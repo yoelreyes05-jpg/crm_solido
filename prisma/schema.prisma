@@ -1,0 +1,110 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = "file:./dev.db"
+}
+
+model User {
+  id        Int      @id @default(autoincrement())
+  name      String
+  email     String   @unique
+  role      String   @default("CASHIER") // ADMIN, RECEPTION, TECHNICIAN
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Client {
+  id        Int       @id @default(autoincrement())
+  name      String
+  phone     String
+  email     String?
+  vehicles  Vehicle[]
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+}
+
+model Vehicle {
+  id         Int         @id @default(autoincrement())
+  brand      String
+  model      String
+  year       Int
+  plate      String      @unique
+  clientId   Int
+  client     Client      @relation(fields: [clientId], references: [id])
+  workOrders WorkOrder[]
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+}
+
+model WorkOrder {
+  id          Int      @id @default(autoincrement())
+  description String
+  status      String   @default("RECIBIDO") // RECIBIDO, DIAGNOSTICO, ESPERANDO_REPUESTO, REPARACION, LISTO, ENTREGADO
+  vehicleId   Int
+  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
+  technician  String?  // Nombre del técnico asignado
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+  invoices    Invoice[]
+  sales       Sale[]
+}
+
+model Supplier {
+  id        Int      @id @default(autoincrement())
+  name      String
+  contact   String?
+  phone     String?
+  parts     Part[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Part {
+  id          Int         @id @default(autoincrement())
+  name        String
+  price       Float
+  stock       Int         @default(0)
+  supplierId  Int?
+  supplier    Supplier?   @relation(fields: [supplierId], references: [id])
+  saleItems   SaleItem[]
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model Sale {
+  id          Int         @id @default(autoincrement())
+  total       Float       @default(0.0)
+  workOrderId Int?
+  workOrder   WorkOrder?  @relation(fields: [workOrderId], references: [id])
+  items       SaleItem[]
+  invoice     Invoice?
+  createdAt   DateTime    @default(now())
+  updatedAt   DateTime    @updatedAt
+}
+
+model SaleItem {
+  id        Int      @id @default(autoincrement())
+  quantity  Int
+  price     Float
+  partId    Int
+  part      Part     @relation(fields: [partId], references: [id])
+  saleId    Int
+  sale      Sale     @relation(fields: [saleId], references: [id])
+}
+
+model Invoice {
+  id          Int        @id @default(autoincrement())
+  total       Float
+  method      String     @default("CASH") // CASH, CARD, TRANSFER
+  workOrderId Int?
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id])
+  saleId      Int?       @unique
+  sale        Sale?      @relation(fields: [saleId], references: [id])
+  createdAt   DateTime   @default(now())
+}
