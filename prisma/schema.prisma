@@ -6,82 +6,111 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
-  url      = "file:./dev.db"
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
+// ─── Usuarios del sistema ───────────────────────────────────────
 model User {
   id        Int      @id @default(autoincrement())
   name      String
   email     String   @unique
-  role      String   @default("CASHIER") // ADMIN, RECEPTION, TECHNICIAN
+  role      String   @default("CASHIER") // ADMIN, RECEPTION, TECHNICIAN, CASHIER
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+// ─── Clientes ───────────────────────────────────────────────────
 model Client {
   id        Int       @id @default(autoincrement())
   name      String
+  cedula    String?   @unique
   phone     String
   email     String?
+  address   String?
   vehicles  Vehicle[]
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
 }
 
+// ─── Vehículos ──────────────────────────────────────────────────
 model Vehicle {
   id         Int         @id @default(autoincrement())
   brand      String
   model      String
   year       Int
+  color      String?
   plate      String      @unique
   clientId   Int
-  client     Client      @relation(fields: [clientId], references: [id])
+  client     Client      @relation(fields: [clientId], references: [id], onDelete: Cascade)
   workOrders WorkOrder[]
   createdAt  DateTime    @default(now())
   updatedAt  DateTime    @updatedAt
 }
 
+// ─── Órdenes de Trabajo ─────────────────────────────────────────
 model WorkOrder {
-  id          Int      @id @default(autoincrement())
+  id          Int          @id @default(autoincrement())
   description String
-  status      String   @default("RECIBIDO") // RECIBIDO, DIAGNOSTICO, ESPERANDO_REPUESTO, REPARACION, LISTO, ENTREGADO
+  status      String       @default("RECIBIDO") // RECIBIDO, DIAGNOSTICO, ESPERANDO_REPUESTO, REPARACION, LISTO, ENTREGADO
   vehicleId   Int
-  vehicle     Vehicle  @relation(fields: [vehicleId], references: [id])
-  technician  String?  // Nombre del técnico asignado
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  vehicle     Vehicle      @relation(fields: [vehicleId], references: [id], onDelete: Cascade)
+  technician  String?
+  orderParts  OrderPart[]
   invoices    Invoice[]
   sales       Sale[]
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
 }
 
+// ─── Repuestos usados en una orden ──────────────────────────────
+model OrderPart {
+  id          Int       @id @default(autoincrement())
+  quantity    Int
+  unitPrice   Float
+  workOrderId Int
+  workOrder   WorkOrder @relation(fields: [workOrderId], references: [id], onDelete: Cascade)
+  partId      Int
+  part        Part      @relation(fields: [partId], references: [id])
+}
+
+// ─── Suplidores (Proveedores) ───────────────────────────────────
 model Supplier {
   id        Int      @id @default(autoincrement())
   name      String
   contact   String?
   phone     String?
+  email     String?
   parts     Part[]
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
+// ─── Inventario / Repuestos ─────────────────────────────────────
 model Part {
   id          Int         @id @default(autoincrement())
   name        String
+  code        String?     @unique
   price       Float
   stock       Int         @default(0)
+  minStock    Int         @default(5)
   supplierId  Int?
-  supplier    Supplier?   @relation(fields: [supplierId], references: [id])
+  supplier    Supplier?   @relation(fields: [supplierId], references: [id], onDelete: SetNull)
   saleItems   SaleItem[]
+  orderParts  OrderPart[]
   createdAt   DateTime    @default(now())
   updatedAt   DateTime    @updatedAt
 }
 
+// ─── Ventas de Repuestos ────────────────────────────────────────
 model Sale {
   id          Int         @id @default(autoincrement())
+  subtotal    Float       @default(0.0)
+  itbis       Float       @default(0.0)   // 18%
   total       Float       @default(0.0)
+  method      String      @default("EFECTIVO") // EFECTIVO, TARJETA, TRANSFERENCIA
   workOrderId Int?
-  workOrder   WorkOrder?  @relation(fields: [workOrderId], references: [id])
+  workOrder   WorkOrder?  @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
   items       SaleItem[]
   invoice     Invoice?
   createdAt   DateTime    @default(now())
@@ -95,16 +124,53 @@ model SaleItem {
   partId    Int
   part      Part     @relation(fields: [partId], references: [id])
   saleId    Int
-  sale      Sale     @relation(fields: [saleId], references: [id])
+  sale      Sale     @relation(fields: [saleId], references: [id], onDelete: Cascade)
 }
 
+// ─── Facturas ───────────────────────────────────────────────────
 model Invoice {
   id          Int        @id @default(autoincrement())
+  subtotal    Float
+  itbis       Float      @default(0.0)
   total       Float
-  method      String     @default("CASH") // CASH, CARD, TRANSFER
+  method      String     @default("EFECTIVO")
   workOrderId Int?
-  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id])
+  workOrder   WorkOrder? @relation(fields: [workOrderId], references: [id], onDelete: SetNull)
   saleId      Int?       @unique
-  sale        Sale?      @relation(fields: [saleId], references: [id])
+  sale        Sale?      @relation(fields: [saleId], references: [id], onDelete: SetNull)
   createdAt   DateTime   @default(now())
+}
+
+// ─── Cafetería: Productos ───────────────────────────────────────
+model CafeProduct {
+  id        Int              @id @default(autoincrement())
+  name      String
+  category  String           @default("BEBIDA") // BEBIDA, COMIDA, POSTRE, OTRO
+  price     Float
+  stock     Int              @default(0)
+  available Boolean          @default(true)
+  items     CafeOrderItem[]
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+}
+
+// ─── Cafetería: Órdenes (Ventas POS) ────────────────────────────
+model CafeOrder {
+  id        Int             @id @default(autoincrement())
+  subtotal  Float           @default(0.0)
+  itbis     Float           @default(0.0)
+  total     Float           @default(0.0)
+  method    String          @default("EFECTIVO")
+  items     CafeOrderItem[]
+  createdAt DateTime        @default(now())
+}
+
+model CafeOrderItem {
+  id          Int         @id @default(autoincrement())
+  quantity    Int
+  unitPrice   Float
+  cafeOrderId Int
+  cafeOrder   CafeOrder   @relation(fields: [cafeOrderId], references: [id], onDelete: Cascade)
+  productId   Int
+  product     CafeProduct @relation(fields: [productId], references: [id])
 }

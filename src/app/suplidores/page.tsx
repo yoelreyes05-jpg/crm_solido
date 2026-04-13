@@ -1,63 +1,78 @@
-import { prisma } from '@/lib/prisma';
-import { Truck, Plus } from 'lucide-react';
-import Link from 'next/link';
+"use client";
+import { useState, useEffect } from "react";
 
-export const dynamic = 'force-dynamic';
+export default function SuplidoresPage() {
+  const [suppliers, setSuppliers] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [nombre, setNombre] = useState("");
+  const API = "http://localhost:4000";
 
-export default async function SuplidoresPage() {
-  const suppliers = await prisma.supplier.findMany({
-    orderBy: { createdAt: 'desc' },
-    include: {
-      _count: {
-        select: { parts: true }
+  useEffect(() => {
+    const fetchData = async () => {
+      try {
+        const res = await fetch(`${API}/suplidores`);
+        const data = await res.json();
+        setSuppliers(Array.isArray(data) ? data : []);
+      } catch {
+        setSuppliers([]);
+      } finally {
+        setLoading(false);
       }
+    };
+    fetchData();
+  }, []);
+
+  const crearSuplidor = async () => {
+    if (!nombre.trim()) return alert("Nombre requerido");
+    try {
+      const res = await fetch(`${API}/suplidores`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: nombre })
+      });
+      const data = await res.json();
+      setSuppliers(prev => [data, ...prev]);
+      setNombre("");
+    } catch {
+      alert("Error al crear suplidor");
     }
-  });
+  };
 
   return (
-    <div className="animate-fade-in">
-      <div className="header">
-        <h1 className="header-title">Suplidores</h1>
-        <button className="btn btn-primary">
-          <Plus size={20} /> Nuevo Suplidor
-        </button>
-      </div>
+    <div style={container}>
+      <h1 style={title}>📦 Suplidores</h1>
 
-      <div className="card">
-        <div className="table-container">
-          <table>
+      <div style={grid}>
+        <div style={card}>
+          <h2 style={cardTitle}>➕ Nuevo Suplidor</h2>
+          <input
+            placeholder="Nombre del suplidor"
+            value={nombre}
+            onChange={e => setNombre(e.target.value)}
+            style={input}
+          />
+          <button onClick={crearSuplidor} style={button}>Guardar</button>
+        </div>
+
+        <div style={card}>
+          <h2 style={cardTitle}>📋 Lista de Suplidores</h2>
+          <table style={table}>
             <thead>
               <tr>
-                <th>ID</th>
-                <th>Nombre</th>
-                <th>Contacto</th>
-                <th>Teléfono</th>
-                <th>Repuestos Asociados</th>
-                <th>Acciones</th>
+                <th style={th}>ID</th>
+                <th style={th}>Nombre</th>
               </tr>
             </thead>
             <tbody>
-              {suppliers.length === 0 ? (
-                <tr>
-                  <td colSpan={6} style={{ textAlign: 'center', padding: '2rem' }}>No hay suplidores registrados.</td>
-                </tr>
+              {loading ? (
+                <tr><td colSpan={2} style={td}>Cargando...</td></tr>
+              ) : suppliers.length === 0 ? (
+                <tr><td colSpan={2} style={td}>Sin suplidores registrados</td></tr>
               ) : (
-                suppliers.map((supplier: any) => (
-                  <tr key={supplier.id}>
-                    <td style={{ fontWeight: 600 }}>#{supplier.id.toString().padStart(4, '0')}</td>
-                    <td style={{ fontWeight: 500 }}>{supplier.name}</td>
-                    <td>{supplier.contact || 'N/A'}</td>
-                    <td>{supplier.phone || 'N/A'}</td>
-                    <td>
-                      <span className="badge badge-blue">
-                        {supplier._count.parts} repuestos
-                      </span>
-                    </td>
-                    <td>
-                      <button className="btn" style={{ padding: '0.25rem 0.75rem', backgroundColor: 'var(--surface-hover)', fontSize: '0.75rem' }}>
-                        Ver Detalles
-                      </button>
-                    </td>
+                suppliers.map(s => (
+                  <tr key={s.id}>
+                    <td style={td}>#{s.id}</td>
+                    <td style={td}>{s.name}</td>
                   </tr>
                 ))
               )}
@@ -68,3 +83,14 @@ export default async function SuplidoresPage() {
     </div>
   );
 }
+
+const container = { padding: "20px", background: "#f5f7fb", minHeight: "100vh" };
+const title = { fontSize: "28px", fontWeight: "bold" as const, marginBottom: "20px" };
+const grid = { display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" };
+const card: any = { background: "#fff", padding: "20px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
+const cardTitle = { marginBottom: "15px", fontSize: "18px", fontWeight: "600" as const };
+const input: any = { display: "block", marginBottom: "10px", padding: "12px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box" as const };
+const button: any = { padding: "12px", background: "#111827", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", width: "100%" };
+const table: any = { width: "100%", borderCollapse: "collapse" };
+const th: any = { textAlign: "left", padding: "10px", background: "#f1f5f9", fontSize: 13 };
+const td: any = { padding: "10px", borderBottom: "1px solid #eee" };
