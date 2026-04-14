@@ -1,7 +1,0 @@
-src/
-public/
-.next/
-next.config.js
-next.config.mjs
-tailwind.config.js
-postcss.config.js
