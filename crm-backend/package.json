@@ -4,7 +4,9 @@
   "main": "server.mjs",
   "type": "module",
   "scripts": {
-    "dev": "nodemon server.mjs"
+    "dev": "nodemon server.mjs",
+    "start": "node server.mjs",
+    "build": "echo No build needed"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
