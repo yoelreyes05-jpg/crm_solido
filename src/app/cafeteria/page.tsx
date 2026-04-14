@@ -162,7 +162,7 @@ export default function CafeteriaPage() {
 
   return (
     <div style={container}>
-      <h1 style={title}>☕ Cafetería — {EMPRESA.nombre}</h1>
+      <h1 style={title}>☕ SOLIDO CAFE GARAGE — {EMPRESA.nombre}</h1>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         {["vender", "productos"].map(t => (
