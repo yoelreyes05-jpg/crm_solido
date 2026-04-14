@@ -658,7 +658,7 @@ app.delete("/ventas/:id", async (req, res) => {
   res.json({ ok: true });
 });
 // Por esto:
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`🔥 SÓLIDO AUTO SERVICIO corriendo en puerto ${PORT}`);
 });
