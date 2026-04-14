@@ -15,7 +15,7 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit"
   });
-  const lineas = items.map(i => `
+  const lineas = items.map(i: any) => `
     <tr>
       <td style="padding:8px 6px;border-bottom:1px solid #eee;">${i.nombre}</td>
       <td style="padding:8px 6px;border-bottom:1px solid #eee;text-align:center;">${i.qty}</td>
