@@ -1,5 +1,11 @@
+[phases.setup]
+nixPkgs = ["nodejs_18"]
+
+[phases.install]
+cmds = ["cd crm-backend && npm install"]
+
 [phases.build]
-cmds = ["npm install"]
+cmds = ["echo 'No build needed'"]
 
 [start]
-cmd = "node server.mjs"
+cmd = "cd crm-backend && node server.mjs"

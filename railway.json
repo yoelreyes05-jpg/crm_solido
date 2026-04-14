@@ -1,10 +1,10 @@
 {
   "build": {
     "builder": "NIXPACKS",
-    "buildCommand": "npm install"
+    "buildCommand": "cd crm-backend && npm install"
   },
   "deploy": {
-    "startCommand": "node server.mjs",
+    "startCommand": "cd crm-backend && node server.mjs",
     "restartPolicyType": "ON_FAILURE"
   }
 }
