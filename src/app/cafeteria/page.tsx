@@ -10,7 +10,7 @@ const EMPRESA = {
   direccion: "Santo Domingo, República Dominicana"
 };
 
-function generarHTMLCafe(venta, items, metodoPago) {
+function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
   const fecha = new Date(venta.created_at || Date.now()).toLocaleString("es-DO", {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit"
