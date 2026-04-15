@@ -320,8 +320,15 @@ const grid = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" };
 const card = { background: "#fff", padding: "20px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)", marginBottom: 16 };
 const cardTitle = { marginBottom: "14px", fontSize: "18px", fontWeight: "600" };
 const tabBtn = { padding: "10px 20px", borderRadius: "8px", border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
+
+
 const label = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
-const input = { display: "block", marginBottom: "12px", padding: "12px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
+
+
+const input = { display: "block", marginBottom: "12px", padding: "12px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box" as "border-box", fontSize: 14 };
+
+
+
 const productoRow = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "12px 0", borderBottom: "1px solid #f0f0f0" };
 const carritoRow = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0" };
 const totalesBox = { marginTop: 14, padding: 14, background: "#f8fafc", borderRadius: 10 };

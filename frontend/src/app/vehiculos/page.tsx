@@ -191,14 +191,14 @@ export default function Vehiculos() {
   );
 }
 
-const container = { padding: "24px", background: "#f5f7fb", minHeight: "100vh" };
-const title = { fontSize: 28, fontWeight: "bold", marginBottom: 22 };
-const grid = { display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" };
-const card = { background: "#fff", padding: "22px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
-const cardTitle = { marginBottom: "16px", fontSize: 19, fontWeight: 700 };
-const label = { display: "block", fontSize: 14, fontWeight: 600, marginBottom: 5, color: "#444" };
-const input = { display: "block", marginBottom: "14px", padding: "13px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box", fontSize: 15 };
-const btnPrimary = { padding: "14px", background: "#111827", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", width: "100%", fontWeight: 700, fontSize: 15 };
-const table = { width: "100%", borderCollapse: "collapse" };
-const th = { textAlign: "left", padding: "12px 14px", background: "#f1f5f9", fontSize: 14, fontWeight: 700 };
-const td = { padding: "12px 14px", borderBottom: "1px solid #eee", fontSize: 14 };
+const container: React.CSSProperties = { padding: "24px", background: "#f5f7fb", minHeight: "100vh" };
+const title: React.CSSProperties = { fontSize: 28, fontWeight: "bold", marginBottom: 22 };
+const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 2fr", gap: "20px" };
+const card: React.CSSProperties = { background: "#fff", padding: "22px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
+const cardTitle: React.CSSProperties = { marginBottom: "16px", fontSize: 19, fontWeight: 700 };
+const label: React.CSSProperties = { display: "block", fontSize: 14, fontWeight: 600, marginBottom: 5, color: "#444" };
+const input: React.CSSProperties = { display: "block", marginBottom: "14px", padding: "13px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box", fontSize: 15 };
+const btnPrimary: React.CSSProperties = { padding: "14px", background: "#111827", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", width: "100%", fontWeight: 700, fontSize: 15 };
+const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse" };
+const th: React.CSSProperties = { textAlign: "left", padding: "12px 14px", background: "#f1f5f9", fontSize: 14, fontWeight: 700 };
+const td: React.CSSProperties = { padding: "12px 14px", borderBottom: "1px solid #eee", fontSize: 14 };

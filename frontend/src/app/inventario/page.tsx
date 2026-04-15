@@ -282,14 +282,14 @@ export default function InventarioPage() {
   );
 }
 
-const container = { padding: "24px", background: "#f5f7fb", minHeight: "100vh" };
-const title = { fontSize: 28, fontWeight: 900, margin: 0 };
-const btnPrimary = { padding: "12px 22px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 15 };
-const kpiCard = { background: "#fff", borderRadius: 14, padding: "20px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", borderLeft: "5px solid #e5e7eb" };
-const kpiLabel = { fontSize: 13, color: "#888", marginBottom: 10, fontWeight: 600 };
-const kpiNum = { fontSize: 34, fontWeight: 900, color: "#111" };
-const td = { padding: "13px 16px", fontSize: 14 };
-const overlay = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
-const modal = { background: "#fff", padding: 28, borderRadius: 18, width: "90%", maxWidth: 520, boxShadow: "0 25px 60px rgba(0,0,0,0.3)", maxHeight: "90vh", overflowY: "auto" };
-const mlabel = { display: "block", fontSize: 14, fontWeight: 600, marginBottom: 5, color: "#555" };
-const minput = { display: "block", marginBottom: 14, padding: "12px", width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
+const container: React.CSSProperties = { padding: "24px", background: "#f5f7fb", minHeight: "100vh" };
+const title: React.CSSProperties = { fontSize: 28, fontWeight: 900, margin: 0 };
+const btnPrimary: React.CSSProperties = { padding: "12px 22px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 15 };
+const kpiCard: React.CSSProperties = { background: "#fff", borderRadius: 14, padding: "20px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", borderLeft: "5px solid #e5e7eb" };
+const kpiLabel: React.CSSProperties = { fontSize: 13, color: "#888", marginBottom: 10, fontWeight: 600 };
+const kpiNum: React.CSSProperties = { fontSize: 34, fontWeight: 900, color: "#111" };
+const td: React.CSSProperties = { padding: "13px 16px", fontSize: 14 };
+const overlay: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
+const modal: React.CSSProperties = { background: "#fff", padding: 28, borderRadius: 18, width: "90%", maxWidth: 520, boxShadow: "0 25px 60px rgba(0,0,0,0.3)", maxHeight: "90vh", overflowY: "auto" };
+const mlabel: React.CSSProperties = { display: "block", fontSize: 14, fontWeight: 600, marginBottom: 5, color: "#555" };
+const minput: React.CSSProperties = { display: "block", marginBottom: 14, padding: "12px", width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };

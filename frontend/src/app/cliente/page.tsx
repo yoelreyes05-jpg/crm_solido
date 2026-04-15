@@ -245,12 +245,18 @@ export default function ClienteApp() {
 }
 
 const appContainer = { maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f7fb" };
-const header = { background: "#111827", padding: "28px 20px 24px", textAlign: "center" };
+
+const header: React.CSSProperties = { background: "#111827", padding: "28px 20px 24px", textAlign: "center" };
+
+
 const content = { padding: "16px" };
 const card = { background: "#fff", borderRadius: 14, padding: 18, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 14 };
 const cardTitle = { fontSize: 17, fontWeight: 700, marginBottom: 8 };
 const label = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#555" };
-const input = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 10, border: "1px solid #e5e7eb", boxSizing: "border-box", fontSize: 14 };
+
+
+const input: React.CSSProperties = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 10, border: "1px solid #e5e7eb", boxSizing: "border-box", fontSize: 14 };
+
 const btnBuscar = { padding: 14, background: "#111827", color: "#fff", border: "none", borderRadius: 12, cursor: "pointer", width: "100%", fontSize: 16, fontWeight: 800 };
 const btnVolver = { marginBottom: 12, padding: "8px 16px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontWeight: 600, fontSize: 13 };
 const tabBtn = { padding: "10px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer", fontWeight: 600, fontSize: 13 };

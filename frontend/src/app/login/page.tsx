@@ -78,8 +78,8 @@ document.cookie = `usuario=${encodeURIComponent(JSON.stringify(data.usuario))};p
   );
 }
 
-const bg = { minHeight: "100vh", background: "linear-gradient(135deg,#111827 0%,#1f2937 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
-const box = { background: "#fff", borderRadius: 20, padding: "36px 32px", width: "100%", maxWidth: 420, boxShadow: "0 25px 60px rgba(0,0,0,0.4)" };
-const label = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#555" };
-const input = { display: "block", marginBottom: 16, padding: "13px 14px", width: "100%", borderRadius: 10, border: "1px solid #e2e8f0", boxSizing: "border-box", fontSize: 14 };
-const btnLogin = { padding: "14px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", width: "100%", fontSize: 15, fontWeight: 700 };
+const bg: React.CSSProperties = { minHeight: "100vh", background: "linear-gradient(135deg,#111827 0%,#1f2937 100%)", display: "flex", alignItems: "center", justifyContent: "center", padding: 20 };
+const box: React.CSSProperties = { background: "#fff", borderRadius: 20, padding: "36px 32px", width: "100%", maxWidth: 420, boxShadow: "0 25px 60px rgba(0,0,0,0.4)" };
+const label: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#555" };
+const input: React.CSSProperties = { display: "block", marginBottom: 16, padding: "13px 14px", width: "100%", borderRadius: 10, border: "1px solid #e2e8f0", boxSizing: "border-box", fontSize: 14 };
+const btnLogin: React.CSSProperties = { padding: "14px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", width: "100%", fontSize: 15, fontWeight: 700 };
