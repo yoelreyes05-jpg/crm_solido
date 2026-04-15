@@ -129,13 +129,14 @@ export default function FacturaPage() {
   const [modalCliente, setModalCliente] = useState("");
 
   const fetchData = async () => {
-    try {
-      const [cRes, vRes, iRes, ventasRes] = await Promise.all([
-        fetch(`${API}/clientes`),
-        fetch(`${API}/vehiculos`),
-        fetch(`${API}/inventario`),
-        fetch(`${API}/ventas`)
+  try {
+    const [cRes, vRes, iRes, ventasRes] = await Promise.all([
+      fetch(`${API}/clientes`),
+      fetch(`${API}/vehiculos`),
+      fetch(`${API}/inventario`),
+      fetch(`${API}/ventas`)
       ]);
+
       const c = await cRes.json(); const v = await vRes.json();
       const i = await iRes.json(); const vt = await ventasRes.json();
       setClientes(Array.isArray(c) ? c : []);

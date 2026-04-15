@@ -93,7 +93,7 @@ export default function POS() {
     }
 
     try {
-      const res = await fetch(`${API}/cafeteria/ventas`, {
+     const res = await fetch(`${API}/cafeteria/ventas`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

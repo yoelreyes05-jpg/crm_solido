@@ -41,12 +41,13 @@ export default function OrdenesPage() {
   });
 
   const fetchAll = async () => {
-    try {
-      const [oRes, cRes, vRes] = await Promise.all([
-        fetch(`${API}/ordenes`),
-        fetch(`${API}/clientes`),
-        fetch(`${API}/vehiculos`)
-      ]);
+  try {
+    // 1. Haces las peticiones en paralelo
+    const [oRes, cRes, vRes] = await Promise.all([
+      fetch(`${API}/ordenes`),
+      fetch(`${API}/clientes`),
+      fetch(`${API}/vehiculos`)
+    ]);
       const o = await oRes.json();
       const c = await cRes.json();
       const v = await vRes.json();
