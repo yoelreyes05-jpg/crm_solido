@@ -56,9 +56,9 @@ export default function VentasPage() {
   const fetchData = async () => {
     try {
       const [sRes, pRes, cRes] = await Promise.all([
-        fetch(`${API}/ventas'),
-        fetch(`${API}/inventario'),
-        fetch(`${API}/clientes')
+        fetch(`${API}/ventas`),
+        fetch(`${API}/inventario`),
+        fetch(`${API}/clientes`)
       ]);
 
       setSales(await sRes.json());
