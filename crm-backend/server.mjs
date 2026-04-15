@@ -5,7 +5,12 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 
 const app = express();
-app.use(cors());
+// Reemplaza la línea 9 con esto:
+app.use(cors({
+  origin: "*", // Permite peticiones desde cualquier origen (Vercel, localhost, etc.)
+  methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
+  allowedHeaders: ["Content-Type", "Authorization"]
+}));
 app.use(express.json());
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
