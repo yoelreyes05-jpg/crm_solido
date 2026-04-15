@@ -28,7 +28,7 @@ export default function Kanban() {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const loadData = async () => {
-    const res = await fetch("http://127.0.0.1:4000/ordenes");
+    const res = await fetch(`${API}/ordenes");
     const data = await res.json();
     setOrders(data);
   };
@@ -38,7 +38,7 @@ export default function Kanban() {
   }, []);
 
   const updateStatus = async (id: number, estado: string) => {
-    await fetch(`http://127.0.0.1:4000/ordenes/${id}`, {
+    await fetch(`${API}/ordenes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ estado })

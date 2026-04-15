@@ -56,9 +56,9 @@ export default function VentasPage() {
   const fetchData = async () => {
     try {
       const [sRes, pRes, cRes] = await Promise.all([
-        fetch('http://localhost:4000/ventas'),
-        fetch('http://localhost:4000/inventario'),
-        fetch('http://localhost:4000/clientes')
+        fetch(`${API}/ventas'),
+        fetch(`${API}/inventario'),
+        fetch(`${API}/clientes')
       ]);
 
       setSales(await sRes.json());
@@ -156,7 +156,7 @@ export default function VentasPage() {
     setSaving(true);
 
     try {
-      const res = await fetch('http://localhost:4000/ventas', {
+      const res = await fetch(`${API}/ventas', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
