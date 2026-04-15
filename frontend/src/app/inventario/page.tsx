@@ -20,7 +20,7 @@ export default function InventarioPage() {
   const fetchData = async () => {
     try {
       const [pRes, sRes] = await Promise.all([
-        fetch(`${API}/inventario`),
+        fetch(`${API}/inventario`)
         fetch(`${API}/suplidores`)
       ]);
       const p = await pRes.json();

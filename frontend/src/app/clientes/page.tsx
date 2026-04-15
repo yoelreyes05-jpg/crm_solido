@@ -23,7 +23,7 @@ export default function Clientes() {
   const crearCliente = async () => {
     if (!nuevo.nombre.trim()) return alert("Nombre requerido");
     try {
-      const res = await fetch(`${API}/clientes`, {
+      const res = await fetch(`${API}/clientes`) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(nuevo)

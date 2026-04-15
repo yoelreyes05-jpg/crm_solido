@@ -28,7 +28,7 @@ export default function Kanban() {
   const [orders, setOrders] = useState<Order[]>([]);
 
   const loadData = async () => {
-    const res = await fetch(`${API}/ordenes");
+    const res = await fetch(`${API}/ordenes`);
     const data = await res.json();
     setOrders(data);
   };
