@@ -7,7 +7,7 @@ export default function Dashboard() {
 
   const obtenerVentas = async () => {
     try {
-      const res = await fetch("h`${API}/cafeteria/ventas");
+      const res = await fetch(`${API}/cafeteria/ventas`);
       const data = await res.json();
       setVentas(data);
     } catch (error) {
