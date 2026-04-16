@@ -25,7 +25,7 @@ const STATUS_COLORS: Record<string, string> = {
   ENTREGADO: "#6b7280"
 };
 
-const API = "http://127.0.0.1:4000";
+const API = process.env.NEXT_PUBLIC_API_URL!;
 
 export default function OrdenesPage() {
   const [orders, setOrders] = useState<Order[]>([]);
