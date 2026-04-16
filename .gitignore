@@ -13,7 +13,7 @@ yarn-error.log*
 
 # Env
 .env
-.env.local
+# .env.local is intentionally tracked so Vercel picks up NEXT_PUBLIC_* vars at build time
 
 # OS
 .DS_Store
