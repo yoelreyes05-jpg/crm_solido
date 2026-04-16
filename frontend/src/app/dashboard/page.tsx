@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-const API = process.env.NEXT_PUBLIC_API_URL || "http://127.0.0.1:4000";
+const API = process.env.NEXT_PUBLIC_API_URL!;
 
 const ESTADO_COLORES = {
   RECIBIDO: "#3b82f6", DIAGNOSTICO: "#f59e0b", REPARACION: "#ef4444",

@@ -5,7 +5,8 @@ export default function SuplidoresPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [nombre, setNombre] = useState("");
-  const API = "http://localhost:4000";
+
+const API = process.env.NEXT_PUBLIC_API_URL!;
 
   useEffect(() => {
     const fetchData = async () => {

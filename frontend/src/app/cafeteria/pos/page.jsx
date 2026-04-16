@@ -5,7 +5,7 @@ export default function POS() {
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
 
-  const API = "http://127.0.0.1:4000";
+ const API = process.env.NEXT_PUBLIC_API_URL!;
 
   // 🔄 Obtener productos
   const obtenerProductos = async () => {

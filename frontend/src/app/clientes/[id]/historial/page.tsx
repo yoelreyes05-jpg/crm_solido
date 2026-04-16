@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 
-const API = "http://127.0.0.1:4000";
+const API = process.env.NEXT_PUBLIC_API_URL!;
 
 const ESTADO_COLOR: Record<string, string> = {
   RECIBIDO: "#3b82f6", DIAGNOSTICO: "#f59e0b", REPARACION: "#ef4444",
