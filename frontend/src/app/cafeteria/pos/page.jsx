@@ -1,11 +1,13 @@
 "use client";
 import { useEffect, useState } from "react";
 
+import { API_URL as API } from "@/config";
+
 export default function POS() {
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
 
- const API = process.env.NEXT_PUBLIC_API_URL!;
+
 
   // 🔄 Obtener productos
   const obtenerProductos = async () => {

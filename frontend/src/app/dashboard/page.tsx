@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 const ESTADO_COLORES = {
   RECIBIDO: "#3b82f6", DIAGNOSTICO: "#f59e0b", REPARACION: "#ef4444",

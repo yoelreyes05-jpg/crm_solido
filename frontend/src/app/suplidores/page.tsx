@@ -1,12 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
+import { API_URL as API } from "@/config";
 
 export default function SuplidoresPage() {
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [nombre, setNombre] = useState("");
 
-import { API } from "@/config";
 
   useEffect(() => {
     const fetchData = async () => {

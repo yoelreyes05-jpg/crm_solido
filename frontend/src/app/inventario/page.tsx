@@ -1,7 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 export default function InventarioPage() {
   const [parts, setParts] = useState([]);

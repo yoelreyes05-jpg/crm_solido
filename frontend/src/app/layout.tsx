@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
+import { API_URL as API } from "@/config";
 
 const PERMISOS = {
   gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion"],

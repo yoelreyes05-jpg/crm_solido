@@ -1,6 +1,8 @@
 "use client";
 import { useEffect, useState } from "react";
 
+import { API_URL as API } from "@/config";
+
 interface Order {
   id: number;
   descripcion: string;
@@ -25,7 +27,7 @@ const STATUS_COLORS: Record<string, string> = {
   ENTREGADO: "#6b7280"
 };
 
-import { API } from "@/config";
+
 
 export default function OrdenesPage() {
   const [orders, setOrders] = useState<Order[]>([]);

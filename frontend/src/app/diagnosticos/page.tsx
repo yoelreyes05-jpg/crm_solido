@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 const TIPOS_SERVICIO = [
   "CAMBIO DE ACEITE", "ALINEACIÓN Y BALANCEO", "FRENOS", "SUSPENSIÓN",

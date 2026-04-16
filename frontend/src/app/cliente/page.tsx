@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 const ESTADO_INFO = {
   RECIBIDO:        { color: "#3b82f6", emoji: "📋", msg: "Tu vehículo fue recibido y está en espera de evaluación." },

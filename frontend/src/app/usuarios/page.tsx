@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },

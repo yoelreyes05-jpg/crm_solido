@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 export default function ConfiguracionPage() {
   const [tab, setTab] = useState("empresa");
@@ -170,7 +170,10 @@ export default function ConfiguracionPage() {
                 <div style={{ fontWeight: 600 }}>URL del Backend</div>
                 <div style={{ fontSize: 12, color: "#888" }}>Dirección del servidor Express</div>
               </div>
-              <input defaultValue="http://127.0.0.1:4000" style={{ ...input, width: 220, marginBottom: 0 }} />
+             <input 
+  defaultValue={process.env.NEXT_PUBLIC_API_URL} 
+  style={{ ...input, width: 220, marginBottom: 0 }} 
+/>
             </div>
 
             <div style={opcionRow}>

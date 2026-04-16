@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 const EMPRESA = {
   nombre: "SÓLIDO AUTO SERVICIO",

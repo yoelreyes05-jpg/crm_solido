@@ -7,7 +7,7 @@ import {
   Draggable
 } from '@hello-pangea/dnd';
 
-import { API } from "@/config";
+import { API_URL as API } from "@/config";
 
 
 
