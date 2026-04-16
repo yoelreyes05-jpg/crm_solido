@@ -70,7 +70,7 @@ export default function ClienteApp() {
 
       const ordenesVehiculo = ordenes
         .filter(o => o.vehiculo_id === vehiculo.id || o.vehiculo_info?.includes(vehiculo.placa))
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       const diagVehiculo = diagnosticos
         .filter(d => d.vehiculo_id === vehiculo.id)
