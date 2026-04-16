@@ -60,18 +60,42 @@ export default function RootLayout({ children }) {
   );
 
   // SIN SIDEBAR: login y cliente
-  if (esPublica) return (
-    <html lang="es">
-      <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
-        {children}
-      </body>
-    </html>
-  );
+
+// Para rutas públicas (login y cliente) agrega los meta tags PWA:
+if (esPublica) return (
+  <html lang="es">
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+      <meta name="theme-color" content="#111827" />
+      <meta name="apple-mobile-web-app-capable" content="yes" />
+      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+      <meta name="apple-mobile-web-app-title" content="Sólido Auto" />
+      <link rel="manifest" href="/manifest.json" />
+      <link rel="apple-touch-icon" href="/icon-192.png" />
+      <title>Sólido Auto Servicio</title>
+    </head>
+    <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
+      {children}
+      <script dangerouslySetInnerHTML={{
+        __html: `
+          if ('serviceWorker' in navigator) {
+            window.addEventListener('load', function() {
+              navigator.serviceWorker.register('/sw.js');
+            });
+          }
+        `
+      }} />
+    </body>
+  </html>
+);
+
 
   if (!usuario) return (
     <html lang="es">
       <body style={{ margin: 0, background: "#f5f7fb" }} />
-    </html>
+   
+
+ </html>
   );
 
   const permitidos = PERMISOS[usuario.rol] || [];
