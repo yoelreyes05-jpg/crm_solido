@@ -74,7 +74,7 @@ export default function ClienteApp() {
 
       const diagVehiculo = diagnosticos
         .filter(d => d.vehiculo_id === vehiculo.id)
-        .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+        .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setResultado({ vehiculo, ordenes: ordenesVehiculo, diagnosticos: diagVehiculo });
     } catch {
@@ -346,11 +346,11 @@ export default function ClienteApp() {
   );
 }
 
-const appWrap = { maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f7fb" };
-const header = { background: "#111827", padding: "32px 20px 28px", textAlign: "center" };
-const content = { padding: "16px" };
-const card = { background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 14 };
-const labelStyle = { display: "block", fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#555" };
+const appWrap: React.CSSProperties = { maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f7fb" };
+const header: React.CSSProperties = { background: "#111827", padding: "32px 20px 28px", textAlign: "center" };
+const content: React.CSSProperties = { padding: "16px" };
+const card: React.CSSProperties = { background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", marginBottom: 14 };
+const labelStyle: React.CSSProperties = { display: "block", fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#555" };
 const btnBuscar = { padding: 16, color: "#fff", border: "none", borderRadius: 14, cursor: "pointer", width: "100%", fontSize: 17, fontWeight: 800, transition: "all 0.2s" };
 const btnVolver = { marginBottom: 14, padding: "10px 18px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 };
 const btnInstalar = { marginTop: 14, padding: "10px 20px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 };
