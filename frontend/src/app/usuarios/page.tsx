@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL!;
+import { API } from "@/config";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },

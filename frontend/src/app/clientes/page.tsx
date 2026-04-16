@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API = process.env.NEXT_PUBLIC_API_URL!;
+import { API } from "@/config";
 
 export default function Clientes() {
   const router = useRouter();

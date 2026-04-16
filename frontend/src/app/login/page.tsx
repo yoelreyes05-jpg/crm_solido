@@ -2,7 +2,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 
-const API = "https://crm-automotriz-3wde-production.up.railway.app";
+import { API } from "@/config";
 
 export default function LoginPage() {
   const router = useRouter();

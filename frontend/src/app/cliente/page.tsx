@@ -1,7 +1,7 @@
 "use client";
 import { useState } from "react";
 
-const API = process.env.NEXT_PUBLIC_API_URL!;
+import { API } from "@/config";
 
 const ESTADO_INFO = {
   RECIBIDO:        { color: "#3b82f6", emoji: "📋", msg: "Tu vehículo fue recibido y está en espera de evaluación." },
