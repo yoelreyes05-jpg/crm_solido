@@ -17,6 +17,7 @@ const PASOS_LABEL = ["Recibido", "Diagnóstico", "Reparación", "Control Calidad
 export default function ClienteApp() {
   const [placa, setPlaca] = useState("");
   const [resultado, setResultado] = useState<any>(null);
+const [productos, setProductos] = useState<any[]>([]); // verifica los productos en la app del cliente PWA
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [tab, setTab] = useState("estado");
@@ -46,15 +47,19 @@ export default function ClienteApp() {
     setResultado(null);
 
     try {
-      const [vRes, oRes, dRes] = await Promise.all([
-        fetch(`${API}/vehiculos`),
-        fetch(`${API}/ordenes`),
-        fetch(`${API}/diagnosticos`)
-      ]);
+     const [vRes, oRes, dRes, pRes] = await Promise.all([
+  fetch(`${API}/vehiculos`),
+  fetch(`${API}/ordenes`),
+  fetch(`${API}/diagnosticos`),
+  fetch(`${API}/inventario`) // 👈 ESTE ES EL NUEVO AQUI ES DONDE PUEDES VER EL INVENTARIO PARA LA APP CIENTE
+]);
 
       const vehiculos = await vRes.json();
       const ordenes = await oRes.json();
       const diagnosticos = await dRes.json();
+
+const productosData = await pRes.json();
+setProductos(productosData || []);
 
       const vehiculo = vehiculos.find((v: any) =>
         v.placa?.toUpperCase() === placa.trim().toUpperCase()
@@ -114,6 +119,40 @@ export default function ClienteApp() {
             💬 WhatsApp
           </button>
         </div>
+
+
+{/* ====== PRODUCTOS ====== */}
+<div style={{ ...card, marginBottom: 14 }}>
+  <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>
+    🛒 Productos Disponibles
+  </h2>
+
+  {productos.length === 0 ? (
+    <div style={{ fontSize: 13, color: "#888" }}>
+      No hay productos disponibles
+    </div>
+  ) : (
+    productos.slice(0, 10).map((p: any) => (
+      <div key={p.id} style={{
+        display: "flex",
+        justifyContent: "space-between",
+        padding: "10px 0",
+        borderBottom: "1px solid #eee"
+      }}>
+        <div>
+          <div style={{ fontWeight: 700 }}>{p.name}</div>
+          <div style={{ fontSize: 12, color: "#888" }}>
+            {p.stock > 0 ? "Disponible" : "Sin stock"}
+          </div>
+        </div>
+
+        <div style={{ fontWeight: 800 }}>
+          RD$ {Number(p.price).toFixed(2)}
+        </div>
+      </div>
+    ))
+  )}
+</div>
 
         {/* ====== BUSCADOR ====== */}
         {!resultado && (

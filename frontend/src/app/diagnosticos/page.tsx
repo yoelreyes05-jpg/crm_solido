@@ -126,7 +126,8 @@ export default function DiagnosticosPage() {
   });
 
   const [cotForm, setCotForm] = useState({ mano_obra: "", repuestos: "", tiempo_estimado: "", notas: "" });
-  const [avanceForm, setAvanceForm] = useState({ descripcion: "", tecnico_nombre: "" });
+  const [detalleManoObra, setDetalleManoObra] = useState("");
+const [avanceForm, setAvanceForm] = useState({ descripcion: "", tecnico_nombre: "" });
   const [firmaCliente, setFirmaCliente] = useState("");
 
   const fetchAll = async () => {
@@ -186,8 +187,11 @@ export default function DiagnosticosPage() {
         ...cotForm, 
         mano_obra: Number(cotForm.mano_obra || 0), 
         repuestos: Number(cotForm.repuestos || 0),
-        total: totalCalculado // Enviamos el total para que facturación lo lea fácilmente
+        total: totalCalculado, // Enviamos el total para que facturación lo lea fácilmente
+ mano_de_obra_detalle: detalleManoObra
+
       })
+
     });
     const res = await fetch(`${API}/diagnosticos/${detalle.diag.id}`);
     setDetalle(await res.json());
@@ -377,6 +381,15 @@ export default function DiagnosticosPage() {
               {detalle.diag.fallas_identificadas && <><div style={secLabel}>⚠️ Fallas</div><p style={secText}>{detalle.diag.fallas_identificadas}</p></>}
               {detalle.diag.observaciones && <><div style={secLabel}>📝 Observaciones</div><p style={secText}>{detalle.diag.observaciones}</p></>}
 
+{detalle.diag.mano_de_obra_detalle && (
+  <>
+    <div style={secLabel}>🛠️ Mano de Obra</div>
+    <p style={secText}>{detalle.diag.mano_de_obra_detalle}</p>
+  </>
+)}
+
+
+
               {detalle.diag.estado !== "COMPLETADO" && (
                 <button onClick={completar} style={{ ...btnPrimary, marginTop: 16, background: "#10b981" }}>
                   ✅ Marcar como Completado
@@ -403,6 +416,14 @@ export default function DiagnosticosPage() {
                 <label style={label}>Tiempo Estimado</label>
                 <input value={cotForm.tiempo_estimado} onChange={e => setCotForm({ ...cotForm, tiempo_estimado: e.target.value })} style={input} placeholder="Ej: 2 días" />
                 <label style={label}>Notas</label>
+<label style={label}>Detalle de Mano de Obra</label>
+<textarea 
+  value={detalleManoObra}
+  onChange={e => setDetalleManoObra(e.target.value)}
+  rows={3}
+  placeholder="Ej: Cambio de aceite, revisión de frenos, ajuste de suspensión..."
+  style={{ ...input, resize: "vertical" }}
+/>
                 <textarea value={cotForm.notas} onChange={e => setCotForm({ ...cotForm, notas: e.target.value })} rows={2} style={{ ...input, resize: "vertical" }} />
                 <button onClick={guardarCotizacion} style={btnPrimary}>💾 Guardar Cotización</button>
 
