@@ -1,6 +1,5 @@
 "use client";
 import { useEffect, useState } from "react";
-
 import { API_URL as API } from "@/config";
 
 const TIPOS_SERVICIO = [
@@ -12,6 +11,104 @@ const TIPOS_SERVICIO = [
 const ESTADOS_COLOR: Record<string, string> = {
   PENDIENTE: "#f59e0b", COTIZADO: "#3b82f6", APROBADO: "#8b5cf6",
   EN_REPARACION: "#ef4444", COMPLETADO: "#10b981"
+};
+
+// --- FUNCIÓN DE IMPRESIÓN PROFESIONAL ---
+const imprimirFormatoTecnico = (detalle: any) => {
+  const { diag, cliente, vehiculo, cotizacion } = detalle;
+  const total = Number(cotizacion?.mano_obra || 0) + Number(cotizacion?.repuestos || 0);
+
+  const html = `
+    <!DOCTYPE html>
+    <html lang="es">
+    <head>
+      <meta charset="UTF-8">
+      <title>Informe Técnico - Sólido Auto Servicio</title>
+      <style>
+        body { font-family: 'Segoe UI', Arial, sans-serif; padding: 40px; color: #1a1a1a; line-height: 1.6; }
+        .header { text-align: center; border-bottom: 3px solid #111; padding-bottom: 20px; margin-bottom: 25px; }
+        .logo { font-size: 26px; font-weight: 900; letter-spacing: 1px; }
+        .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; }
+        .card { border: 1px solid #e2e8f0; padding: 15px; border-radius: 8px; background: #f8fafc; }
+        .card-title { font-size: 11px; font-weight: bold; text-transform: uppercase; color: #64748b; margin-bottom: 8px; border-bottom: 1px solid #e2e8f0; }
+        .obs-box { background: #fffbeb; border: 1px solid #fef3c7; padding: 15px; border-radius: 8px; margin: 20px 0; }
+        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+        th { background: #111; color: #fff; padding: 12px; text-align: left; font-size: 13px; }
+        td { padding: 12px; border-bottom: 1px solid #eee; font-size: 14px; }
+        .total-box { text-align: right; margin-top: 20px; font-size: 24px; font-weight: 900; color: #1e40af; border-top: 2px solid #111; padding-top: 10px; }
+        .footer { text-align: center; margin-top: 60px; font-size: 11px; color: #94a3b8; border-top: 1px dashed #cbd5e1; padding-top: 20px; }
+        @media print { .no-print { display: none; } }
+      </style>
+    </head>
+    <body>
+      <div class="header">
+        <div class="logo">🔧 SÓLIDO AUTO SERVICIO</div>
+        <p>Expertos en Mecánica & Detallado | Tel: 809-712-2027<br>Santo Domingo, República Dominicana</p>
+      </div>
+
+      <h2 style="text-align:center;">INFORME DE DIAGNÓSTICO #${diag.id}</h2>
+
+      <div class="info-grid">
+        <div class="card">
+          <div class="card-title">Cliente y Vehículo</div>
+          <strong>Cliente:</strong> ${cliente?.nombre || 'Particular'}<br>
+          <strong>Vehículo:</strong> ${vehiculo?.marca || ''} ${vehiculo?.modelo || ''}<br>
+          <strong>Placa:</strong> ${vehiculo?.placa || 'N/A'}
+        </div>
+        <div class="card">
+          <div class="card-title">Detalles del Servicio</div>
+          <strong>Servicio:</strong> ${diag.tipo_servicio}<br>
+          <strong>Técnico:</strong> ${diag.tecnico_nombre || 'YOEL'}<br>
+          <strong>Fecha:</strong> ${new Date(diag.created_at).toLocaleDateString('es-DO')}
+        </div>
+      </div>
+
+      <div class="card" style="margin-bottom:20px;">
+        <div class="card-title">Inspección Técnica</div>
+        ${diag.inspeccion_mecanica ? `<p><strong>Mecánica:</strong> ${diag.inspeccion_mecanica}</p>` : ''}
+        ${diag.inspeccion_electrica ? `<p><strong>Eléctrica:</strong> ${diag.inspeccion_electrica}</p>` : ''}
+        ${diag.inspeccion_electronica ? `<p><strong>Scanner:</strong> ${diag.inspeccion_electronica}</p>` : ''}
+      </div>
+
+      <div class="obs-box">
+        <div class="card-title" style="color:#92400e; border-color:#fde68a;">Fallas Identificadas y Recomendaciones</div>
+        <p>${diag.fallas_identificadas || 'Sin fallas críticas reportadas.'}</p>
+        <p><strong>Observaciones:</strong> ${diag.observaciones || 'No hay notas adicionales.'}</p>
+      </div>
+
+      ${cotizacion ? `
+      <table>
+        <thead>
+          <tr>
+            <th>DETALLE DE COTIZACIÓN</th>
+            <th style="text-align:right;">MONTO (RD$)</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>Servicios Profesionales de Mano de Obra</td>
+            <td style="text-align:right;">RD$ ${Number(cotizacion.mano_obra).toLocaleString()}</td>
+          </tr>
+          <tr>
+            <td>Repuestos, Insumos y Materiales</td>
+            <td style="text-align:right;">RD$ ${Number(cotizacion.repuestos).toLocaleString()}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="total-box">TOTAL PRESUPUESTO: RD$ ${total.toLocaleString()}</div>
+      ` : ''}
+
+      <div class="footer">
+        <p>Este informe técnico tiene validez de 15 días. Precios sujetos a cambios tras desarme profundo.</p>
+        <p>Sólido Café Garage - "Mecánica de alto nivel"</p>
+      </div>
+      <script>window.onload = () => { window.print(); window.close(); }</script>
+    </body>
+    </html>
+  `;
+  const win = window.open("", "_blank");
+  win?.document.write(html);
+  win?.document.close();
 };
 
 export default function DiagnosticosPage() {
@@ -77,14 +174,25 @@ export default function DiagnosticosPage() {
 
   const guardarCotizacion = async () => {
     if (!cotForm.mano_obra && !cotForm.repuestos) return alert("Ingresa al menos un monto");
+    
+    // El monto total que se pasará a facturación
+    const totalCalculado = Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0);
+
     await fetch(`${API}/cotizaciones`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ diagnostico_id: detalle.diag.id, ...cotForm, mano_obra: Number(cotForm.mano_obra || 0), repuestos: Number(cotForm.repuestos || 0) })
+      body: JSON.stringify({ 
+        diagnostico_id: detalle.diag.id, 
+        ...cotForm, 
+        mano_obra: Number(cotForm.mano_obra || 0), 
+        repuestos: Number(cotForm.repuestos || 0),
+        total: totalCalculado // Enviamos el total para que facturación lo lea fácilmente
+      })
     });
     const res = await fetch(`${API}/diagnosticos/${detalle.diag.id}`);
     setDetalle(await res.json());
     fetchAll();
+    alert("💰 Cotización guardada correctamente");
   };
 
   const aprobarCotizacion = async () => {
@@ -241,9 +349,14 @@ export default function DiagnosticosPage() {
       {/* ========== DETALLE ========== */}
       {detalle && (
         <div>
-          <button onClick={() => setDetalle(null)} style={btnBack}>← Volver a lista</button>
+          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 16 }}>
+            <button onClick={() => setDetalle(null)} style={btnBack}>← Volver a lista</button>
+            <button onClick={() => imprimirFormatoTecnico(detalle)} style={{ ...btnPrimary, width: "auto", padding: "8px 20px", background: "#111827" }}>
+              🖨️ Imprimir Diagnóstico
+            </button>
+          </div>
 
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginTop: 16 }}>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
             {/* INFO */}
             <div style={card}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
@@ -285,7 +398,7 @@ export default function DiagnosticosPage() {
                 <label style={label}>Repuestos (RD$)</label>
                 <input type="number" value={cotForm.repuestos} onChange={e => setCotForm({ ...cotForm, repuestos: e.target.value })} style={input} placeholder="0.00" />
                 <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontWeight: 700, fontSize: 16 }}>
-                  Total: RD$ {(Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0)).toFixed(2)}
+                  Total: RD$ {(Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
                 </div>
                 <label style={label}>Tiempo Estimado</label>
                 <input value={cotForm.tiempo_estimado} onChange={e => setCotForm({ ...cotForm, tiempo_estimado: e.target.value })} style={input} placeholder="Ej: 2 días" />
@@ -312,7 +425,7 @@ export default function DiagnosticosPage() {
                   <p style={{ color: "#888", fontSize: 13, marginBottom: 12 }}>Sin avances registrados aún</p>
                 ) : (
                   <div style={{ marginBottom: 14 }}>
-                    {detalle.avances.map((a: any, i: number) => (
+                    {detalle.avances.map((a: any) => (
                       <div key={a.id} style={{ borderLeft: "3px solid #8b5cf6", paddingLeft: 12, marginBottom: 10 }}>
                         <div style={{ fontSize: 12, color: "#888" }}>
                           {new Date(a.created_at).toLocaleString("es-DO")} — {a.tecnico_nombre || "Técnico"}

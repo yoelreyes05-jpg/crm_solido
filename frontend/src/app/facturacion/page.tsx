@@ -112,7 +112,7 @@ export default function FacturaPage() {
   const [vehiculos, setVehiculos] = useState([]);
   const [items, setItems] = useState([]);
   const [ventas, setVentas] = useState([]);
-  const [diagnosticos, setDiagnosticos] = useState([]); // Nuevo
+  const [diagnosticos, setDiagnosticos] = useState([]);
   const [carrito, setCarrito] = useState([]);
   const [clienteId, setClienteId] = useState("");
   const [vehiculoId, setVehiculoId] = useState("");
@@ -136,7 +136,7 @@ export default function FacturaPage() {
         fetch(`${API}/vehiculos`),
         fetch(`${API}/inventario`),
         fetch(`${API}/ventas`),
-        fetch(`${API}/diagnosticos`) // Endpoint de tus diagnósticos
+        fetch(`${API}/diagnosticos`)
       ]);
 
       const c = await cRes.json(); const v = await vRes.json();
@@ -153,7 +153,6 @@ export default function FacturaPage() {
 
   useEffect(() => { fetchData(); }, []);
 
-  // Lógica de filtrado
   const vehiculosFiltrados = vehiculos.filter(v => Number(v.cliente_id) === Number(clienteId));
   const itemsFiltrados = items.filter(i => !busqueda || i.name.toLowerCase().includes(busqueda.toLowerCase()));
   const ventasFiltradas = ventas.filter(v => 
@@ -162,24 +161,21 @@ export default function FacturaPage() {
     v.ncf?.toLowerCase().includes(buscandoHistorial.toLowerCase())
   );
 
-  // Totales
   const subtotal = carrito.reduce((acc, p) => acc + p.price * p.qty, 0);
   const itbis = subtotal * 0.18;
   const total = subtotal + itbis;
   const vuelto = Number(montoRecibido || 0) - total;
 
-  // Importar Diagnóstico al Carrito
   const cargarDiagnostico = (diag) => {
     setClienteId(diag.cliente_id);
     setVehiculoId(diag.vehiculo_id);
     
-    // Creamos la línea de mano de obra basada en el diagnóstico
     const manoDeObra = {
       id: `MO-${diag.id}`,
       name: `MANO DE OBRA: ${diag.detalle_tecnico || 'Servicio técnico'}`,
       price: diag.costo_estimado || 0,
       qty: 1,
-      stock: 999 // Virtual
+      stock: 999 
     };
     
     setCarrito([manoDeObra]);
@@ -199,10 +195,14 @@ export default function FacturaPage() {
 
   const updateQty = (id, qty) => {
     if (qty <= 0) { setCarrito(carrito.filter(p => p.id !== id)); return; }
+    const itemOriginal = items.find(i => i.id === id);
+    if (itemOriginal && qty > itemOriginal.stock) {
+      alert("No hay suficiente stock");
+      return;
+    }
     setCarrito(carrito.map(p => p.id === id ? { ...p, qty } : p));
   };
 
-  // Acción: Imprimir Cotización
   const handleCotizacion = () => {
     if (carrito.length === 0) return alert("Carrito vacío");
     const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
@@ -245,7 +245,6 @@ export default function FacturaPage() {
     finally { setLoading(false); }
   };
 
-  // Re-imprimir
   const reimprimirDesdeHistorial = async (venta) => {
     try {
       const res = await fetch(`${API}/ventas/${venta.id}/items`);
@@ -254,7 +253,6 @@ export default function FacturaPage() {
     } catch { alert("Error al cargar ítems"); }
   };
 
-  // Eliminar/Cancelar (Se mantienen tus funciones)
   const eliminarFactura = async (id) => {
     if (!confirm(`¿Eliminar permanentemente FAC-${String(id).padStart(5, "0")}?`)) return;
     try {
@@ -305,13 +303,10 @@ export default function FacturaPage() {
 
       {tab === "nueva" && (
         <div style={grid}>
-          {/* COLUMNA IZQUIERDA: CONFIGURACIÓN */}
+          {/* COLUMNA IZQUIERDA */}
           <div>
-            {/* CARGAR DIAGNÓSTICO */}
             <div style={{ ...card, marginBottom: 16, border: "2px solid #3b82f6" }}>
-              <h2 style={{ ...cardTitle, color: "#1e40af", display: "flex", alignItems: "center", gap: 8 }}>
-                📋 Cargar Diagnóstico Técnico
-              </h2>
+              <h2 style={{ ...cardTitle, color: "#1e40af" }}>📋 Cargar Diagnóstico Técnico</h2>
               <select style={input} onChange={(e) => {
                 const d = diagnosticos.find(x => x.id === Number(e.target.value));
                 if (d) cargarDiagnostico(d);
@@ -365,7 +360,7 @@ export default function FacturaPage() {
 
             <div style={card}>
               <h2 style={cardTitle}>📦 Repuestos del Inventario</h2>
-              <input placeholder="Buscar repuesto para añadir..." value={busqueda}
+              <input placeholder="Buscar repuesto..." value={busqueda}
                 onChange={e => setBusqueda(e.target.value)} style={{ ...input, marginBottom: 12 }} />
               <div style={{ maxHeight: 280, overflowY: "auto" }}>
                 {itemsFiltrados.map(i => (
@@ -385,10 +380,9 @@ export default function FacturaPage() {
             </div>
           </div>
 
-          {/* COLUMNA DERECHA: CARRITO Y PAGO */}
+          {/* COLUMNA DERECHA */}
           <div style={card}>
             <h2 style={cardTitle}>🛒 Detalle de Servicios y Piezas</h2>
-
             {carrito.length === 0 ? (
               <p style={{ color: "#888", textAlign: "center", padding: 40 }}>Carrito vacío</p>
             ) : carrito.map(p => (
@@ -415,9 +409,9 @@ export default function FacturaPage() {
             </div>
 
             <div style={vueltoBx}>
-              <label style={{ display: "block", fontSize: 13, fontWeight: 700, marginBottom: 8, color: "#92400e" }}>💵 Recibido (RD$)</label>
+              <label style={label}>💵 Recibido (RD$)</label>
               <input type="number" value={montoRecibido} onChange={e => setMontoRecibido(e.target.value)} placeholder="0.00"
-                style={{ display: "block", padding: "10px 12px", width: "100%", borderRadius: 8, border: "1px solid #fde68a", fontSize: 18, fontWeight: 700, boxSizing: "border-box" }} />
+                style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a" }} />
               {Number(montoRecibido) > 0 && (
                 <div style={{ marginTop: 10, padding: "10px", borderRadius: 8, textAlign: "center", background: vuelto >= 0 ? "#dcfce7" : "#fee2e2", color: vuelto >= 0 ? "#166534" : "#dc2626", fontWeight: 800, fontSize: 20 }}>
                   {vuelto >= 0 ? `Vuelto: RD$ ${vuelto.toFixed(2)}` : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
@@ -442,11 +436,11 @@ export default function FacturaPage() {
         </div>
       )}
 
-      {/* ====== HISTORIAL ====== */}
+      {/* HISTORIAL */}
       {tab === "historial" && (
         <div style={card}>
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h2 style={{ ...cardTitle, marginBottom: 0 }}>📋 Historial de Ventas</h2>
+            <h2 style={cardTitle}>📋 Historial de Ventas</h2>
             <input placeholder="Buscar por cliente o NCF..."
               value={buscandoHistorial} onChange={e => setBuscandoHistorial(e.target.value)}
               style={{ ...input, width: 280, marginBottom: 0 }} />
@@ -485,7 +479,7 @@ export default function FacturaPage() {
         </div>
       )}
 
-      {/* ====== MODAL EDITAR (Opcional) ====== */}
+      {/* MODAL EDITAR */}
       {modalVenta && (
         <div style={overlay}>
           <div style={modal}>
@@ -503,25 +497,25 @@ export default function FacturaPage() {
   );
 }
 
-// ESTILOS (Se mantienen exactamente como los tenías)
+// ESTILOS
 const container: React.CSSProperties = { padding: "20px", background: "#f5f7fb", minHeight: "100vh" };
 const title: React.CSSProperties = { fontSize: "24px", fontWeight: "bold", marginBottom: "20px" };
 const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" };
 const card: React.CSSProperties = { background: "#fff", padding: "20px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
-const cardTitle = { marginBottom: "15px", fontSize: "18px", fontWeight: "600" };
+const cardTitle: React.CSSProperties = { marginBottom: "15px", fontSize: "18px", fontWeight: "600" };
 const tabBtn: React.CSSProperties = { padding: "10px 20px", borderRadius: "8px", border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
 const label: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
 const input: React.CSSProperties = { display: "block", marginBottom: "12px", padding: "12px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
 const productoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0" };
 const carritoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0", gap: 8 };
 const totalesBox: React.CSSProperties = { marginTop: 16, padding: 16, background: "#f8fafc", borderRadius: 10 };
-const totalesRow = { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 };
+const totalesRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 };
 const vueltoBx: React.CSSProperties = { marginTop: 12, padding: 14, background: "#fefce8", borderRadius: 10, border: "1px solid #fde68a" };
 const btnAdd: React.CSSProperties = { padding: "6px 14px", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" };
 const btnQty: React.CSSProperties = { padding: "2px 10px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" };
 const btnFacturar: React.CSSProperties = { padding: "14px", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", width: "100%", marginTop: 16, fontSize: 16, fontWeight: 700 };
 const btnReimprimir: React.CSSProperties = { padding: "10px", background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: "8px", cursor: "pointer", width: "100%", marginTop: 10, fontSize: 13 };
-const btnAcc = (bg) => ({ padding: "5px 9px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 });
+const btnAcc = (bg: string): React.CSSProperties => ({ padding: "5px 9px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 });
 const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse" };
 const th: React.CSSProperties = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
 const td: React.CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
