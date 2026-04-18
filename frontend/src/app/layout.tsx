@@ -1,3 +1,4 @@
+
 "use client";
 import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
@@ -64,30 +65,32 @@ export default function RootLayout({ children }) {
 // Para rutas públicas (login y cliente) agrega los meta tags PWA:
 if (esPublica) return (
   <html lang="es">
-    <head>
-      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-      <meta name="theme-color" content="#111827" />
-      <meta name="mobile-web-app-capable" content="yes" />
-      <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-      <meta name="apple-mobile-web-app-title" content="Sólido Auto" />
-      <link rel="manifest" href="/manifest.json" />
-      <link rel="apple-touch-icon" href="/icon-192.png" />
-      <title>Sólido Auto Servicio</title>
-    </head>
-    <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
-      {children}
-      <script dangerouslySetInnerHTML={{
-        __html: `
-          if ('serviceWorker' in navigator) {
-            window.addEventListener('load', function() {
-              navigator.serviceWorker.register('/sw.js');
-            });
-          }
-        `
-      }} />
-    </body>
-  </html>
-);
+  <head>
+        <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+        <meta name="theme-color" content="#111827" />
+        <meta name="mobile-web-app-capable" content="yes" />
+        <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+        <meta name="apple-mobile-web-app-title" content="Sólido Auto" />
+        {/* Cambiado: Referencia al nuevo logo en el manifest e iconos */}
+        <link rel="manifest" href="/manifest.json" />
+        <link rel="apple-touch-icon" href="/logo.png" />
+        <link rel="icon" href="/logo.png" />
+        <title>Sólido Auto Servicio</title>
+      </head>
+      <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
+        {children}
+        <script dangerouslySetInnerHTML={{
+          __html: `
+            if ('serviceWorker' in navigator) {
+              window.addEventListener('load', function() {
+                navigator.serviceWorker.register('/sw.js');
+              });
+            }
+          `
+        }} />
+      </body>
+    </html>
+  );
 
 
   if (!usuario) return (
@@ -121,15 +124,21 @@ if (esPublica) return (
           zIndex: 100,
           overflowX: "hidden"
         }}>
-          {/* LOGO */}
-          <div style={{ padding: "20px 14px", borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 10 }}>
-            <span style={{ fontSize: 30, flexShrink: 0 }}>🔧</span>
+
+         {/* LOGO SECCIÓN MODIFICADA */}
+          <div style={{ padding: "16px 14px", borderBottom: "1px solid #1f2937", display: "flex", alignItems: "center", gap: 10 }}>
+            <img 
+              src="/logo.png" 
+              alt="Logo Sólido" 
+              style={{ width: 40, height: 40, borderRadius: 8, flexShrink: 0, objectFit: "contain" }} 
+            />
             {sidebarOpen && (
-              <div>
-                <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.2, whiteSpace: "nowrap" }}>SÓLIDO AUTO</div>
-                <div style={{ fontWeight: 400, fontSize: 12, color: "#9ca3af" }}>SERVICIO</div>
+              <div style={{ flex: 1 }}>
+                <div style={{ fontWeight: 900, fontSize: 14, lineHeight: 1.2, color: "#fff" }}>SÓLIDO AUTO</div>
+                <div style={{ fontWeight: 400, fontSize: 11, color: "#3b82f6", letterSpacing: 1 }}>SERVICIO & CAFÉ</div>
               </div>
             )}
+
             <button onClick={() => setSidebarOpen(!sidebarOpen)} style={{
               marginLeft: "auto", background: "none", border: "none",
               color: "#9ca3af", cursor: "pointer", fontSize: 18, flexShrink: 0, padding: 4

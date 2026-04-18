@@ -9,6 +9,8 @@ const ESTADO_COLORES = {
   CONTROL_CALIDAD: "#8b5cf6", LISTO: "#10b981", ENTREGADO: "#6b7280"
 };
 
+
+
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [ordenes, setOrdenes] = useState([]);
