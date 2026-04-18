@@ -23,7 +23,15 @@ const [productos, setProductos] = useState<any[]>([]); // verifica los productos
   const [tab, setTab] = useState("estado");
   const [instalable, setInstalable] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-
+const verProductos = async () => {
+  try {
+    const res = await fetch(`${API}/inventario`);
+    const data = await res.json();
+    setProductos(data || []);
+  } catch (err) {
+    console.log(err);
+  }
+};
   useEffect(() => {
     window.addEventListener("beforeinstallprompt", (e) => {
       e.preventDefault();
@@ -47,24 +55,31 @@ const [productos, setProductos] = useState<any[]>([]); // verifica los productos
     setResultado(null);
 
     try {
-     const [vRes, oRes, dRes, pRes] = await Promise.all([
+     const [vRes, oRes, dRes, ] = await Promise.all([
   fetch(`${API}/vehiculos`),
   fetch(`${API}/ordenes`),
-  fetch(`${API}/diagnosticos`),
-  fetch(`${API}/inventario`) // 👈 ESTE ES EL NUEVO AQUI ES DONDE PUEDES VER EL INVENTARIO PARA LA APP CIENTE
+  fetch(`${API}/diagnosticos`)
+
 ]);
 
       const vehiculos = await vRes.json();
       const ordenes = await oRes.json();
       const diagnosticos = await dRes.json();
 
-const productosData = await pRes.json();
-setProductos(productosData || []);
-
       const vehiculo = vehiculos.find((v: any) =>
         v.placa?.toUpperCase() === placa.trim().toUpperCase()
       );
 
+
+const verProductos = async () => {
+  try {
+    const res = await fetch(`${API}/inventario`);
+    const data = await res.json();
+    setProductos(data || []);
+  } catch (err) {
+    console.log(err);
+  }
+};
       if (!vehiculo) {
         setError("No encontramos un vehículo con esa placa. Verifica e intenta de nuevo.");
         return;
@@ -112,7 +127,7 @@ setProductos(productosData || []);
       <div style={content}>
         {/* ====== ACCESOS RÁPIDOS ====== */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-          <button onClick={() => window.location.href = "/catalogo"} style={btnQuickMenu}>
+         <button onClick={verProductos}>
             🛒 Ver Productos
           </button>
           <button onClick={() => window.open("https://wa.me/18097122027", "_blank")} style={btnQuickWA}>
