@@ -115,9 +115,21 @@ const verProductos = async () => {
 
   return (
     <div style={appWrap}>
+
+
       {/* HEADER */}
-      <div style={header}>
-        <div style={{ fontSize: 36, marginBottom: 6 }}>🔧</div>
+      {/* REEMPLAZA EL CONTENIDO DEL HEADER POR ESTE: */}
+<div style={header}>
+  <div style={{ marginBottom: 12 }}>
+    <img 
+      src="/logo.png" 
+      alt="Logo Sólido" 
+      style={{ width: 85, height: 85, objectFit: "contain" }} 
+    />
+  </div>
+
+
+
         <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: "#fff", letterSpacing: 1 }}>
           SÓLIDO AUTO SERVICIO
         </h1>
