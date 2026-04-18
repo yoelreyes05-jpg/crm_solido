@@ -32,12 +32,20 @@ const verProductos = async () => {
     console.log(err);
   }
 };
-  useEffect(() => {
-    window.addEventListener("beforeinstallprompt", (e) => {
-      e.preventDefault();
-      setDeferredPrompt(e);
-      setInstalable(true);
-    });
+ 
+useEffect(() => {
+  const handler = (e: any) => {
+    e.preventDefault();
+    setDeferredPrompt(e);
+    setInstalable(true);
+  };
+
+  window.addEventListener("beforeinstallprompt", handler);
+
+  return () => window.removeEventListener("beforeinstallprompt", handler);
+}, []);
+
+
   }, []);
 
   const instalarApp = async () => {
@@ -123,6 +131,16 @@ const verProductos = async () => {
           </button>
         )}
       </div>
+
+
+
+{!instalable && (
+  <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
+    📲 En tu navegador, toca "Agregar a pantalla de inicio"
+  </div>
+)}
+
+
 
       <div style={content}>
         {/* ====== ACCESOS RÁPIDOS ====== */}
