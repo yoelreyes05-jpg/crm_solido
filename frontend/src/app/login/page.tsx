@@ -218,7 +218,7 @@ export default function LoginPage() {
           {/* HEADER */}
           <div className="login-header">
             <div className="login-icon-wrap">
-              <img src="https://crm-solido.vercel.app/logo.png" />
+              <img src="/logo.png" alt="Logo Sólido" className="login-logo" />
             </div>
             <div className="login-title">SÓLIDO AUTO SERVICIO</div>
             <p className="login-subtitle">Sistema de Gestión — Inicia sesión para continuar</p>
