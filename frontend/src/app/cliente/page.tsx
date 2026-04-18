@@ -127,7 +127,7 @@ const verProductos = async () => {
       <div style={content}>
         {/* ====== ACCESOS RÁPIDOS ====== */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-         <button onClick={verProductos}>
+         <button onClick={verProductos} style={btnQuickMenu}>
             🛒 Ver Productos
           </button>
           <button onClick={() => window.open("https://wa.me/18097122027", "_blank")} style={btnQuickWA}>
