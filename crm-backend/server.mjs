@@ -334,17 +334,29 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 
 // COTIZACIONES
 app.post("/cotizaciones", async (req, res) => {
-  const { diagnostico_id, mano_obra, repuestos, tiempo_estimado, notas } = req.body;
-  const total = Number(mano_obra) + Number(repuestos);
+  const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
+  const totalcalculado = Number(mano_obra) + Number(repuestos);
   const { data: exist } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
   let result;
   if (exist) {
-    const { data } = await supabase.from("cotizaciones").update({ mano_obra, repuestos, total, tiempo_estimado, notas }).eq("diagnostico_id", diagnostico_id).select();
+    const { data } = await supabase.from("cotizaciones").update({ mano_obra, repuestos, total, totalcalculado, tiempo_estimado, notas }).eq("diagnostico_id", diagnostico_id).select();
     result = data?.[0];
   } else {
-    const { data } = await supabase.from("cotizaciones").insert([{ diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, notas }]).select();
+    const { data } = await supabase.from("cotizaciones").insert([{ diagnostico_id, mano_obra, repuestos, total,totalcalculado, tiempo_estimado, notas }]).select();
     result = data?.[0];
   }
+
+// 🔥 GUARDAR MANO DE OBRA DETALLADA EN DIAGNÓSTICO
+if (mano_de_obra_detalle) {
+  await supabase
+    .from("diagnosticos")
+    .update({
+      mano_de_obra_detalle,
+      costo_estimado: totalCalculado
+    })
+    .eq("id", diagnostico_id);
+}
+
   await supabase.from("diagnosticos").update({ estado: "COTIZADO" }).eq("id", diagnostico_id);
   res.json(result);
 });
