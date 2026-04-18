@@ -46,7 +46,7 @@ useEffect(() => {
 }, []);
 
 
-  }, []);
+
 
   const instalarApp = async () => {
     if (!deferredPrompt) return;
