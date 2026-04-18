@@ -2,51 +2,48 @@
 import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
 
+/* ─── DATA ─────────────────────────────────────────────────────────── */
 const ESTADO_INFO = {
-  RECIBIDO:        { color: "#3b82f6", emoji: "📋", paso: 1, msg: "Tu vehículo fue recibido. Pronto será evaluado." },
-  DIAGNOSTICO:     { color: "#f59e0b", emoji: "🔍", paso: 2, msg: "Nuestro técnico está evaluando tu vehículo." },
-  REPARACION:      { color: "#ef4444", emoji: "🔧", paso: 3, msg: "Tu vehículo está siendo reparado por nuestro equipo." },
-  CONTROL_CALIDAD: { color: "#8b5cf6", emoji: "✅", paso: 4, msg: "Revisión final de calidad en proceso." },
-  LISTO:           { color: "#10b981", emoji: "🎉", paso: 5, msg: "¡Tu vehículo está listo! Puedes pasar a recogerlo." },
-  ENTREGADO:       { color: "#6b7280", emoji: "🚗", paso: 6, msg: "Vehículo entregado. ¡Gracias por tu confianza!" },
+  RECIBIDO:        { color: "#60a5fa", grad: "linear-gradient(135deg,#1e3a5f,#2563eb)", emoji: "📋", paso: 1, msg: "Tu vehículo fue recibido. Pronto será evaluado." },
+  DIAGNOSTICO:     { color: "#fbbf24", grad: "linear-gradient(135deg,#451a03,#d97706)", emoji: "🔍", paso: 2, msg: "Nuestro técnico está evaluando tu vehículo." },
+  REPARACION:      { color: "#f87171", grad: "linear-gradient(135deg,#450a0a,#dc2626)", emoji: "🔧", paso: 3, msg: "Tu vehículo está siendo reparado por nuestro equipo." },
+  CONTROL_CALIDAD: { color: "#a78bfa", grad: "linear-gradient(135deg,#2e1065,#7c3aed)", emoji: "✅", paso: 4, msg: "Revisión final de calidad en proceso." },
+  LISTO:           { color: "#34d399", grad: "linear-gradient(135deg,#022c22,#059669)", emoji: "🎉", paso: 5, msg: "¡Tu vehículo está listo! Puedes pasar a recogerlo." },
+  ENTREGADO:       { color: "#94a3b8", grad: "linear-gradient(135deg,#1e293b,#475569)", emoji: "🚗", paso: 6, msg: "Vehículo entregado. ¡Gracias por tu confianza!" },
 };
 
-const PASOS = ["RECIBIDO", "DIAGNOSTICO", "REPARACION", "CONTROL_CALIDAD", "LISTO", "ENTREGADO"];
-const PASOS_LABEL = ["Recibido", "Diagnóstico", "Reparación", "Control Calidad", "Listo", "Entregado"];
+const PASOS       = ["RECIBIDO","DIAGNOSTICO","REPARACION","CONTROL_CALIDAD","LISTO","ENTREGADO"];
+const PASOS_LABEL = ["Recibido","Diagnóstico","Reparación","C. Calidad","Listo","Entregado"];
 
+/* ─── COMPONENT ─────────────────────────────────────────────────────── */
 export default function ClienteApp() {
-  const [placa, setPlaca] = useState("");
-  const [resultado, setResultado] = useState<any>(null);
-const [productos, setProductos] = useState<any[]>([]); // verifica los productos en la app del cliente PWA
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [tab, setTab] = useState("estado");
-  const [instalable, setInstalable] = useState(false);
+  const [placa, setPlaca]               = useState("");
+  const [resultado, setResultado]       = useState<any>(null);
+  const [productos, setProductos]       = useState<any[]>([]);
+  const [loading, setLoading]           = useState(false);
+  const [error, setError]               = useState("");
+  const [tab, setTab]                   = useState("estado");
+  const [instalable, setInstalable]     = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-const verProductos = async () => {
-  try {
-    const res = await fetch(`${API}/inventario`);
-    const data = await res.json();
-    setProductos(data || []);
-  } catch (err) {
-    console.log(err);
-  }
-};
- 
-useEffect(() => {
-  const handler = (e: any) => {
-    e.preventDefault();
-    setDeferredPrompt(e);
-    setInstalable(true);
+  const [showProductos, setShowProductos]   = useState(false);
+  const [mounted, setMounted]           = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+    const handler = (e: any) => { e.preventDefault(); setDeferredPrompt(e); setInstalable(true); };
+    window.addEventListener("beforeinstallprompt", handler);
+    return () => window.removeEventListener("beforeinstallprompt", handler);
+  }, []);
+
+  const verProductos = async () => {
+    setShowProductos(v => !v);
+    if (productos.length > 0) return;
+    try {
+      const res  = await fetch(`${API}/inventario`);
+      const data = await res.json();
+      setProductos(data || []);
+    } catch {}
   };
-
-  window.addEventListener("beforeinstallprompt", handler);
-
-  return () => window.removeEventListener("beforeinstallprompt", handler);
-}, []);
-
-
-
 
   const instalarApp = async () => {
     if (!deferredPrompt) return;
@@ -58,40 +55,21 @@ useEffect(() => {
 
   const buscar = async () => {
     if (!placa.trim()) return setError("Ingresa la placa de tu vehículo");
-    setLoading(true);
-    setError("");
-    setResultado(null);
-
+    setLoading(true); setError(""); setResultado(null);
     try {
-     const [vRes, oRes, dRes, ] = await Promise.all([
-  fetch(`${API}/vehiculos`),
-  fetch(`${API}/ordenes`),
-  fetch(`${API}/diagnosticos`)
-
-]);
-
-      const vehiculos = await vRes.json();
-      const ordenes = await oRes.json();
+      const [vRes, oRes, dRes] = await Promise.all([
+        fetch(`${API}/vehiculos`),
+        fetch(`${API}/ordenes`),
+        fetch(`${API}/diagnosticos`),
+      ]);
+      const vehiculos   = await vRes.json();
+      const ordenes     = await oRes.json();
       const diagnosticos = await dRes.json();
 
       const vehiculo = vehiculos.find((v: any) =>
         v.placa?.toUpperCase() === placa.trim().toUpperCase()
       );
-
-
-const verProductos = async () => {
-  try {
-    const res = await fetch(`${API}/inventario`);
-    const data = await res.json();
-    setProductos(data || []);
-  } catch (err) {
-    console.log(err);
-  }
-};
-      if (!vehiculo) {
-        setError("No encontramos un vehículo con esa placa. Verifica e intenta de nuevo.");
-        return;
-      }
+      if (!vehiculo) { setError("No encontramos un vehículo con esa placa. Verifica e intenta de nuevo."); return; }
 
       const ordenesVehiculo = ordenes
         .filter((o: any) => o.vehiculo_id === vehiculo.id || o.vehiculo_info?.includes(vehiculo.placa))
@@ -102,293 +80,486 @@ const verProductos = async () => {
         .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
 
       setResultado({ vehiculo, ordenes: ordenesVehiculo, diagnosticos: diagVehiculo });
-    } catch {
-      setError("Error de conexión. Intenta más tarde.");
-    } finally {
-      setLoading(false);
-    }
+    } catch { setError("Error de conexión. Intenta más tarde."); }
+    finally { setLoading(false); }
   };
 
   const ultimaOrden = resultado?.ordenes?.[0];
-  const estadoInfo = ultimaOrden ? (ESTADO_INFO[ultimaOrden.estado as keyof typeof ESTADO_INFO] || ESTADO_INFO.RECIBIDO) : null;
-  const pasoActual = estadoInfo ? estadoInfo.paso : 0;
+  const estadoInfo  = ultimaOrden ? (ESTADO_INFO[ultimaOrden.estado as keyof typeof ESTADO_INFO] || ESTADO_INFO.RECIBIDO) : null;
+  const pasoActual  = estadoInfo ? estadoInfo.paso : 0;
 
+  /* ─── JSX ─────────────────────────────────────────────────────────── */
   return (
-    <div style={appWrap}>
+    <>
+      {/* ── GLOBAL STYLES ── */}
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
+        * { box-sizing: border-box; margin: 0; padding: 0; }
 
-      {/* HEADER */}
-      {/* REEMPLAZA EL CONTENIDO DEL HEADER POR ESTE: */}
-<div style={header}>
-  <div style={{ marginBottom: 12 }}>
-    <img 
-      src="/logo.png" 
-      alt="Logo Sólido" 
-      style={{ width: 85, height: 85, objectFit: "contain" }} 
-    />
-  </div>
+        body { background: #080c14; }
 
+        .sas-root {
+          max-width: 480px;
+          margin: 0 auto;
+          min-height: 100vh;
+          background: #080c14;
+          font-family: 'DM Sans', sans-serif;
+          color: #e2e8f0;
+          position: relative;
+          overflow-x: hidden;
+        }
 
+        /* noise texture overlay */
+        .sas-root::before {
+          content:'';
+          position:fixed; inset:0;
+          background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
+          pointer-events:none; z-index:0; opacity:.4;
+        }
 
-        <h1 style={{ fontSize: 22, fontWeight: 900, margin: 0, color: "#fff", letterSpacing: 1 }}>
-          SÓLIDO AUTO SERVICIO
-        </h1>
-        <p style={{ fontSize: 12, color: "#9ca3af", margin: "6px 0 0" }}>
-          Portal del Cliente · 809-712-2027
-        </p>
+        .sas-content { position:relative; z-index:1; }
 
-        {instalable && (
-          <button onClick={instalarApp} style={btnInstalar}>
-            📲 Instalar App en tu celular
-          </button>
-        )}
-      </div>
+        /* HEADER */
+        .sas-header {
+          background: linear-gradient(170deg, #0f172a 0%, #1e293b 100%);
+          padding: 36px 24px 28px;
+          text-align: center;
+          border-bottom: 1px solid rgba(255,255,255,0.06);
+          position: relative;
+          overflow: hidden;
+        }
+        .sas-header::after {
+          content:'';
+          position:absolute;
+          width:280px; height:280px;
+          border-radius:50%;
+          background: radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);
+          top:-80px; left:50%; transform:translateX(-50%);
+          pointer-events:none;
+        }
+        .sas-logo {
+          width:80px; height:80px; object-fit:contain;
+          border-radius:20px;
+          box-shadow: 0 0 30px rgba(59,130,246,0.3);
+          margin-bottom:14px;
+        }
+        .sas-title {
+          font-family: 'Syne', sans-serif;
+          font-size: 20px; font-weight:800; letter-spacing:2px;
+          background: linear-gradient(135deg, #fff 30%, #93c5fd);
+          -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+          background-clip:text;
+        }
+        .sas-subtitle { font-size:12px; color:#64748b; margin-top:6px; letter-spacing:.5px; }
+        .btn-install {
+          margin-top:16px; padding:10px 22px;
+          background: linear-gradient(135deg,#1d4ed8,#3b82f6);
+          color:#fff; border:none; border-radius:100px;
+          font-family:'DM Sans',sans-serif; font-weight:600; font-size:13px;
+          cursor:pointer; letter-spacing:.3px;
+          box-shadow: 0 4px 15px rgba(59,130,246,0.3);
+        }
+        .sas-hint { font-size:11px; color:#334155; margin-top:10px; }
 
+        /* QUICK ACTIONS */
+        .quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+        .btn-quick {
+          padding:15px 10px; border-radius:16px; border:none;
+          font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
+          cursor:pointer; letter-spacing:.2px; transition:transform .15s, box-shadow .15s;
+        }
+        .btn-quick:active { transform:scale(.97); }
+        .btn-productos { background:linear-gradient(135deg,#064e3b,#059669); color:#fff; box-shadow:0 4px 14px rgba(5,150,105,.3); }
+        .btn-wa-q     { background:linear-gradient(135deg,#14532d,#16a34a); color:#fff; box-shadow:0 4px 14px rgba(22,163,74,.3); }
 
+        /* CARD */
+        .card {
+          background: rgba(15,23,42,0.9);
+          border: 1px solid rgba(255,255,255,0.07);
+          border-radius:20px; padding:20px;
+          backdrop-filter:blur(12px);
+          margin-bottom:12px;
+        }
+        .card-title {
+          font-family:'Syne',sans-serif; font-size:16px; font-weight:700;
+          color:#f1f5f9; margin-bottom:14px; letter-spacing:.5px;
+        }
 
-{!instalable && (
-  <div style={{ marginTop: 10, fontSize: 12, color: "#9ca3af" }}>
-    📲 En tu navegador, toca "Agregar a pantalla de inicio"
-  </div>
-)}
+        /* PRODUCTOS */
+        .prod-row {
+          display:flex; justify-content:space-between; align-items:center;
+          padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.05);
+        }
+        .prod-row:last-child { border-bottom:none; }
+        .prod-name { font-weight:600; font-size:14px; color:#e2e8f0; }
+        .prod-stock { font-size:11px; color:#64748b; margin-top:2px; }
+        .prod-price { font-family:'Syne',sans-serif; font-weight:800; font-size:15px; color:#34d399; }
 
+        /* BUSCADOR */
+        .field-label { font-size:12px; font-weight:600; color:#64748b; letter-spacing:.8px; text-transform:uppercase; display:block; margin-bottom:10px; }
+        .input-placa {
+          display:block; width:100%; padding:18px;
+          font-family:'Syne',sans-serif; font-size:28px; font-weight:800;
+          text-align:center; letter-spacing:8px; text-transform:uppercase;
+          background: rgba(255,255,255,0.04);
+          border:2px solid rgba(255,255,255,0.1);
+          border-radius:14px; color:#fff;
+          margin-bottom:16px; transition:border-color .2s, box-shadow .2s;
+          outline:none;
+        }
+        .input-placa:focus { border-color:#3b82f6; box-shadow:0 0 0 4px rgba(59,130,246,0.12); }
+        .input-placa::placeholder { color:#334155; letter-spacing:4px; }
+        .error-banner {
+          background:rgba(220,38,38,0.1); border:1px solid rgba(220,38,38,0.3);
+          color:#fca5a5; padding:13px 16px; border-radius:12px; font-size:13px;
+          font-weight:500; margin-bottom:14px;
+        }
+        .btn-buscar {
+          width:100%; padding:17px; border:none; border-radius:14px;
+          font-family:'Syne',sans-serif; font-weight:800; font-size:16px; letter-spacing:.5px;
+          cursor:pointer; transition:opacity .2s, transform .15s;
+          background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+          color:#fff; box-shadow:0 6px 20px rgba(59,130,246,0.35);
+        }
+        .btn-buscar:disabled { opacity:.4; cursor:not-allowed; }
+        .btn-buscar:not(:disabled):active { transform:scale(.98); }
 
+        /* VOLVER */
+        .btn-volver {
+          margin-bottom:14px; padding:10px 20px;
+          background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+          border-radius:100px; cursor:pointer; font-weight:600; font-size:13px;
+          color:#94a3b8; letter-spacing:.3px;
+        }
 
-      <div style={content}>
-        {/* ====== ACCESOS RÁPIDOS ====== */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
-         <button onClick={verProductos} style={btnQuickMenu}>
-            🛒 Ver Productos
-          </button>
-          <button onClick={() => window.open("https://wa.me/18097122027", "_blank")} style={btnQuickWA}>
-            💬 WhatsApp
-          </button>
-        </div>
+        /* CAR CARD */
+        .car-card {
+          background:linear-gradient(135deg,#0f1729 0%,#1e3a5f 100%);
+          border:1px solid rgba(59,130,246,0.2);
+          border-radius:22px; padding:22px; margin-bottom:12px;
+          position:relative; overflow:hidden;
+        }
+        .car-card::before {
+          content:'';
+          position:absolute; right:-30px; top:-30px;
+          width:160px; height:160px; border-radius:50%;
+          background:radial-gradient(circle,rgba(59,130,246,0.2) 0%,transparent 70%);
+        }
+        .car-main { display:flex; gap:16px; align-items:center; position:relative; }
+        .car-emoji { font-size:52px; }
+        .car-marca { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff; }
+        .car-meta  { font-size:13px; color:#64748b; margin-top:4px; }
+        .placa-badge {
+          margin-top:12px; display:inline-block;
+          background:rgba(255,255,255,0.07);
+          border:1px solid rgba(255,255,255,0.15);
+          padding:8px 20px; border-radius:10px;
+          font-family:'Syne',sans-serif; font-weight:900; font-size:20px;
+          letter-spacing:5px; color:#93c5fd;
+        }
 
+        /* ESTADO */
+        .estado-card {
+          border-radius:22px; padding:22px; margin-bottom:12px;
+          position:relative; overflow:hidden;
+        }
+        .estado-top-label {
+          font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
+          color:rgba(255,255,255,0.4); margin-bottom:14px;
+        }
+        .estado-row { display:flex; align-items:center; gap:16px; margin-bottom:20px; }
+        .estado-emoji { font-size:48px; }
+        .estado-name {
+          font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff;
+        }
+        .estado-msg { font-size:13px; color:rgba(255,255,255,0.6); margin-top:4px; line-height:1.6; }
 
-{/* ====== PRODUCTOS ====== */}
-<div style={{ ...card, marginBottom: 14 }}>
-  <h2 style={{ fontSize: 16, fontWeight: 800, marginBottom: 10 }}>
-    🛒 Productos Disponibles
-  </h2>
+        /* PROGRESS */
+        .progress-wrap { display:flex; justify-content:space-between; gap:4px; }
+        .prog-step { display:flex; flex-direction:column; align-items:center; flex:1; }
+        .prog-dot {
+          width:28px; height:28px; border-radius:50%;
+          display:flex; align-items:center; justify-content:center;
+          font-size:11px; font-weight:800; transition:all .3s;
+        }
+        .prog-dot-done   { background:rgba(255,255,255,0.2); color:#fff; }
+        .prog-dot-active { background:#fff; color:#111; box-shadow:0 0 12px rgba(255,255,255,0.4); }
+        .prog-dot-future { background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.25); }
+        .prog-label {
+          font-size:8px; margin-top:5px; text-align:center; font-weight:600; letter-spacing:.3px;
+          white-space:nowrap;
+        }
+        .prog-label-on  { color:rgba(255,255,255,0.85); }
+        .prog-label-off { color:rgba(255,255,255,0.2); }
 
-  {productos.length === 0 ? (
-    <div style={{ fontSize: 13, color: "#888" }}>
-      No hay productos disponibles
-    </div>
-  ) : (
-    productos.slice(0, 10).map((p: any) => (
-      <div key={p.id} style={{
-        display: "flex",
-        justifyContent: "space-between",
-        padding: "10px 0",
-        borderBottom: "1px solid #eee"
-      }}>
-        <div>
-          <div style={{ fontWeight: 700 }}>{p.name}</div>
-          <div style={{ fontSize: 12, color: "#888" }}>
-            {p.stock > 0 ? "Disponible" : "Sin stock"}
-          </div>
-        </div>
+        /* TABS */
+        .tabs-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+        .tab-btn {
+          padding:13px 8px; border-radius:14px;
+          border:1px solid rgba(255,255,255,0.07);
+          font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
+          cursor:pointer; transition:all .2s; letter-spacing:.2px;
+        }
+        .tab-active   { background:linear-gradient(135deg,#1d4ed8,#3b82f6); color:#fff; border-color:transparent; box-shadow:0 4px 14px rgba(59,130,246,.3); }
+        .tab-inactive { background:rgba(255,255,255,0.04); color:#64748b; }
 
-        <div style={{ fontWeight: 800 }}>
-          RD$ {Number(p.price).toFixed(2)}
-        </div>
-      </div>
-    ))
-  )}
-</div>
+        /* ORDEN CARD */
+        .orden-card {
+          border-radius:18px; padding:18px; margin-bottom:10px;
+          background:rgba(15,23,42,0.95);
+          border:1px solid rgba(255,255,255,0.07);
+          border-left:4px solid;
+        }
+        .orden-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
+        .orden-id { font-family:'Syne',sans-serif; font-weight:800; font-size:15px; color:#f1f5f9; }
+        .orden-badge { padding:4px 14px; border-radius:100px; font-size:11px; font-weight:700; letter-spacing:.3px; }
+        .orden-desc { font-size:13px; color:#64748b; line-height:1.6; }
+        .btn-wa-card {
+          margin-top:14px; width:100%; padding:12px;
+          background:linear-gradient(135deg,#14532d,#16a34a);
+          color:#fff; border:none; border-radius:12px;
+          font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
+          cursor:pointer; letter-spacing:.2px;
+          box-shadow:0 4px 14px rgba(22,163,74,.25);
+        }
 
-        {/* ====== BUSCADOR ====== */}
-        {!resultado && (
-          <div style={card}>
-            <h2 style={{ fontSize: 18, fontWeight: 800, marginBottom: 8 }}>🔎 Consulta tu Vehículo</h2>
-            <p style={{ fontSize: 14, color: "#888", marginBottom: 20, lineHeight: 1.6 }}>
-              Ingresa la placa de tu vehículo para ver su estado en tiempo real.
-            </p>
+        /* DIAG CARD */
+        .diag-card {
+          border-radius:18px; padding:18px; margin-bottom:10px;
+          background:rgba(15,23,42,0.95);
+          border:1px solid rgba(255,255,255,0.07);
+        }
+        .diag-tipo { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#e2e8f0; margin-bottom:6px; }
+        .diag-obs  { font-size:13px; color:#64748b; line-height:1.6; }
 
-            <label style={labelStyle}>Placa del vehículo</label>
-            <input
-              value={placa}
-              onChange={e => setPlaca(e.target.value.toUpperCase())}
-              onKeyDown={e => e.key === "Enter" && buscar()}
-              placeholder="Ej: A123456"
-              maxLength={10}
-              style={inputPlaca}
-            />
+        /* WA FLOATING */
+        .wa-float {
+          position:fixed; bottom:22px; right:22px;
+          background:linear-gradient(135deg,#15803d,#22c55e);
+          color:#fff; width:58px; height:58px; border-radius:50%;
+          display:flex; align-items:center; justify-content:center;
+          font-size:26px; text-decoration:none;
+          box-shadow:0 6px 24px rgba(34,197,94,.45);
+          z-index:999; transition:transform .15s;
+        }
+        .wa-float:active { transform:scale(.93); }
 
-            {error && (
-              <div style={errorBanner}>
-                ❌ {error}
-              </div>
+        /* FOOTER */
+        .footer { text-align:center; padding:30px 0 80px; color:#1e293b; font-size:12px; }
+        .footer-brand { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#334155; margin:6px 0 2px; }
+
+        /* FADE-IN */
+        @keyframes fadeUp { from{ opacity:0; transform:translateY(16px); } to{ opacity:1; transform:translateY(0); } }
+        .fade-up { animation: fadeUp .4s ease both; }
+        .delay-1 { animation-delay:.05s; }
+        .delay-2 { animation-delay:.10s; }
+        .delay-3 { animation-delay:.15s; }
+        .delay-4 { animation-delay:.20s; }
+
+        /* DIVIDER */
+        .search-intro { font-size:14px; color:#334155; line-height:1.7; margin-bottom:20px; }
+      `}</style>
+
+      <div className="sas-root">
+        <div className="sas-content">
+
+          {/* ── HEADER ── */}
+          <div className="sas-header">
+            <img src="/logo.png" alt="Logo Sólido" className="sas-logo" />
+            <div className="sas-title">SÓLIDO AUTO SERVICIO</div>
+            <div className="sas-subtitle">Portal del Cliente · 809-712-2027</div>
+            {instalable && (
+              <button onClick={instalarApp} className="btn-install">
+                📲 Instalar App
+              </button>
             )}
-
-            <button onClick={buscar} disabled={loading || !placa.trim()}
-              style={{ ...btnBuscar, background: (!placa.trim() || loading) ? "#9ca3af" : "#111827" }}>
-              {loading ? "⏳ Buscando..." : "🔍 Consultar Estado"}
-            </button>
+            {!instalable && (
+              <div className="sas-hint">📲 Toca "Agregar a pantalla de inicio" en tu navegador</div>
+            )}
           </div>
-        )}
 
-        {/* ====== RESULTADO ====== */}
-        {resultado && (
-          <div>
-            <button onClick={() => { setResultado(null); setPlaca(""); }} style={btnVolver}>
-              ← Nueva consulta
-            </button>
+          {/* ── BODY ── */}
+          <div style={{ padding:"16px" }}>
 
-            {/* TARJETA VEHÍCULO */}
-            <div style={carCard}>
-              <div style={{ display: "flex", gap: 16, alignItems: "center" }}>
-                <span style={{ fontSize: 48 }}>🚗</span>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 22, fontWeight: 900 }}>
-                    {resultado.vehiculo.marca} {resultado.vehiculo.modelo}
-                  </div>
-                  <div style={{ fontSize: 14, color: "#9ca3af", marginTop: 2 }}>
-                    Año {resultado.vehiculo.ano} {resultado.vehiculo.color ? `· ${resultado.vehiculo.color}` : ""}
-                  </div>
-                  <div style={placaBadge}>
-                    {resultado.vehiculo.placa}
-                  </div>
-                </div>
-              </div>
+            {/* QUICK ACTIONS */}
+            <div className="quick-grid fade-up">
+              <button onClick={verProductos} className="btn-quick btn-productos">
+                🛒 {showProductos ? "Ocultar" : "Ver"} Productos
+              </button>
+              <button onClick={() => window.open("https://wa.me/18097122027","_blank")} className="btn-quick btn-wa-q">
+                💬 WhatsApp
+              </button>
             </div>
 
-            {/* ESTADO ACTUAL */}
-            {ultimaOrden && estadoInfo && (
-              <div style={{ ...card, borderLeft: `5px solid ${estadoInfo.color}`, marginBottom: 14 }}>
-                <div style={estadoLabel}>Estado Actual</div>
-                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
-                  <span style={{ fontSize: 44 }}>{estadoInfo.emoji}</span>
-                  <div>
-                    <div style={{ fontWeight: 900, fontSize: 22, color: estadoInfo.color }}>
-                      {ultimaOrden.estado.replace("_", " ")}
-                    </div>
-                    <div style={{ fontSize: 14, color: "#555", marginTop: 4, lineHeight: 1.5 }}>
-                      {estadoInfo.msg}
-                    </div>
-                  </div>
-                </div>
-
-                {/* BARRA DE PROGRESO */}
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 8 }}>
-                  {PASOS.map((paso, i) => {
-                    const infoPaso = (ESTADO_INFO as any)[paso];
-                    const alcanzado = i < pasoActual;
-                    const actual = i === pasoActual - 1;
-                    return (
-                      <div key={paso} style={{ display: "flex", flexDirection: "column", alignItems: "center", flex: 1 }}>
-                        <div style={{
-                          width: 28, height: 28, borderRadius: "50%",
-                          background: alcanzado || actual ? infoPaso?.color || "#888" : "#e5e7eb",
-                          color: "#fff", display: "flex", alignItems: "center",
-                          justifyContent: "center", fontSize: 12, fontWeight: 800,
-                          border: actual ? `3px solid ${estadoInfo.color}` : "none",
-                        }}>
-                          {alcanzado || actual ? "✓" : i + 1}
-                        </div>
-                        <div style={{ fontSize: 9, marginTop: 4, textAlign: "center", color: alcanzado || actual ? "#111" : "#aaa", fontWeight: alcanzado || actual ? 700 : 400 }}>
-                          {PASOS_LABEL[i]}
-                        </div>
+            {/* PRODUCTOS */}
+            {showProductos && (
+              <div className="card fade-up">
+                <div className="card-title">🛒 Productos Disponibles</div>
+                {productos.length === 0 ? (
+                  <div style={{ fontSize:13, color:"#475569" }}>Cargando productos...</div>
+                ) : (
+                  productos.slice(0,10).map((p:any) => (
+                    <div key={p.id} className="prod-row">
+                      <div>
+                        <div className="prod-name">{p.name}</div>
+                        <div className="prod-stock">{p.stock > 0 ? "✓ Disponible" : "Sin stock"}</div>
                       </div>
-                    );
-                  })}
-                </div>
+                      <div className="prod-price">RD$ {Number(p.price).toFixed(2)}</div>
+                    </div>
+                  ))
+                )}
               </div>
             )}
 
-            {/* TABS */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 14 }}>
-              {[
-                { key: "estado",    label: `📋 Servicios (${resultado.ordenes.length})` },
-                { key: "historial", label: `🔬 Diagnósticos (${resultado.diagnosticos.length})` },
-              ].map(t => (
-                <button key={t.key} onClick={() => setTab(t.key)}
-                  style={{
-                    padding: "12px 8px", borderRadius: 10, border: "1px solid #ddd",
-                    fontWeight: 700, fontSize: 13,
-                    background: tab === t.key ? "#111827" : "#fff",
-                    color: tab === t.key ? "#fff" : "#111"
-                  }}>
-                  {t.label}
+            {/* ── BUSCADOR ── */}
+            {!resultado && (
+              <div className="card fade-up delay-1">
+                <div className="card-title">🔎 Consulta tu Vehículo</div>
+                <p className="search-intro">
+                  Ingresa la placa de tu vehículo para ver su estado en tiempo real.
+                </p>
+                <label className="field-label">Placa del vehículo</label>
+                <input
+                  value={placa}
+                  onChange={e => setPlaca(e.target.value.toUpperCase())}
+                  onKeyDown={e => e.key === "Enter" && buscar()}
+                  placeholder="A123456"
+                  maxLength={10}
+                  className="input-placa"
+                />
+                {error && <div className="error-banner">⚠️ {error}</div>}
+                <button
+                  onClick={buscar}
+                  disabled={loading || !placa.trim()}
+                  className="btn-buscar"
+                >
+                  {loading ? "⏳ Buscando..." : "🔍 Consultar Estado"}
                 </button>
-              ))}
-            </div>
+              </div>
+            )}
 
-            {/* ÓRDENES */}
-            {tab === "estado" && (
+            {/* ── RESULTADO ── */}
+            {resultado && (
               <div>
-                {resultado.ordenes.map((o: any) => {
-                  const info = (ESTADO_INFO as any)[o.estado] || ESTADO_INFO.RECIBIDO;
-                  return (
-                    <div key={o.id} style={{ ...card, borderLeft: `4px solid ${info.color}`, marginBottom: 10 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                        <span style={{ fontWeight: 800, fontSize: 15 }}>Orden #{o.id}</span>
-                        <span style={{ background: info.color, color: "#fff", padding: "3px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>
-                          {o.estado.replace("_", " ")}
-                        </span>
+                <button onClick={() => { setResultado(null); setPlaca(""); }} className="btn-volver">
+                  ← Nueva consulta
+                </button>
+
+                {/* VEHICLE CARD */}
+                <div className="car-card fade-up">
+                  <div className="car-main">
+                    <span className="car-emoji">🚗</span>
+                    <div>
+                      <div className="car-marca">
+                        {resultado.vehiculo.marca} {resultado.vehiculo.modelo}
                       </div>
-                      <div style={{ fontSize: 14, color: "#555", marginBottom: 10 }}>{o.descripcion}</div>
-                      
-                      <button
-                        onClick={() => {
-                          const msg = `Hola, quiero info de mi vehículo (${resultado.vehiculo.placa}), orden #${o.id}`;
-                          window.open(`https://wa.me/18097122027?text=${encodeURIComponent(msg)}`, "_blank");
-                        }}
-                        style={btnWAInCard}
-                      >
-                        💬 Consultar por WhatsApp
-                      </button>
+                      <div className="car-meta">
+                        Año {resultado.vehiculo.ano}{resultado.vehiculo.color ? ` · ${resultado.vehiculo.color}` : ""}
+                      </div>
+                      <div className="placa-badge">{resultado.vehiculo.placa}</div>
                     </div>
-                  );
-                })}
-              </div>
-            )}
-
-            {/* DIAGNÓSTICOS */}
-            {tab === "historial" && (
-              <div>
-                {resultado.diagnosticos.map((d: any) => (
-                  <div key={d.id} style={{ ...card, marginBottom: 10 }}>
-                    <div style={{ fontWeight: 800, marginBottom: 5 }}>{d.tipo_servicio}</div>
-                    <div style={{ fontSize: 13, color: "#555" }}>{d.observaciones}</div>
                   </div>
-                ))}
+                </div>
+
+                {/* ESTADO */}
+                {ultimaOrden && estadoInfo && (
+                  <div className="estado-card fade-up delay-1" style={{ background: estadoInfo.grad }}>
+                    <div className="estado-top-label">Estado Actual</div>
+                    <div className="estado-row">
+                      <span className="estado-emoji">{estadoInfo.emoji}</span>
+                      <div>
+                        <div className="estado-name">{ultimaOrden.estado.replace("_"," ")}</div>
+                        <div className="estado-msg">{estadoInfo.msg}</div>
+                      </div>
+                    </div>
+                    {/* PROGRESS STEPS */}
+                    <div className="progress-wrap">
+                      {PASOS.map((paso, i) => {
+                        const alcanzado = i < pasoActual;
+                        const actual    = i === pasoActual - 1;
+                        return (
+                          <div key={paso} className="prog-step">
+                            <div className={`prog-dot ${actual ? "prog-dot-active" : alcanzado ? "prog-dot-done" : "prog-dot-future"}`}>
+                              {alcanzado || actual ? "✓" : i+1}
+                            </div>
+                            <div className={`prog-label ${alcanzado || actual ? "prog-label-on" : "prog-label-off"}`}>
+                              {PASOS_LABEL[i]}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {/* TABS */}
+                <div className="tabs-grid fade-up delay-2">
+                  {[
+                    { key:"estado",    label:`📋 Servicios (${resultado.ordenes.length})` },
+                    { key:"historial", label:`🔬 Diagnósticos (${resultado.diagnosticos.length})` },
+                  ].map(t => (
+                    <button key={t.key} onClick={() => setTab(t.key)}
+                      className={`tab-btn ${tab === t.key ? "tab-active" : "tab-inactive"}`}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* ÓRDENES */}
+                {tab === "estado" && (
+                  <div className="fade-up delay-3">
+                    {resultado.ordenes.map((o: any) => {
+                      const info = (ESTADO_INFO as any)[o.estado] || ESTADO_INFO.RECIBIDO;
+                      return (
+                        <div key={o.id} className="orden-card" style={{ borderLeftColor: info.color }}>
+                          <div className="orden-header">
+                            <span className="orden-id">Orden #{o.id}</span>
+                            <span className="orden-badge" style={{ background:`${info.color}22`, color:info.color }}>
+                              {o.estado.replace("_"," ")}
+                            </span>
+                          </div>
+                          <div className="orden-desc">{o.descripcion}</div>
+                          <button
+                            onClick={() => {
+                              const msg = `Hola, quiero info de mi vehículo (${resultado.vehiculo.placa}), orden #${o.id}`;
+                              window.open(`https://wa.me/18097122027?text=${encodeURIComponent(msg)}`,"_blank");
+                            }}
+                            className="btn-wa-card"
+                          >
+                            💬 Consultar por WhatsApp
+                          </button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+
+                {/* DIAGNÓSTICOS */}
+                {tab === "historial" && (
+                  <div className="fade-up delay-3">
+                    {resultado.diagnosticos.map((d: any) => (
+                      <div key={d.id} className="diag-card">
+                        <div className="diag-tipo">{d.tipo_servicio}</div>
+                        <div className="diag-obs">{d.observaciones}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
+
+            <footer className="footer">
+              <div style={{ fontSize:22 }}>🔧</div>
+              <div className="footer-brand">Sólido Auto Servicio</div>
+              <div>809-712-2027</div>
+            </footer>
           </div>
-        )}
+        </div>
 
-        <footer style={footerStyle}>
-          <div style={{ fontSize: 20 }}>🔧</div>
-          <div style={{ fontWeight: 700 }}>Sólido Auto Servicio</div>
-          <div>809-712-2027</div>
-        </footer>
+        {/* BOTÓN FLOTANTE WA */}
+        <a href="https://wa.me/18097122027" target="_blank" className="wa-float">💬</a>
       </div>
-
-      {/* BOTÓN FLOTANTE WHATSAPP */}
-      <a href="https://wa.me/18097122027" target="_blank" style={btnWAFloating}>💬</a>
-    </div>
+    </>
   );
 }
-
-// ESTILOS (CON TIPADO)
-const appWrap: React.CSSProperties = { maxWidth: 480, margin: "0 auto", minHeight: "100vh", background: "#f5f7fb" };
-const header: React.CSSProperties = { background: "#111827", padding: "32px 20px", textAlign: "center" };
-const content: React.CSSProperties = { padding: "16px" };
-const card: React.CSSProperties = { background: "#fff", borderRadius: 16, padding: 18, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", position: "relative" };
-const labelStyle: React.CSSProperties = { display: "block", fontSize: 14, fontWeight: 700, marginBottom: 8, color: "#555" };
-const btnQuickMenu: React.CSSProperties = { padding: 14, borderRadius: 12, border: "none", background: "#10b981", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer" };
-const btnQuickWA: React.CSSProperties = { padding: 14, borderRadius: 12, border: "none", background: "#25D366", color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer" };
-const inputPlaca: React.CSSProperties = { display: "block", width: "100%", padding: "16px", fontSize: 24, fontWeight: 900, textAlign: "center", letterSpacing: 6, textTransform: "uppercase", borderRadius: 12, border: "2px solid #e5e7eb", boxSizing: "border-box", marginBottom: 16, background: "#f8fafc" };
-const errorBanner: React.CSSProperties = { background: "#fee2e2", color: "#dc2626", padding: 14, borderRadius: 10, fontSize: 14, marginBottom: 14, fontWeight: 600 };
-const btnBuscar: React.CSSProperties = { padding: 16, color: "#fff", border: "none", borderRadius: 14, cursor: "pointer", width: "100%", fontSize: 17, fontWeight: 800 };
-const btnVolver: React.CSSProperties = { marginBottom: 14, padding: "10px 18px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 14 };
-const carCard: React.CSSProperties = { background: "#111827", borderRadius: 18, padding: 20, marginBottom: 14, color: "#fff" };
-const placaBadge: React.CSSProperties = { marginTop: 10, display: "inline-block", background: "#1f2937", padding: "6px 18px", borderRadius: 8, fontWeight: 900, fontSize: 20, letterSpacing: 4, border: "2px solid #374151" };
-const estadoLabel: React.CSSProperties = { fontSize: 12, color: "#888", fontWeight: 700, marginBottom: 10, textTransform: "uppercase", letterSpacing: 1 };
-const btnWAInCard: React.CSSProperties = { marginTop: 10, width: "100%", padding: 10, background: "#25D366", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, cursor: "pointer" };
-const btnWAFloating: React.CSSProperties = { position: "fixed", bottom: 20, right: 20, background: "#25D366", color: "#fff", width: 60, height: 60, borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: 28, textDecoration: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.2)", zIndex: 999 };
-const footerStyle: React.CSSProperties = { textAlign: "center", padding: "24px 0", fontSize: 13, color: "#9ca3af" };
-const btnInstalar: React.CSSProperties = { marginTop: 14, padding: "10px 20px", background: "#3b82f6", color: "#fff", border: "none", borderRadius: 10, fontWeight: 700, fontSize: 14 };
