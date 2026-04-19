@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
 
-// ─── DATOS EMPRESA ──────nueva ────────────────────────────────────────────────────
+// ─── DATOS EMPRESA ──────────────────────────────────────────────────────────
 const EMPRESA = {
   nombre: "SÓLIDO AUTO SERVICIO SRL",
   telefono: "809-712-2027",
@@ -193,8 +193,7 @@ export default function FacturaPage() {
       setItems(await iRes.json() || []);
       setFacturas(await fRes.json() || []);
       const diags = await dRes.json() || [];
-      
-// ✅ FIX: mostrar todos los diagnósticos no facturados,
+      // ✅ FIX: mostrar todos los diagnósticos no facturados,
       //    sin importar si costo_estimado es 0 o null
       setDiagnosticos(diags.filter((d: any) => d.estado !== "FACTURADO"));
     } catch (err) { console.error(err); }
@@ -327,36 +326,26 @@ export default function FacturaPage() {
     if (Number(montoRecibido) > 0 && vuelto < 0)
       return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
 
-  for (const item of carrito) {
-  if (!item.descripcion) {
-    alert("Item sin descripción");
-    return;
-  }
-  if (!item.cantidad || item.cantidad <= 0) {
-    alert("Cantidad inválida");
-    return;
-  }
-  if (item.precio_unitario == null) {
-    alert("Precio inválido");
-    return;
-  }
-}
+    // ✅ Validar items ANTES de setLoading
+    for (const item of carrito) {
+      if (!item.descripcion) { alert("Item sin descripción"); return; }
+      if (!item.cantidad || item.cantidad <= 0) { alert("Cantidad inválida"); return; }
+      if (item.precio_unitario == null) { alert("Precio inválido"); return; }
+    }
 
- setLoading(true);
+    setLoading(true);
     const snap = [...carrito];
     try {
       const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
-     const body = {
-       
- items: snap.map(p => ({
+      const body = {
+        items: snap.map(p => ({
           tipo:            p.tipo,
           descripcion:     p.descripcion,
           cantidad:        p.cantidad,
           precio_unitario: p.precio_unitario,
           itbis_aplica:    p.itbis_aplica,
           inventario_id:   p.inventario_id || null
-       
- })),
+        })),
         metodo_pago:    method,
         ncf_tipo:       ncfTipo,
         subtotal,
