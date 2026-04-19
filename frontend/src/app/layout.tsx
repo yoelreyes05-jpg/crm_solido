@@ -25,6 +25,7 @@ const MENU = [
   { href: "/facturacion",   icon: "🧾", label: "Facturación",        key: "facturacion" },
   { href: "/cafeteria",     icon: "☕", label: "Cafetería POS",      key: "cafeteria" },
   { href: "/usuarios",      icon: "👥", label: "Usuarios",           key: "usuarios" },
+  { href: "/contabilidad",  icon: "🧮", label: "Contabilidad",       key: "contabilidad" },
   { href: "/configuracion", icon: "⚙️", label: "Configuración",      key: "configuracion" },
 ];
 
