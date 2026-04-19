@@ -367,7 +367,7 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 app.post("/cotizaciones", async (req, res) => {
   const { diagnostico_id, mano_obra, repuestos, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
 
-  // ✅ FIX: nombre de variable consistente (era "totalcalculado" → crash silencioso)
+  // ✅ FIX: nombre de variable consistente (era "totalCalculado" → crash silencioso)
   const totalCalculado = Number(mano_obra) + Number(repuestos);
 
   const { data: exist } = await supabase
@@ -602,7 +602,8 @@ app.post("/facturas", async (req, res) => {
     // 4. Insertar items y descontar stock
     for (const item of items) {
       const subtotalItem = Number(item.precio_unitario) * Number(item.cantidad);
-      await supabase.from("factura_items").insert([{
+     
+ const { error: itemError } = await supabase.from("factura_items").insert([{
         factura_id: facturaId,
         tipo: item.tipo || "repuesto",
         descripcion: item.descripcion,
@@ -612,41 +613,38 @@ app.post("/facturas", async (req, res) => {
         subtotal: subtotalItem,
         inventario_id: item.inventario_id || null
       }]);
-      if (item.tipo === "repuesto" && item.inventario_id) {
-        const { data: prod } = await supabase.from("inventario").select("stock").eq("id", item.inventario_id).single();
-        if (prod) {
-          await supabase.from("inventario").update({ stock: prod.stock - Number(item.cantidad) }).eq("id", item.inventario_id);
-          await supabase.from("inventario_movimientos").insert([{
-            part_id: item.inventario_id,
-            tipo: "SALIDA",
-            cantidad: Number(item.cantidad),
-            descripcion: `Factura ${ncf}`,
-            created_at: new Date()
-          }]);
-        }
+
+    if (itemError) {
+  console.error("ERROR ITEM:", itemError);
+  return res.json({ error: itemError.message });
+}
       }
     }
 
     // 5. Marcar diagnóstico como FACTURADO
-    if (diagnostico_id) {
-      await supabase.from("diagnosticos").update({ estado: "FACTURADO" }).eq("id", diagnostico_id);
-    }
+ 
+ if (diagnostico_id) {
+  const { error: diagError } = await supabase
+    .from("diagnosticos")
+    .update({ estado: "FACTURADO" })
+    .eq("id", diagnostico_id);
 
+  if (diagError) console.error("ERROR DIAGNOSTICO:", diagError);
+}
     // 6. Registrar ingreso en caja
-    await supabase.from("caja_movimientos").insert([{
-      tipo: "INGRESO",
-      concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
-      monto: total,
-      metodo_pago: metodo_pago || "EFECTIVO",
-      factura_id: facturaId,
-      created_at: new Date()
-    }]);
+    
+const { error: cajaError } = await supabase.from("caja_movimientos").insert([{
+  tipo: "INGRESO",
+  concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+  monto: total,
+  metodo_pago: metodo_pago || "EFECTIVO",
+  factura_id: facturaId,
+  created_at: new Date()
+}]);
 
-    res.json(factura[0]);
-  } catch (err) {
-    console.error("Error creando factura:", err);
-    res.json({ error: err.message || "Error interno" });
-  }
+if (cajaError) {
+  console.error("ERROR CAJA:", cajaError);
+}
 });
 
 // IMPORTANTE: /facturas/:id/items debe ir ANTES de /facturas/:id
