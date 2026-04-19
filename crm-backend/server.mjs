@@ -674,6 +674,217 @@ app.delete("/ventas/:id", async (req, res) => {
   if (error) return res.json({ error: error.message });
   res.json({ ok: true });
 });
+
+// =====================================================
+// 🧾 FACTURACIÓN - CONSULTA RNC
+// =====================================================
+app.get("/facturacion/rnc/:rnc", async (req, res) => {
+  const { rnc } = req.params;
+
+  const { data } = await supabase
+    .from("clientes")
+    .select("*")
+    .eq("rnc", rnc)
+    .single();
+
+  if (!data) {
+    return res.json({
+      error: true,
+      mensaje: "RNC no encontrado"
+    });
+  }
+
+  res.json({
+    nombre: data.nombre,
+    rnc: data.rnc,
+    direccion: data.direccion || ""
+  });
+});
+
+// =====================================================
+// 🧾 FACTURAS — rutas nuevas (agregar antes de app.listen)
+// =====================================================
+
+// GET /facturas — listar todas
+app.get("/facturas", async (req, res) => {
+  const { data } = await supabase
+    .from("facturas")
+    .select("*")
+    .order("id", { ascending: false });
+  res.json(data || []);
+});
+
+// POST /facturas — crear factura con items mixtos
+// Acepta mano de obra (diagnostico) + repuestos (inventario) juntos
+app.post("/facturas", async (req, res) => {
+  const {
+    items,           // [{ tipo, descripcion, cantidad, precio_unitario, itbis_aplica, inventario_id }]
+    metodo_pago,
+    ncf_tipo,
+    cliente_id,
+    cliente_nombre,
+    cliente_rnc,
+    vehiculo_id,
+    vehiculo_info,
+    diagnostico_id,
+    notas
+  } = req.body;
+
+  if (!items || items.length === 0)
+    return res.json({ error: "Sin items en la factura" });
+
+  try {
+    // 1. Calcular totales
+    let subtotal = 0;
+    let itbis = 0;
+    for (const item of items) {
+      const linea = Number(item.precio_unitario) * Number(item.cantidad);
+      subtotal += linea;
+      if (item.itbis_aplica) itbis += linea * 0.18;
+    }
+    const total = subtotal + itbis;
+
+    // 2. Generar NCF secuencial
+    const tipo = ncf_tipo || "B02";
+    const { data: ncfData } = await supabase
+      .from("ncf_config")
+      .select("*")
+      .eq("tipo", tipo)
+      .single();
+
+    let ncf;
+    const fechaVence = new Date();
+    fechaVence.setFullYear(fechaVence.getFullYear() + 2);
+
+    if (ncfData) {
+      const nuevo = (ncfData.secuencia_actual || 0) + 1;
+      await supabase
+        .from("ncf_config")
+        .update({ secuencia_actual: nuevo })
+        .eq("tipo", tipo);
+      ncf = (ncfData.prefijo || tipo) + String(nuevo).padStart(8, "0");
+    } else {
+      ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
+    }
+
+    // 3. Insertar factura
+    const { data: factura, error: errFac } = await supabase
+      .from("facturas")
+      .insert([{
+        ncf,
+        ncf_tipo: tipo,
+        ncf_vence: fechaVence.toISOString().split("T")[0],
+        estado: "ACTIVA",
+        cliente_id: cliente_id || null,
+        cliente_nombre: cliente_nombre || "Consumidor Final",
+        cliente_rnc: cliente_rnc || null,
+        vehiculo_id: vehiculo_id || null,
+        vehiculo_info: vehiculo_info || null,
+        diagnostico_id: diagnostico_id || null,
+        subtotal,
+        itbis,
+        total,
+        metodo_pago: metodo_pago || "EFECTIVO",
+        notas: notas || null,
+        created_at: new Date()
+      }])
+      .select();
+
+    if (errFac) return res.json({ error: errFac.message });
+    const facturaId = factura[0].id;
+
+    // 4. Insertar items y descontar stock solo de repuestos
+    for (const item of items) {
+      const subtotalItem = Number(item.precio_unitario) * Number(item.cantidad);
+      await supabase.from("factura_items").insert([{
+        factura_id: facturaId,
+        tipo: item.tipo || "repuesto",
+        descripcion: item.descripcion,
+        cantidad: Number(item.cantidad),
+        precio_unitario: Number(item.precio_unitario),
+        itbis_aplica: item.itbis_aplica || false,
+        subtotal: subtotalItem,
+        inventario_id: item.inventario_id || null
+      }]);
+
+      // Solo descontar stock en repuestos con inventario_id válido
+      if (item.tipo === "repuesto" && item.inventario_id) {
+        const { data: prod } = await supabase
+          .from("inventario")
+          .select("stock")
+          .eq("id", item.inventario_id)
+          .single();
+        if (prod) {
+          await supabase
+            .from("inventario")
+            .update({ stock: prod.stock - Number(item.cantidad) })
+            .eq("id", item.inventario_id);
+          // Registrar movimiento
+          await supabase.from("inventario_movimientos").insert([{
+            part_id: item.inventario_id,
+            tipo: "SALIDA",
+            cantidad: Number(item.cantidad),
+            descripcion: `Factura ${ncf}`,
+            created_at: new Date()
+          }]);
+        }
+      }
+    }
+
+    // 5. Marcar diagnóstico como FACTURADO
+    if (diagnostico_id) {
+      await supabase
+        .from("diagnosticos")
+        .update({ estado: "FACTURADO" })
+        .eq("id", diagnostico_id);
+    }
+
+    // 6. Registrar ingreso en caja
+    await supabase.from("caja_movimientos").insert([{
+      tipo: "INGRESO",
+      concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+      monto: total,
+      metodo_pago: metodo_pago || "EFECTIVO",
+      factura_id: facturaId,
+      created_at: new Date()
+    }]);
+
+    res.json(factura[0]);
+  } catch (err) {
+    console.error("Error creando factura:", err);
+    res.json({ error: err.message || "Error interno" });
+  }
+});
+
+// GET /facturas/:id/items
+app.get("/facturas/:id/items", async (req, res) => {
+  const { id } = req.params;
+  const { data: factura } = await supabase
+    .from("facturas").select("*").eq("id", id).single();
+  if (!factura) return res.json({ error: "Factura no encontrada" });
+  const { data: items } = await supabase
+    .from("factura_items").select("*").eq("factura_id", id);
+  res.json({ factura, items: items || [] });
+});
+
+// PATCH /facturas/:id — actualizar estado / datos
+app.patch("/facturas/:id", async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase
+    .from("facturas").update(req.body).eq("id", id).select();
+  if (error) return res.json({ error: error.message });
+  res.json(data[0]);
+});
+
+// DELETE /facturas/:id — eliminar factura e items
+app.delete("/facturas/:id", async (req, res) => {
+  const { id } = req.params;
+  await supabase.from("factura_items").delete().eq("factura_id", id);
+  const { error } = await supabase.from("facturas").delete().eq("id", id);
+  if (error) return res.json({ error: error.message });
+  res.json({ ok: true });
+});
+
 // Por esto:
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {

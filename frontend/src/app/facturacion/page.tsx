@@ -2,337 +2,643 @@
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
 
+// ─── DATOS EMPRESA (actualiza con tu RNC real) ─────────────────────────────
 const EMPRESA = {
-  nombre: "SÓLIDO AUTO SERVICIO",
+  nombre: "SÓLIDO AUTO SERVICIO SRL",
   telefono: "809-712-2027",
-  rnc: "RNC: 000-000000-0",
-  direccion: "Santo Domingo, República Dominicana"
+  rnc: "1-32-XXXXX-X",
+  direccion: "Santo Domingo, República Dominicana",
+  email: "info@solidoauto.com",
+  logo: "/logo.png"
 };
 
-// Generador de HTML Unificado (Factura y Cotización)
-function generarHTML(venta, itemsFactura, clienteNombre, vehiculoInfo, esCotizacion = false) {
-  const subtotalFinal = Number(venta.subtotal || 0);
-  const itbisFinal = Number(venta.itbis || 0);
-  const totalFinal = Number(venta.total || 0);
-  
-  const fecha = new Date(venta.created_at || Date.now()).toLocaleString("es-DO", {
-    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
+// ─── GENERADOR HTML DGII COMPLIANT ─────────────────────────────────────────
+// Layout: empresa (izquierda) | info documento/NCF (derecha) — requerimiento DGII
+function generarHTML(
+  factura: any,
+  items: any[],
+  clienteExtra: any = {},
+  esCotizacion = false
+) {
+  const subtotal = Number(factura.subtotal || 0);
+  const itbis    = Number(factura.itbis    || 0);
+  const total    = Number(factura.total    || 0);
+
+  const fecha = new Date(factura.created_at || Date.now()).toLocaleString("es-DO", {
+    day: "2-digit", month: "2-digit", year: "numeric",
+    hour: "2-digit", minute: "2-digit"
   });
 
-  const lineas = itemsFactura.map(p => `
-    <tr>
-      <td style="padding:8px 6px;border-bottom:1px solid #eee;">${p.name}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #eee;text-align:center;">${p.qty}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #eee;text-align:right;">RD$ ${Number(p.price).toFixed(2)}</td>
-      <td style="padding:8px 6px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">RD$ ${(p.price * p.qty).toFixed(2)}</td>
-    </tr>`).join("");
+  const ncfVence = factura.ncf_vence
+    ? new Date(factura.ncf_vence).toLocaleDateString("es-DO")
+    : (() => {
+        const d = new Date(factura.created_at || Date.now());
+        d.setFullYear(d.getFullYear() + 2);
+        return d.toLocaleDateString("es-DO");
+      })();
 
-  const banner = esCotizacion 
-    ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:20px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN PREVENTIVA</div>`
-    : venta.estado === "CANCELADA"
-    ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:20px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
+  const lineas = items.map(p => {
+    const cant   = Number(p.cantidad ?? p.qty ?? 1);
+    const precio = Number(p.precio_unitario ?? p.price ?? 0);
+    const linea  = cant * precio;
+    return `
+      <tr>
+        <td style="padding:9px 8px;border-bottom:1px solid #eee;">
+          <div style="font-weight:600;">${p.descripcion ?? p.name ?? ""}</div>
+          ${p.tipo ? `<div style="font-size:11px;color:#888;text-transform:capitalize;">${String(p.tipo).replace("_", " ")}</div>` : ""}
+        </td>
+        <td style="padding:9px 8px;border-bottom:1px solid #eee;text-align:center;">${cant}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid #eee;text-align:right;">RD$ ${precio.toFixed(2)}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid #eee;text-align:center;">${p.itbis_aplica ? "18%" : "—"}</td>
+        <td style="padding:9px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">RD$ ${linea.toFixed(2)}</td>
+      </tr>`;
+  }).join("");
+
+  const banner = esCotizacion
+    ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN PREVENTIVA — Válida por 15 días</div>`
+    : factura.estado === "CANCELADA"
+    ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
     : "";
 
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
-    <title>${esCotizacion ? 'Cotización' : 'Factura'} ${venta.ncf || ''}</title>
-    <style>
-      *{margin:0;padding:0;box-sizing:border-box;}
-      body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:30px;max-width:720px;margin:auto;}
-      .header{text-align:center;border-bottom:3px solid #111;padding-bottom:18px;margin-bottom:20px;}
-      .logo-nombre{font-size:28px;font-weight:900;letter-spacing:2px;text-transform:uppercase;}
-      .logo-sub{font-size:13px;color:#555;margin-top:6px;line-height:1.6;}
-      .dos-col{display:flex;justify-content:space-between;gap:16px;margin-bottom:20px;}
-      .info-box{flex:1;background:#f8f8f8;border-radius:8px;padding:14px 16px;}
-      .info-box h3{font-size:10px;text-transform:uppercase;color:#888;margin-bottom:8px;letter-spacing:1px;}
-      .info-box p{margin-bottom:5px;font-size:13px;line-height:1.5;}
-      .ncf-box{background:${esCotizacion ? '#854d0e' : '#111'};color:#fff;text-align:center;padding:12px;border-radius:8px;margin:18px 0;}
-      .ncf-label{font-size:11px;letter-spacing:1px;opacity:0.7;margin-bottom:4px;}
-      .ncf-num{font-size:20px;font-weight:900;letter-spacing:3px;}
-      table{width:100%;border-collapse:collapse;margin-bottom:16px;}
-      thead th{background:#111;color:#fff;padding:10px 6px;font-size:12px;text-align:left;}
-      .totales{margin-left:auto;width:300px;margin-top:8px;}
-      .t-row{display:flex;justify-content:space-between;padding:7px 0;font-size:14px;border-bottom:1px solid #eee;}
-      .t-total{font-size:20px;font-weight:900;border-top:3px solid #111;border-bottom:none;padding-top:12px;margin-top:6px;}
-      .footer{text-align:center;margin-top:30px;padding-top:16px;border-top:1px dashed #ccc;color:#777;font-size:12px;line-height:2;}
-    </style></head><body>
-    <div class="header">
-      <div class="logo-nombre">🔧 ${EMPRESA.nombre}</div>
-      <div class="logo-sub">Tel: ${EMPRESA.telefono} &nbsp;|&nbsp; ${EMPRESA.direccion}<br/>${EMPRESA.rnc}</div>
-    </div>
-    ${banner}
-    <div class="dos-col">
-      <div class="info-box">
-        <h3>Datos del Documento</h3>
-        <p><b>${esCotizacion ? 'Cotización' : 'Factura'} #:</b> ${esCotizacion ? 'PRO-FORMA' : 'FAC-'+String(venta.id).padStart(5, "0")}</p>
-        <p><b>Fecha:</b> ${fecha}</p>
-        <p><b>Método:</b> ${venta.method}</p>
-        ${!esCotizacion ? `<p><b>Tipo NCF:</b> ${venta.ncf_tipo}</p>` : ''}
+  <title>${esCotizacion ? "Cotización" : "Factura"} ${factura.ncf || ""}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:30px;max-width:780px;margin:auto;}
+
+    /* CABECERA: empresa izquierda — documento derecha (DGII) */
+    .cabecera{display:flex;justify-content:space-between;align-items:flex-start;
+      border-bottom:3px solid #111;padding-bottom:18px;margin-bottom:20px;gap:24px;}
+
+    /* IZQUIERDA — EMPRESA */
+    .cab-empresa{flex:1.2;}
+    .cab-empresa img{height:56px;margin-bottom:8px;object-fit:contain;}
+    .empresa-nombre{font-size:18px;font-weight:900;letter-spacing:.5px;text-transform:uppercase;line-height:1.2;}
+    .empresa-meta{font-size:12px;color:#555;margin-top:6px;line-height:1.8;}
+
+    /* DERECHA — DOCUMENTO */
+    .cab-doc{flex:1;text-align:right;border-left:2px solid #f0f0f0;padding-left:20px;}
+    .doc-tipo{font-size:22px;font-weight:900;text-transform:uppercase;color:#111;}
+    .doc-num{font-size:14px;color:#444;margin-top:3px;font-weight:600;}
+    .doc-meta{font-size:12px;color:#666;margin-top:4px;line-height:1.7;}
+    .doc-badge{display:inline-block;background:#111;color:#fff;padding:3px 10px;border-radius:4px;
+      font-size:11px;font-weight:700;letter-spacing:.5px;margin-top:6px;}
+
+    /* NCF BAR */
+    .ncf-box{background:#1a1a2e;color:#fff;display:flex;justify-content:space-between;
+      align-items:center;padding:14px 20px;border-radius:8px;margin:18px 0;}
+    .ncf-label{font-size:10px;letter-spacing:1.5px;opacity:.55;margin-bottom:3px;text-transform:uppercase;}
+    .ncf-num{font-size:22px;font-weight:900;letter-spacing:4px;}
+    .ncf-right{text-align:right;font-size:12px;color:rgba(255,255,255,.65);line-height:1.8;}
+
+    /* DATOS DOS COLUMNAS */
+    .dos-col{display:flex;gap:14px;margin-bottom:20px;}
+    .info-box{flex:1;background:#f8f8f8;border-radius:8px;padding:14px 16px;border:1px solid #ebebeb;}
+    .info-box h3{font-size:10px;text-transform:uppercase;color:#888;margin-bottom:8px;
+      letter-spacing:1px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;}
+    .info-box p{margin-bottom:4px;font-size:13px;line-height:1.5;}
+
+    /* TABLA */
+    table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+    thead th{background:#111;color:#fff;padding:10px 8px;font-size:12px;text-align:left;}
+    thead th:nth-child(2),thead th:nth-child(4){text-align:center;}
+    thead th:nth-child(3),thead th:nth-child(5){text-align:right;}
+
+    /* TOTALES */
+    .totales{margin-left:auto;width:300px;margin-top:8px;}
+    .t-row{display:flex;justify-content:space-between;padding:7px 0;font-size:14px;border-bottom:1px solid #eee;}
+    .t-total{font-size:20px;font-weight:900;border-top:3px solid #111;border-bottom:none;
+      padding-top:12px;margin-top:6px;}
+
+    /* FOOTER */
+    .footer{text-align:center;margin-top:30px;padding-top:16px;
+      border-top:1px dashed #ccc;color:#777;font-size:12px;line-height:2;}
+    .dgii-note{font-size:10.5px;color:#aaa;margin-top:3px;}
+  </style></head><body>
+
+  <!-- CABECERA DGII: empresa izq | doc info der -->
+  <div class="cabecera">
+    <div class="cab-empresa">
+      <img src="${EMPRESA.logo}" alt="Logo" onerror="this.style.display='none'"/>
+      <div class="empresa-nombre">${EMPRESA.nombre}</div>
+      <div class="empresa-meta">
+        <strong>RNC:</strong> ${EMPRESA.rnc}<br/>
+        <strong>Tel:</strong> ${EMPRESA.telefono}<br/>
+        ${EMPRESA.direccion}<br/>
+        ${EMPRESA.email}
       </div>
-      <div class="info-box">
-        <h3>Cliente</h3>
-        <p><b>${clienteNombre}</b></p>
-        ${vehiculoInfo ? `<p>🚗 ${vehiculoInfo}</p>` : ""}
-      </div>
     </div>
-    ${!esCotizacion ? `
-    <div class="ncf-box">
+    <div class="cab-doc">
+      <div class="doc-tipo">${esCotizacion ? "Cotización" : "Factura"}</div>
+      <div class="doc-num">
+        ${esCotizacion
+          ? "PRO-FORMA"
+          : "FAC-" + String(factura.id).padStart(5, "0")}
+      </div>
+      <div class="doc-meta">
+        <strong>Fecha:</strong> ${fecha}<br/>
+        ${!esCotizacion ? `<strong>Vence NCF:</strong> ${ncfVence}<br/>` : ""}
+        <strong>Método:</strong> ${factura.metodo_pago || factura.method || "EFECTIVO"}<br/>
+        ${!esCotizacion ? `<strong>Tipo NCF:</strong> ${factura.ncf_tipo || "B02"}` : ""}
+      </div>
+      ${!esCotizacion ? `<div class="doc-badge">${factura.ncf_tipo || "B02"}</div>` : ""}
+    </div>
+  </div>
+
+  ${banner}
+
+  <!-- NCF -->
+  ${!esCotizacion ? `
+  <div class="ncf-box">
+    <div>
       <div class="ncf-label">Número de Comprobante Fiscal (NCF)</div>
-      <div class="ncf-num">${venta.ncf}</div>
-    </div>` : ''}
-    <table>
-      <thead><tr>
-        <th>Descripción</th>
-        <th style="text-align:center;">Cant.</th>
-        <th style="text-align:right;">Precio Unit.</th>
-        <th style="text-align:right;">Total</th>
-      </tr></thead>
-      <tbody>${lineas}</tbody>
-    </table>
-    <div class="totales">
-      <div class="t-row"><span>Subtotal:</span><span>RD$ ${subtotalFinal.toFixed(2)}</span></div>
-      <div class="t-row"><span>ITBIS (18%):</span><span>RD$ ${itbisFinal.toFixed(2)}</span></div>
-      <div class="t-row t-total"><span>TOTAL:</span><span>RD$ ${totalFinal.toFixed(2)}</span></div>
+      <div class="ncf-num">${factura.ncf || "—"}</div>
     </div>
-    <div class="footer">
-      <p>¡Gracias por confiar en <b>${EMPRESA.nombre}</b>!</p>
-      ${esCotizacion ? '<p>Esta cotización tiene una validez de 15 días.</p>' : ''}
-      <p style="font-size:11px;color:#aaa;margin-top:6px;">Documento fiscal válido según la DGII — República Dominicana</p>
+    <div class="ncf-right">
+      Tipo: ${factura.ncf_tipo || "B02"}<br/>
+      Vencimiento: ${ncfVence}<br/>
+      ${factura.estado === "CANCELADA" ? "⚠️ CANCELADA" : "✓ Vigente"}
     </div>
-    <script>window.onload=function(){window.print();}</script>
-    </body></html>`;
+  </div>` : ""}
+
+  <!-- CLIENTE + VEHÍCULO -->
+  <div class="dos-col">
+    <div class="info-box">
+      <h3>Cliente</h3>
+      <p><strong>${factura.cliente_nombre || clienteExtra?.nombre || "Consumidor Final"}</strong></p>
+      ${(factura.cliente_rnc || clienteExtra?.rnc) ? `<p>RNC/Cédula: ${factura.cliente_rnc || clienteExtra.rnc}</p>` : ""}
+      ${clienteExtra?.telefono ? `<p>Tel: ${clienteExtra.telefono}</p>` : ""}
+      ${clienteExtra?.direccion ? `<p>${clienteExtra.direccion}</p>` : ""}
+    </div>
+    <div class="info-box">
+      <h3>Vehículo</h3>
+      ${factura.vehiculo_info
+        ? `<p>🚗 ${factura.vehiculo_info}</p>`
+        : "<p style='color:#888'>Sin vehículo asociado</p>"}
+    </div>
+  </div>
+
+  <!-- ITEMS -->
+  <table>
+    <thead><tr>
+      <th>Descripción</th>
+      <th style="text-align:center;">Cant.</th>
+      <th style="text-align:right;">Precio Unit.</th>
+      <th style="text-align:center;">ITBIS</th>
+      <th style="text-align:right;">Total</th>
+    </tr></thead>
+    <tbody>${lineas}</tbody>
+  </table>
+
+  <!-- TOTALES -->
+  <div class="totales">
+    <div class="t-row"><span>Subtotal:</span><span>RD$ ${subtotal.toFixed(2)}</span></div>
+    <div class="t-row"><span>ITBIS (18%):</span><span>RD$ ${itbis.toFixed(2)}</span></div>
+    <div class="t-row t-total"><span>TOTAL:</span><span>RD$ ${total.toFixed(2)}</span></div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer">
+    <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
+    ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}
+    <p class="dgii-note">Documento fiscal emitido conforme a la Norma General 06-2018 de la DGII — República Dominicana</p>
+    <p class="dgii-note">Valide este comprobante en: <strong>www.dgii.gov.do</strong></p>
+  </div>
+
+  <script>window.onload=function(){window.print();}</script>
+  </body></html>`;
 }
 
-function abrirImpresion(html) {
-  const w = window.open("", "_blank", "width=780,height=950");
+function abrirImpresion(html: string) {
+  const w = window.open("", "_blank", "width=820,height=1000");
   if (w) { w.document.write(html); w.document.close(); }
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
 export default function FacturaPage() {
-  const [clientes, setClientes] = useState([]);
-  const [vehiculos, setVehiculos] = useState([]);
-  const [items, setItems] = useState([]);
-  const [ventas, setVentas] = useState([]);
-  const [diagnosticos, setDiagnosticos] = useState([]);
-  const [carrito, setCarrito] = useState([]);
-  const [clienteId, setClienteId] = useState("");
-  const [vehiculoId, setVehiculoId] = useState("");
-  const [method, setMethod] = useState("EFECTIVO");
-  const [ncfTipo, setNcfTipo] = useState("B02");
-  const [loading, setLoading] = useState(false);
-  const [tab, setTab] = useState("nueva");
-  const [busqueda, setBusqueda] = useState("");
-  const [buscandoHistorial, setBuscandoHistorial] = useState("");
-  const [ultimaVenta, setUltimaVenta] = useState(null);
-  const [montoRecibido, setMontoRecibido] = useState("");
-  const [modalVenta, setModalVenta] = useState(null);
+  const [clientes, setClientes]         = useState<any[]>([]);
+  const [vehiculos, setVehiculos]       = useState<any[]>([]);
+  const [items, setItems]               = useState<any[]>([]);
+  const [facturas, setFacturas]         = useState<any[]>([]);
+  const [diagnosticos, setDiagnosticos] = useState<any[]>([]);
+  const [carrito, setCarrito]           = useState<any[]>([]);
+
+  const [clienteId, setClienteId]             = useState("");
+  const [clienteSeleccionado, setClienteSel]  = useState<any>(null);
+  const [vehiculoId, setVehiculoId]           = useState("");
+  const [method, setMethod]                   = useState("EFECTIVO");
+  const [ncfTipo, setNcfTipo]                 = useState("B02");
+  const [loading, setLoading]                 = useState(false);
+  const [tab, setTab]                         = useState("nueva");
+  const [busqueda, setBusqueda]               = useState("");
+  const [busHistorial, setBusHistorial]       = useState("");
+  const [ultimaFactura, setUltimaFactura]     = useState<any>(null);
+  const [montoRecibido, setMontoRecibido]     = useState("");
+  const [diagCargado, setDiagCargado]         = useState<number | null>(null);
+
+  // Búsqueda RNC/nombre
+  const [busqRNC, setBusqRNC]   = useState("");
+  const [resultRNC, setResultRNC] = useState<any[]>([]);
+  const [modoRNC, setModoRNC]   = useState(false);
+
+  // Modal edición historial
+  const [modalFac, setModalFac]       = useState<any>(null);
   const [modalMethod, setModalMethod] = useState("EFECTIVO");
-  const [modalNcfTipo, setModalNcfTipo] = useState("B02");
   const [modalCliente, setModalCliente] = useState("");
 
+  // ── Carga inicial ────────────────────────────────────────────────────────
   const fetchData = async () => {
     try {
-      const [cRes, vRes, iRes, ventasRes, dRes] = await Promise.all([
+      const [cRes, vRes, iRes, fRes, dRes] = await Promise.all([
         fetch(`${API}/clientes`),
         fetch(`${API}/vehiculos`),
         fetch(`${API}/inventario`),
-        fetch(`${API}/ventas`),
+        fetch(`${API}/facturas`),
         fetch(`${API}/diagnosticos`)
       ]);
-
-      const c = await cRes.json(); const v = await vRes.json();
-      const i = await iRes.json(); const vt = await ventasRes.json();
-      const d = await dRes.json();
-
-      setClientes(Array.isArray(c) ? c : []);
-      setVehiculos(Array.isArray(v) ? v : []);
-      setItems(Array.isArray(i) ? i : []);
-      setVentas(Array.isArray(vt) ? vt : []);
-      setDiagnosticos(Array.isArray(d) ? d.filter(item => item.estado !== 'FACTURADO') : []);
+      setClientes(await cRes.json() || []);
+      setVehiculos(await vRes.json() || []);
+      setItems(await iRes.json() || []);
+      setFacturas(await fRes.json() || []);
+      const diags = await dRes.json() || [];
+      // Solo diagnósticos que NO estén facturados ni completados sin cotización
+      setDiagnosticos(diags.filter((d: any) =>
+        d.estado !== "FACTURADO" && d.costo_estimado
+      ));
     } catch (err) { console.error(err); }
   };
 
   useEffect(() => { fetchData(); }, []);
 
-  const vehiculosFiltrados = vehiculos.filter(v => Number(v.cliente_id) === Number(clienteId));
-  const itemsFiltrados = items.filter(i => !busqueda || i.name.toLowerCase().includes(busqueda.toLowerCase()));
-  const ventasFiltradas = ventas.filter(v => 
-    !buscandoHistorial || 
-    v.customer_name?.toLowerCase().includes(buscandoHistorial.toLowerCase()) || 
-    v.ncf?.toLowerCase().includes(buscandoHistorial.toLowerCase())
-  );
-
-  const subtotal = carrito.reduce((acc, p) => acc + p.price * p.qty, 0);
-  const itbis = subtotal * 0.18;
-  const total = subtotal + itbis;
-  const vuelto = Number(montoRecibido || 0) - total;
-
-  const cargarDiagnostico = (diag) => {
-    setClienteId(diag.cliente_id);
-    setVehiculoId(diag.vehiculo_id);
-    
-    const manoDeObra = {
-      id: `MO-${diag.id}`,
-      name: `MANO DE OBRA: ${diag.detalle_tecnico || 'Servicio técnico'}`,
-      price: diag.costo_estimado || 0,
-      qty: 1,
-      stock: 999 
-    };
-    
-    setCarrito([manoDeObra]);
-    alert("Diagnóstico cargado correctamente.");
+  // ── Búsqueda cliente por RNC/nombre ─────────────────────────────────────
+  const buscarCliente = (q: string) => {
+    setBusqRNC(q);
+    if (q.length < 2) { setResultRNC([]); return; }
+    setResultRNC(
+      clientes.filter(c =>
+        c.nombre?.toLowerCase().includes(q.toLowerCase()) ||
+        c.rnc?.includes(q) ||
+        c.telefono?.includes(q)
+      ).slice(0, 8)
+    );
   };
 
-  const addItem = (item) => {
+  const seleccionarCliente = (c: any) => {
+    setClienteSel(c);
+    setClienteId(String(c.id));
+    setVehiculoId("");
+    setNcfTipo(c.tipo_cliente === "contribuyente" ? "B01" : "B02");
+    setBusqRNC("");
+    setResultRNC([]);
+    setModoRNC(false);
+  };
+
+  // ── Cargar diagnóstico ───────────────────────────────────────────────────
+  const cargarDiagnostico = (diag: any) => {
+    // Setear cliente
+    const cli = clientes.find((c: any) => c.id === Number(diag.cliente_id));
+    if (cli) { setClienteSel(cli); setClienteId(String(cli.id)); }
+    setVehiculoId(String(diag.vehiculo_id));
+    setDiagCargado(diag.id);
+
+    // Descripción de la mano de obra
+    const descripcionMO = diag.mano_de_obra_detalle?.trim()
+      ? diag.mano_de_obra_detalle
+      : diag.tipo_servicio
+        ? `Mano de Obra — ${diag.tipo_servicio}`
+        : "Mano de Obra Técnica";
+
+    const precioMO = Number(diag.costo_estimado || 0);
+
+    const itemMO = {
+      id:              `MO-${diag.id}`,
+      descripcion:     descripcionMO,
+      tipo:            "mano_obra",
+      precio_unitario: precioMO,
+      cantidad:        1,
+      itbis_aplica:    false,
+      inventario_id:   null,
+      _diagId:         diag.id
+    };
+
+    // Reemplazar MO previa si existe, agregar si no
+    setCarrito(prev => [
+      itemMO,
+      ...prev.filter(p => !String(p.id).startsWith("MO-"))
+    ]);
+  };
+
+  // ── Inventario / carrito ──────────────────────────────────────────────────
+  const vehiculosFiltrados = vehiculos.filter(v =>
+    Number(v.cliente_id) === Number(clienteId)
+  );
+
+  const itemsFiltrados = items.filter(i =>
+    !busqueda ||
+    i.name?.toLowerCase().includes(busqueda.toLowerCase()) ||
+    i.code?.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const addItem = (item: any) => {
     if (item.stock <= 0) return alert("Sin stock disponible");
     const exists = carrito.find(p => p.id === item.id);
     if (exists) {
-      if (exists.qty >= item.stock) return alert("Stock insuficiente");
-      setCarrito(carrito.map(p => p.id === item.id ? { ...p, qty: p.qty + 1 } : p));
+      if (exists.cantidad >= item.stock) return alert("Stock insuficiente");
+      setCarrito(carrito.map(p =>
+        p.id === item.id ? { ...p, cantidad: p.cantidad + 1 } : p
+      ));
     } else {
-      setCarrito([...carrito, { ...item, qty: 1 }]);
+      setCarrito([...carrito, {
+        id:              item.id,
+        descripcion:     item.name,
+        tipo:            "repuesto",
+        precio_unitario: Number(item.price),
+        cantidad:        1,
+        itbis_aplica:    true,
+        inventario_id:   item.id
+      }]);
     }
   };
 
-  const updateQty = (id, qty) => {
-    if (qty <= 0) { setCarrito(carrito.filter(p => p.id !== id)); return; }
-    const itemOriginal = items.find(i => i.id === id);
-    if (itemOriginal && qty > itemOriginal.stock) {
-      alert("No hay suficiente stock");
-      return;
-    }
-    setCarrito(carrito.map(p => p.id === id ? { ...p, qty } : p));
+  const updateCantidad = (id: any, cant: number) => {
+    if (cant <= 0) { setCarrito(carrito.filter(p => p.id !== id)); return; }
+    const orig = items.find(i => i.id === id);
+    if (orig && cant > orig.stock) { alert("Stock insuficiente"); return; }
+    setCarrito(carrito.map(p => p.id === id ? { ...p, cantidad: cant } : p));
   };
 
+  // ── Totales ───────────────────────────────────────────────────────────────
+  const subtotal = carrito.reduce(
+    (acc, p) => acc + Number(p.precio_unitario) * Number(p.cantidad), 0
+  );
+  const itbis = carrito
+    .filter(p => p.itbis_aplica)
+    .reduce((acc, p) => acc + Number(p.precio_unitario) * Number(p.cantidad) * 0.18, 0);
+  const total  = subtotal + itbis;
+  const vuelto = Number(montoRecibido || 0) - total;
+
+  // ── Cotización (sin guardar en BD) ────────────────────────────────────────
   const handleCotizacion = () => {
     if (carrito.length === 0) return alert("Carrito vacío");
     const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
-    const vehiculoInfo = veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "";
-    const clienteNombre = clientes.find(c => c.id === Number(clienteId))?.nombre || "Consumidor Final";
-    
-    const mockVenta = { subtotal, itbis, total, method: method, created_at: new Date() };
-    abrirImpresion(generarHTML(mockVenta, carrito, clienteNombre, vehiculoInfo, true));
+    const mockFac = {
+      subtotal, itbis, total,
+      metodo_pago: method,
+      vehiculo_info: veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "",
+      cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
+      cliente_rnc:    clienteSeleccionado?.rnc || "",
+      created_at: new Date()
+    };
+    abrirImpresion(generarHTML(mockFac, carrito, clienteSeleccionado, true));
   };
 
+  // ── Generar factura real ──────────────────────────────────────────────────
   const generarFactura = async () => {
     if (carrito.length === 0) return alert("Carrito vacío");
-    if (Number(montoRecibido) > 0 && vuelto < 0) return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
+    if (Number(montoRecibido) > 0 && vuelto < 0)
+      return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
+
     setLoading(true);
     const snap = [...carrito];
     try {
-      const res = await fetch(`${API}/ventas`, {
+      const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
+
+      const body = {
+        items: snap.map(p => ({
+          tipo:            p.tipo,
+          descripcion:     p.descripcion,
+          cantidad:        p.cantidad,
+          precio_unitario: p.precio_unitario,
+          itbis_aplica:    p.itbis_aplica,
+          inventario_id:   p.inventario_id || null
+        })),
+        metodo_pago:    method,
+        ncf_tipo:       ncfTipo,
+        subtotal,
+        itbis,
+        total,
+        cliente_id:     clienteId ? Number(clienteId) : null,
+        cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
+        cliente_rnc:    clienteSeleccionado?.rnc || null,
+        vehiculo_id:    vehiculoId ? Number(vehiculoId) : null,
+        vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : null,
+        diagnostico_id: diagCargado || null
+      };
+
+      const res  = await fetch(`${API}/facturas`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          items: snap.map(p => ({ partId: typeof p.id === 'string' ? null : p.id, name: p.name, price: p.price, quantity: p.qty })),
-          method,
-          customer_name: clientes.find(c => c.id === Number(clienteId))?.nombre || "Consumidor Final",
-          ncf_tipo: ncfTipo,
-          subtotal, itbis, total
-        })
+        body: JSON.stringify(body)
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
 
-      const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
-      const vehiculoInfo = veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "";
-      const clienteNombre = clientes.find(c => c.id === Number(clienteId))?.nombre || "Consumidor Final";
-      
-      setUltimaVenta({ venta: data, items: snap });
-      abrirImpresion(generarHTML(data, snap, clienteNombre, vehiculoInfo));
-      setCarrito([]); setClienteId(""); setVehiculoId(""); setMontoRecibido("");
+      setUltimaFactura({ factura: data, items: snap });
+      abrirImpresion(generarHTML(data, snap, clienteSeleccionado, false));
+
+      // Limpiar formulario
+      setCarrito([]); setClienteId(""); setClienteSel(null);
+      setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
       fetchData();
-    } catch { alert("Error generando factura"); }
+    } catch (e: any) { alert("Error generando factura: " + e.message); }
     finally { setLoading(false); }
   };
 
-  const reimprimirDesdeHistorial = async (venta) => {
+  // ── Historial ─────────────────────────────────────────────────────────────
+  const reimprimirFactura = async (fac: any) => {
     try {
-      const res = await fetch(`${API}/ventas/${venta.id}/items`);
+      const res  = await fetch(`${API}/facturas/${fac.id}/items`);
       const data = await res.json();
-      abrirImpresion(generarHTML(venta, data.items || [], venta.customer_name || "Consumidor Final", ""));
-    } catch { alert("Error al cargar ítems"); }
+      abrirImpresion(generarHTML(fac, data.items || [], {}, false));
+    } catch { alert("Error al cargar items"); }
   };
 
-  const eliminarFactura = async (id) => {
-    if (!confirm(`¿Eliminar permanentemente FAC-${String(id).padStart(5, "0")}?`)) return;
-    try {
-      const res = await fetch(`${API}/ventas/${id}`, { method: "DELETE" });
-      const data = await res.json();
-      if (data.error) return alert(data.error);
-      fetchData();
-    } catch { alert("Error al eliminar"); }
+  const cancelarFactura = async (fac: any) => {
+    if (!confirm(`¿Cancelar FAC-${String(fac.id).padStart(5,"0")}?`)) return;
+    await fetch(`${API}/facturas/${fac.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ estado: "CANCELADA" })
+    });
+    fetchData();
   };
 
-  const cancelarFactura = async (venta) => {
-    if (!confirm(`¿Cancelar FAC-${String(venta.id).padStart(5, "0")}?`)) return;
-    try {
-      await fetch(`${API}/ventas/${venta.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ estado: "CANCELADA" })
-      });
-      fetchData();
-    } catch { alert("Error al cancelar"); }
+  const eliminarFactura = async (id: number) => {
+    if (!confirm(`¿Eliminar permanentemente FAC-${String(id).padStart(5,"0")}?`)) return;
+    await fetch(`${API}/facturas/${id}`, { method: "DELETE" });
+    fetchData();
   };
 
   const guardarEdicion = async () => {
-    if (!modalVenta) return;
-    try {
-      await fetch(`${API}/ventas/${modalVenta.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ method: modalMethod, ncf_tipo: modalNcfTipo, customer_name: modalCliente })
-      });
-      setModalVenta(null);
-      fetchData();
-    } catch { alert("Error al guardar"); }
+    if (!modalFac) return;
+    await fetch(`${API}/facturas/${modalFac.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ metodo_pago: modalMethod, cliente_nombre: modalCliente })
+    });
+    setModalFac(null);
+    fetchData();
   };
 
+  const facturasFiltradas = facturas.filter(f =>
+    !busHistorial ||
+    f.cliente_nombre?.toLowerCase().includes(busHistorial.toLowerCase()) ||
+    f.ncf?.toLowerCase().includes(busHistorial.toLowerCase())
+  );
+
+  // ═════════════════════════════════════════════════════════════════════════
   return (
     <div style={container}>
-      <h1 style={title}>🧾 Facturación y Taller — {EMPRESA.nombre}</h1>
+      <h1 style={title}>🧾 Facturación — {EMPRESA.nombre}</h1>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         {["nueva", "historial"].map(t => (
           <button key={t} onClick={() => setTab(t)}
-            style={{ ...tabBtn, background: tab === t ? "#111827" : "#fff", color: tab === t ? "#fff" : "#111" }}>
-            {t === "nueva" ? "➕ Facturación / Cotización" : `📋 Historial (${ventas.length})`}
+            style={{ ...tabBtn,
+              background: tab === t ? "#111827" : "#fff",
+              color:      tab === t ? "#fff"    : "#111" }}>
+            {t === "nueva"
+              ? "➕ Nueva Factura / Cotización"
+              : `📋 Historial (${facturas.length})`}
           </button>
         ))}
       </div>
 
+      {/* ══════════════ NUEVA FACTURA ══════════════ */}
       {tab === "nueva" && (
         <div style={grid}>
+
           {/* COLUMNA IZQUIERDA */}
           <div>
+
+            {/* CARGAR DIAGNÓSTICO */}
             <div style={{ ...card, marginBottom: 16, border: "2px solid #3b82f6" }}>
               <h2 style={{ ...cardTitle, color: "#1e40af" }}>📋 Cargar Diagnóstico Técnico</h2>
-              <select style={input} onChange={(e) => {
-                const d = diagnosticos.find(x => x.id === Number(e.target.value));
-                if (d) cargarDiagnostico(d);
-              }}>
-                <option value="">-- Seleccionar diagnóstico pendiente --</option>
-                {diagnosticos.map(d => (
-                  <option key={d.id} value={d.id}>Diag #{d.id} - {d.cliente_nombre} ({d.vehiculo_marca})</option>
-                ))}
-              </select>
+              <p style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+                Selecciona un diagnóstico aprobado para cargar la mano de obra automáticamente.
+              </p>
+              {diagnosticos.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#94a3b8", fontStyle: "italic" }}>
+                  Sin diagnósticos pendientes de facturar.
+                </p>
+              ) : (
+                <select style={input} value="" onChange={e => {
+                  const d = diagnosticos.find((x: any) => x.id === Number(e.target.value));
+                  if (d) cargarDiagnostico(d);
+                }}>
+                  <option value="">— Seleccionar diagnóstico —</option>
+                  {diagnosticos.map((d: any) => (
+                    <option key={d.id} value={d.id}>
+                      #{d.id} · {d.tipo_servicio} · {d.cliente_nombre} · {d.vehiculo_info}
+                      {d.costo_estimado ? ` · RD$${Number(d.costo_estimado).toLocaleString()}` : ""}
+                    </option>
+                  ))}
+                </select>
+              )}
+              {diagCargado && (
+                <div style={{ marginTop: 8, background: "#eff6ff", border: "1px solid #bfdbfe",
+                  borderRadius: 8, padding: "8px 12px", fontSize: 13, color: "#1e40af",
+                  display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span>✅ Diagnóstico #{diagCargado} cargado</span>
+                  <button onClick={() => {
+                    setDiagCargado(null);
+                    setCarrito(prev => prev.filter(p => !String(p.id).startsWith("MO-")));
+                  }} style={{ background: "none", border: "none", color: "#ef4444",
+                    cursor: "pointer", fontWeight: 700 }}>✕</button>
+                </div>
+              )}
             </div>
 
+            {/* CLIENTE */}
             <div style={{ ...card, marginBottom: 16 }}>
-              <h2 style={cardTitle}>👤 Cliente y Vehículo</h2>
-              <label style={label}>Cliente</label>
-              <select value={clienteId} onChange={e => { setClienteId(e.target.value); setVehiculoId(""); }} style={input}>
-                <option value="">Consumidor Final</option>
-                {clientes.map(c => <option key={c.id} value={c.id}>{c.nombre}</option>)}
-              </select>
+              <h2 style={cardTitle}>👤 Cliente y Documento</h2>
 
+              <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                {["Lista", "Buscar por nombre / RNC"].map((label, i) => (
+                  <button key={i} onClick={() => setModoRNC(i === 1)}
+                    style={{ ...tabBtn, fontSize: 12, padding: "7px 14px",
+                      background: modoRNC === (i === 1) ? "#111827" : "#fff",
+                      color:      modoRNC === (i === 1) ? "#fff"    : "#111" }}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+
+              {/* Selector clásico */}
+              {!modoRNC && (
+                <>
+                  <label style={label}>Cliente</label>
+                  <select value={clienteId} onChange={e => {
+                    setClienteId(e.target.value);
+                    setVehiculoId("");
+                    const cli = clientes.find((c: any) => c.id === Number(e.target.value));
+                    setClienteSel(cli || null);
+                    if (cli?.tipo_cliente === "contribuyente") setNcfTipo("B01");
+                  }} style={input}>
+                    <option value="">Consumidor Final</option>
+                    {clientes.map((c: any) => (
+                      <option key={c.id} value={c.id}>
+                        {c.nombre}{c.rnc ? ` (RNC: ${c.rnc})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </>
+              )}
+
+              {/* Búsqueda por RNC/nombre */}
+              {modoRNC && (
+                <div style={{ position: "relative", marginBottom: 12 }}>
+                  <label style={label}>Buscar por nombre o RNC</label>
+                  <input value={busqRNC} onChange={e => buscarCliente(e.target.value)}
+                    placeholder="Escribe nombre o RNC..." style={input} />
+                  {resultRNC.length > 0 && (
+                    <div style={{ position: "absolute", top: "100%", left: 0, right: 0,
+                      background: "#fff", border: "1px solid #ddd", borderRadius: 8,
+                      zIndex: 50, boxShadow: "0 8px 24px rgba(0,0,0,.15)",
+                      maxHeight: 240, overflowY: "auto" }}>
+                      {resultRNC.map((c: any) => (
+                        <div key={c.id} onClick={() => seleccionarCliente(c)}
+                          style={{ padding: "11px 14px", cursor: "pointer",
+                            borderBottom: "1px solid #f0f0f0", fontSize: 13,
+                            display: "flex", justifyContent: "space-between" }}>
+                          <span style={{ fontWeight: 600 }}>{c.nombre}</span>
+                          <span style={{ color: "#888", fontSize: 12 }}>
+                            {c.rnc ? `RNC: ${c.rnc}` : c.telefono}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {clienteSeleccionado && (
+                    <div style={{ background: "#f0fdf4", border: "1px solid #86efac",
+                      borderRadius: 8, padding: "10px 14px", marginTop: 8,
+                      display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 14 }}>{clienteSeleccionado.nombre}</div>
+                        <div style={{ fontSize: 12, color: "#555", marginTop: 2 }}>
+                          {clienteSeleccionado.rnc ? `RNC: ${clienteSeleccionado.rnc} · ` : ""}
+                          {clienteSeleccionado.telefono}
+                        </div>
+                      </div>
+                      <button onClick={() => { setClienteSel(null); setClienteId(""); }}
+                        style={{ background: "none", border: "none", color: "#ef4444",
+                          cursor: "pointer", fontSize: 18 }}>✕</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Vehículo */}
               {clienteId && (
                 <>
                   <label style={label}>Vehículo</label>
-                  <select value={vehiculoId} onChange={e => setVehiculoId(e.target.value)} style={input}>
+                  <select value={vehiculoId} onChange={e => setVehiculoId(e.target.value)}
+                    style={input}>
                     <option value="">— Sin vehículo —</option>
-                    {vehiculosFiltrados.map(v => (
-                      <option key={v.id} value={v.id}>{v.marca} {v.modelo} · {v.placa}</option>
+                    {vehiculosFiltrados.map((v: any) => (
+                      <option key={v.id} value={v.id}>
+                        {v.marca} {v.modelo} · {v.placa}
+                      </option>
                     ))}
                   </select>
                 </>
@@ -341,154 +647,275 @@ export default function FacturaPage() {
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <label style={label}>Tipo NCF</label>
-                  <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)} style={input}>
+                  <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)}
+                    style={input}>
                     <option value="B02">B02 — Consumidor Final</option>
                     <option value="B01">B01 — Crédito Fiscal</option>
+                    <option value="B14">B14 — Régimen Especial</option>
                     <option value="B15">B15 — Gubernamental</option>
                   </select>
                 </div>
                 <div style={{ flex: 1 }}>
                   <label style={label}>Método de pago</label>
                   <select value={method} onChange={e => setMethod(e.target.value)} style={input}>
-                    <option value="EFECTIVO">Efectivo</option>
-                    <option value="TARJETA">Tarjeta</option>
-                    <option value="TRANSFERENCIA">Transferencia</option>
+                    <option value="EFECTIVO">💵 Efectivo</option>
+                    <option value="TARJETA">💳 Tarjeta</option>
+                    <option value="TRANSFERENCIA">🏦 Transferencia</option>
+                    <option value="CHEQUE">📄 Cheque</option>
                   </select>
                 </div>
               </div>
             </div>
 
+            {/* REPUESTOS */}
             <div style={card}>
-              <h2 style={cardTitle}>📦 Repuestos del Inventario</h2>
-              <input placeholder="Buscar repuesto..." value={busqueda}
-                onChange={e => setBusqueda(e.target.value)} style={{ ...input, marginBottom: 12 }} />
+              <h2 style={cardTitle}>🔩 Repuestos del Inventario</h2>
+              <input placeholder="🔍 Buscar repuesto o código..." value={busqueda}
+                onChange={e => setBusqueda(e.target.value)}
+                style={{ ...input, marginBottom: 12 }} />
               <div style={{ maxHeight: 280, overflowY: "auto" }}>
-                {itemsFiltrados.map(i => (
+                {itemsFiltrados.map((i: any) => (
                   <div key={i.id} style={productoRow}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{i.name}</div>
-                      <div style={{ fontSize: 12, color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>Stock: {i.stock}</div>
+                      <div style={{ fontSize: 12,
+                        color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>
+                        Stock: {i.stock}
+                        {i.code ? ` · Cód: ${i.code}` : ""}
+                      </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontWeight: 700 }}>RD$ {Number(i.price).toFixed(2)}</span>
+                      <span style={{ fontWeight: 700 }}>
+                        RD$ {Number(i.price).toFixed(2)}
+                      </span>
                       <button onClick={() => addItem(i)} disabled={i.stock <= 0}
-                        style={{ ...btnAdd, background: i.stock <= 0 ? "#ccc" : "#111827" }}>+ Agregar</button>
+                        style={{ ...btnAdd,
+                          background: i.stock <= 0 ? "#ccc" : "#111827" }}>
+                        + Agregar
+                      </button>
                     </div>
                   </div>
                 ))}
+                {itemsFiltrados.length === 0 && (
+                  <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>
+                    Sin resultados
+                  </p>
+                )}
               </div>
             </div>
           </div>
 
-          {/* COLUMNA DERECHA */}
+          {/* COLUMNA DERECHA — CARRITO */}
           <div style={card}>
             <h2 style={cardTitle}>🛒 Detalle de Servicios y Piezas</h2>
+
             {carrito.length === 0 ? (
-              <p style={{ color: "#888", textAlign: "center", padding: 40 }}>Carrito vacío</p>
-            ) : carrito.map(p => (
-              <div key={p.id} style={carritoRow}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 600 }}>{p.name}</div>
-                  <div style={{ fontSize: 12, color: "#888" }}>RD$ {Number(p.price).toFixed(2)} c/u</div>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <button onClick={() => updateQty(p.id, p.qty - 1)} style={btnQty}>−</button>
-                  <span style={{ fontWeight: 700, minWidth: 24, textAlign: "center" }}>{p.qty}</span>
-                  <button onClick={() => updateQty(p.id, p.qty + 1)} style={btnQty}>+</button>
-                  <span style={{ minWidth: 90, textAlign: "right", fontWeight: 600 }}>RD$ {(p.price * p.qty).toFixed(2)}</span>
+              <div style={{ color: "#888", textAlign: "center", padding: 40 }}>
+                <div style={{ fontSize: 32, marginBottom: 8 }}>🛒</div>
+                <div>Carrito vacío</div>
+                <div style={{ fontSize: 12, marginTop: 6 }}>
+                  Carga un diagnóstico o agrega repuestos
                 </div>
               </div>
-            ))}
+            ) : (
+              carrito.map(p => (
+                <div key={p.id} style={carritoRow}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 3 }}>
+                      <span style={{
+                        fontSize: 10,
+                        background: p.tipo === "mano_obra" ? "#fef3c7" : "#dcfce7",
+                        color:      p.tipo === "mano_obra" ? "#92400e" : "#166534",
+                        padding: "2px 7px", borderRadius: 4, fontWeight: 700
+                      }}>
+                        {p.tipo === "mano_obra" ? "MANO OBRA" : "REPUESTO"}
+                      </span>
+                    </div>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{p.descripcion}</div>
+                    <div style={{ fontSize: 12, color: "#888" }}>
+                      RD$ {Number(p.precio_unitario).toFixed(2)} c/u ·{" "}
+                      {p.itbis_aplica ? "ITBIS 18%" : "Sin ITBIS"}
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <button onClick={() => updateCantidad(p.id, p.cantidad - 1)}
+                      style={btnQty}>−</button>
+                    <span style={{ fontWeight: 700, minWidth: 24, textAlign: "center" }}>
+                      {p.cantidad}
+                    </span>
+                    <button onClick={() => updateCantidad(p.id, p.cantidad + 1)}
+                      style={btnQty}>+</button>
+                    <span style={{ minWidth: 90, textAlign: "right", fontWeight: 600 }}>
+                      RD$ {(Number(p.precio_unitario) * Number(p.cantidad)).toFixed(2)}
+                    </span>
+                  </div>
+                </div>
+              ))
+            )}
 
+            {/* TOTALES */}
             <div style={totalesBox}>
-              <div style={totalesRow}><span>Subtotal</span><span>RD$ {subtotal.toFixed(2)}</span></div>
-              <div style={totalesRow}><span>ITBIS (18%)</span><span>RD$ {itbis.toFixed(2)}</span></div>
-              <div style={{ ...totalesRow, fontWeight: 700, fontSize: 18, borderTop: "2px solid #e2e8f0", paddingTop: 10, marginTop: 4 }}>
-                <span>TOTAL</span><span>RD$ {total.toFixed(2)}</span>
+              <div style={totalesRow}>
+                <span>Subtotal</span>
+                <span>RD$ {subtotal.toFixed(2)}</span>
+              </div>
+              <div style={totalesRow}>
+                <span>ITBIS (18%)</span>
+                <span>RD$ {itbis.toFixed(2)}</span>
+              </div>
+              <div style={{ ...totalesRow, fontWeight: 700, fontSize: 18,
+                borderTop: "2px solid #e2e8f0", paddingTop: 10, marginTop: 4 }}>
+                <span>TOTAL</span>
+                <span>RD$ {total.toFixed(2)}</span>
               </div>
             </div>
 
+            {/* VUELTO */}
             <div style={vueltoBx}>
-              <label style={label}>💵 Recibido (RD$)</label>
-              <input type="number" value={montoRecibido} onChange={e => setMontoRecibido(e.target.value)} placeholder="0.00"
-                style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a" }} />
+              <label style={label}>💵 Monto recibido (RD$)</label>
+              <input type="number" value={montoRecibido}
+                onChange={e => setMontoRecibido(e.target.value)}
+                placeholder="0.00"
+                style={{ ...input, fontSize: 18, fontWeight: 700,
+                  borderColor: "#fde68a" }} />
               {Number(montoRecibido) > 0 && (
-                <div style={{ marginTop: 10, padding: "10px", borderRadius: 8, textAlign: "center", background: vuelto >= 0 ? "#dcfce7" : "#fee2e2", color: vuelto >= 0 ? "#166534" : "#dc2626", fontWeight: 800, fontSize: 20 }}>
-                  {vuelto >= 0 ? `Vuelto: RD$ ${vuelto.toFixed(2)}` : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
+                <div style={{ marginTop: 10, padding: 10, borderRadius: 8,
+                  textAlign: "center",
+                  background: vuelto >= 0 ? "#dcfce7" : "#fee2e2",
+                  color:      vuelto >= 0 ? "#166534" : "#dc2626",
+                  fontWeight: 800, fontSize: 20 }}>
+                  {vuelto >= 0
+                    ? `Vuelto: RD$ ${vuelto.toFixed(2)}`
+                    : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
                 </div>
               )}
             </div>
 
+            {/* BOTONES */}
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button onClick={handleCotizacion} style={{ ...btnFacturar, background: "#64748b", marginTop: 0 }}>📄 Cotización</button>
-              <button onClick={generarFactura} disabled={loading || carrito.length === 0}
-                style={{ ...btnFacturar, background: carrito.length === 0 ? "#aaa" : "#10b981", marginTop: 0, flex: 2 }}>
-                {loading ? "Procesando..." : `🖨️ Facturar`}
+              <button onClick={handleCotizacion}
+                style={{ ...btnFacturar, background: "#64748b", marginTop: 0 }}>
+                📄 Cotización
+              </button>
+              <button onClick={generarFactura}
+                disabled={loading || carrito.length === 0}
+                style={{ ...btnFacturar,
+                  background: carrito.length === 0 ? "#aaa" : "#10b981",
+                  marginTop: 0, flex: 2 }}>
+                {loading ? "Procesando..." : "🖨️ Facturar"}
               </button>
             </div>
 
-            {ultimaVenta && (
-              <button onClick={() => abrirImpresion(generarHTML(ultimaVenta.venta, ultimaVenta.items, ultimaVenta.venta.customer_name, ""))} style={btnReimprimir}>
-                🔁 Reimprimir FAC-{String(ultimaVenta.venta.id).padStart(5, "0")}
+            {ultimaFactura && (
+              <button onClick={() =>
+                abrirImpresion(generarHTML(
+                  ultimaFactura.factura, ultimaFactura.items, {}, false
+                ))
+              } style={btnReimprimir}>
+                🔁 Reimprimir FAC-{String(ultimaFactura.factura.id).padStart(5, "0")}
               </button>
             )}
           </div>
         </div>
       )}
 
-      {/* HISTORIAL */}
+      {/* ══════════════ HISTORIAL ══════════════ */}
       {tab === "historial" && (
         <div style={card}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
-            <h2 style={cardTitle}>📋 Historial de Ventas</h2>
+          <div style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "center", marginBottom: 16 }}>
+            <h2 style={cardTitle}>📋 Historial de Facturas</h2>
             <input placeholder="Buscar por cliente o NCF..."
-              value={buscandoHistorial} onChange={e => setBuscandoHistorial(e.target.value)}
+              value={busHistorial}
+              onChange={e => setBusHistorial(e.target.value)}
               style={{ ...input, width: 280, marginBottom: 0 }} />
           </div>
           <div style={{ overflowX: "auto" }}>
-            <table style={table}>
+            <table style={tableStyle}>
               <thead>
-                <tr>{["Factura", "NCF", "Tipo", "Cliente", "Método", "Total", "Estado", "Fecha", "Acciones"].map(h => <th key={h} style={th}>{h}</th>)}</tr>
+                <tr>
+                  {["Factura","NCF","Tipo","Cliente","RNC","Método","Total","Estado","Fecha","Acciones"]
+                    .map(h => <th key={h} style={th}>{h}</th>)}
+                </tr>
               </thead>
               <tbody>
-                {ventasFiltradas.map(v => {
-                  const cancelada = v.estado === "CANCELADA";
+                {facturasFiltradas.map((f: any) => {
+                  const cancelada = f.estado === "CANCELADA";
                   return (
-                    <tr key={v.id} style={{ opacity: cancelada ? 0.6 : 1 }}>
-                      <td style={td}><b>FAC-{String(v.id).padStart(5, "0")}</b></td>
-                      <td style={{ ...td, fontSize: 11 }}>{v.ncf}</td>
-                      <td style={td}>{v.ncf_tipo}</td>
-                      <td style={td}>{v.customer_name}</td>
-                      <td style={td}>{v.method}</td>
-                      <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(v.total).toFixed(2)}</td>
-                      <td style={td}>{cancelada ? "🔴 CANCELADA" : "🟢 ACTIVA"}</td>
-                      <td style={{ ...td, fontSize: 11 }}>{new Date(v.created_at).toLocaleString("es-DO")}</td>
+                    <tr key={f.id} style={{ opacity: cancelada ? 0.6 : 1 }}>
+                      <td style={td}><b>FAC-{String(f.id).padStart(5,"0")}</b></td>
+                      <td style={{ ...td, fontSize: 11, fontFamily: "monospace" }}>{f.ncf}</td>
+                      <td style={td}>{f.ncf_tipo}</td>
+                      <td style={td}>{f.cliente_nombre}</td>
+                      <td style={{ ...td, fontSize: 12, color: "#888" }}>{f.cliente_rnc || "—"}</td>
+                      <td style={td}>{f.metodo_pago}</td>
+                      <td style={{ ...td, fontWeight: 700 }}>
+                        RD$ {Number(f.total).toFixed(2)}
+                      </td>
+                      <td style={td}>
+                        {cancelada ? "🔴 CANCELADA" : "🟢 ACTIVA"}
+                      </td>
+                      <td style={{ ...td, fontSize: 11 }}>
+                        {f.created_at
+                          ? new Date(f.created_at).toLocaleString("es-DO")
+                          : "—"}
+                      </td>
                       <td style={td}>
                         <div style={{ display: "flex", gap: 4 }}>
-                          <button onClick={() => reimprimirDesdeHistorial(v)} style={btnAcc("#111827")}>🖨️</button>
-                          {!cancelada && <button onClick={() => cancelarFactura(v)} style={btnAcc("#f59e0b")}>⛔</button>}
-                          <button onClick={() => eliminarFactura(v.id)} style={btnAcc("#dc2626")}>🗑️</button>
+                          <button onClick={() => reimprimirFactura(f)}
+                            style={btnAcc("#111827")}>🖨️</button>
+                          {!cancelada && (
+                            <button onClick={() => cancelarFactura(f)}
+                              style={btnAcc("#f59e0b")}>⛔</button>
+                          )}
+                          <button onClick={() => eliminarFactura(f.id)}
+                            style={btnAcc("#dc2626")}>🗑️</button>
                         </div>
                       </td>
                     </tr>
                   );
                 })}
+                {facturasFiltradas.length === 0 && (
+                  <tr>
+                    <td colSpan={10} style={{ textAlign: "center",
+                      color: "#888", padding: 32 }}>
+                      Sin facturas registradas
+                    </td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* MODAL EDITAR */}
-      {modalVenta && (
+      {/* ══════════════ MODAL EDITAR ══════════════ */}
+      {modalFac && (
         <div style={overlay}>
           <div style={modal}>
             <h2 style={{ marginBottom: 16 }}>✏️ Editar Factura</h2>
             <label style={label}>Cliente</label>
-            <input value={modalCliente} onChange={e => setModalCliente(e.target.value)} style={input} />
-            <div style={{ display: "flex", gap: 10 }}>
-              <button onClick={guardarEdicion} style={{ flex: 1, padding: 12, background: "#111827", color: "#fff", borderRadius: 8 }}>💾 Guardar</button>
-              <button onClick={() => setModalVenta(null)} style={{ flex: 1, padding: 12, background: "#eee", borderRadius: 8 }}>Cerrar</button>
+            <input value={modalCliente}
+              onChange={e => setModalCliente(e.target.value)} style={input} />
+            <label style={label}>Método de pago</label>
+            <select value={modalMethod}
+              onChange={e => setModalMethod(e.target.value)} style={input}>
+              <option value="EFECTIVO">💵 Efectivo</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+            </select>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={guardarEdicion}
+                style={{ flex: 1, padding: 12, background: "#111827",
+                  color: "#fff", borderRadius: 8, border: "none",
+                  cursor: "pointer", fontWeight: 700 }}>
+                💾 Guardar
+              </button>
+              <button onClick={() => setModalFac(null)}
+                style={{ flex: 1, padding: 12, background: "#eee",
+                  borderRadius: 8, border: "none", cursor: "pointer" }}>
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
@@ -497,27 +924,27 @@ export default function FacturaPage() {
   );
 }
 
-// ESTILOS
-const container: React.CSSProperties = { padding: "20px", background: "#f5f7fb", minHeight: "100vh" };
-const title: React.CSSProperties = { fontSize: "24px", fontWeight: "bold", marginBottom: "20px" };
-const grid: React.CSSProperties = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px" };
-const card: React.CSSProperties = { background: "#fff", padding: "20px", borderRadius: "15px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
-const cardTitle: React.CSSProperties = { marginBottom: "15px", fontSize: "18px", fontWeight: "600" };
-const tabBtn: React.CSSProperties = { padding: "10px 20px", borderRadius: "8px", border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
-const label: React.CSSProperties = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
-const input: React.CSSProperties = { display: "block", marginBottom: "12px", padding: "12px", width: "100%", borderRadius: "8px", border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
+// ─── ESTILOS ───────────────────────────────────────────────────────────────
+const container: React.CSSProperties  = { padding: 20, background: "#f5f7fb", minHeight: "100vh" };
+const title: React.CSSProperties      = { fontSize: 24, fontWeight: "bold", marginBottom: 20 };
+const grid: React.CSSProperties       = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 };
+const card: React.CSSProperties       = { background: "#fff", padding: 20, borderRadius: 15, boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
+const cardTitle: React.CSSProperties  = { marginBottom: 14, fontSize: 18, fontWeight: 600 };
+const tabBtn: React.CSSProperties     = { padding: "10px 20px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
+const label: React.CSSProperties      = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
+const input: React.CSSProperties      = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
 const productoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0" };
-const carritoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0", gap: 8 };
-const totalesBox: React.CSSProperties = { marginTop: 16, padding: 16, background: "#f8fafc", borderRadius: 10 };
-const totalesRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 };
-const vueltoBx: React.CSSProperties = { marginTop: 12, padding: 14, background: "#fefce8", borderRadius: 10, border: "1px solid #fde68a" };
-const btnAdd: React.CSSProperties = { padding: "6px 14px", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontSize: 13, whiteSpace: "nowrap" };
-const btnQty: React.CSSProperties = { padding: "2px 10px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: "6px", cursor: "pointer", fontWeight: "bold" };
-const btnFacturar: React.CSSProperties = { padding: "14px", color: "#fff", border: "none", borderRadius: "8px", cursor: "pointer", width: "100%", marginTop: 16, fontSize: 16, fontWeight: 700 };
-const btnReimprimir: React.CSSProperties = { padding: "10px", background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: "8px", cursor: "pointer", width: "100%", marginTop: 10, fontSize: 13 };
+const carritoRow: React.CSSProperties  = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0", gap: 8 };
+const totalesBox: React.CSSProperties  = { marginTop: 16, padding: 16, background: "#f8fafc", borderRadius: 10 };
+const totalesRow: React.CSSProperties  = { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 };
+const vueltoBx: React.CSSProperties    = { marginTop: 12, padding: 14, background: "#fefce8", borderRadius: 10, border: "1px solid #fde68a" };
+const btnAdd: React.CSSProperties      = { padding: "6px 14px", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 };
+const btnQty: React.CSSProperties      = { padding: "2px 10px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 6, cursor: "pointer", fontWeight: "bold" };
+const btnFacturar: React.CSSProperties = { padding: 14, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 16, fontSize: 16, fontWeight: 700 };
+const btnReimprimir: React.CSSProperties = { padding: 10, background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 10, fontSize: 13 };
 const btnAcc = (bg: string): React.CSSProperties => ({ padding: "5px 9px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 });
-const table: React.CSSProperties = { width: "100%", borderCollapse: "collapse" };
-const th: React.CSSProperties = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
-const td: React.CSSProperties = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
-const overlay: React.CSSProperties = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
-const modal: React.CSSProperties = { background: "#fff", padding: 28, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
+const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse" };
+const th: React.CSSProperties         = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
+const td: React.CSSProperties         = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
+const overlay: React.CSSProperties    = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
+const modal: React.CSSProperties      = { background: "#fff", padding: 28, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
