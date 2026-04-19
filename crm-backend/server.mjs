@@ -867,6 +867,19 @@ app.get("/facturas/:id/items", async (req, res) => {
   res.json({ factura, items: items || [] });
 });
 
+app.get("/facturas", async (req, res) => {
+  const { data, error } = await supabase
+    .from("facturas")
+    .select("*")
+    .order("id", { ascending: false });
+
+  if (error) {
+    return res.json({ error: error.message });
+  }
+
+  res.json(data || []);
+});
+
 // PATCH /facturas/:id — actualizar estado / datos
 app.patch("/facturas/:id", async (req, res) => {
   const { id } = req.params;
