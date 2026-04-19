@@ -335,30 +335,33 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 // COTIZACIONES
 app.post("/cotizaciones", async (req, res) => {
   const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
-  const totalcalculado = Number(mano_obra) + Number(repuestos);
-  const { data: exist } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
-  let result;
-  if (exist) {
-    const { data } = await supabase.from("cotizaciones").update({ mano_obra, repuestos, total, totalcalculado, tiempo_estimado, notas }).eq("diagnostico_id", diagnostico_id).select();
-    result = data?.[0];
-  } else {
-    const { data } = await supabase.from("cotizaciones").insert([{ diagnostico_id, mano_obra, repuestos, total,totalcalculado, tiempo_estimado, notas }]).select();
-    result = data?.[0];
-  }
+  
 
-// 🔥 GUARDAR MANO DE OBRA DETALLADA EN DIAGNÓSTICO
-if (mano_de_obra_detalle) {
-  await supabase
-    .from("diagnosticos")
-    .update({
-      mano_de_obra_detalle,
-      costo_estimado: totalCalculado
-    })
-    .eq("id", diagnostico_id);
+// ✅ Código corregido // 🔥 GUARDAR MANO DE OBRA DETALLADA EN DIAGNÓSTICO
+// ✅ REEMPLAZAR CON ESTO
+const totalCalculado = Number(mano_obra) + Number(repuestos); // nombre consistente
+
+const { data: exist } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
+let result;
+if (exist) {
+  const { data } = await supabase.from("cotizaciones").update({ mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas }).eq("diagnostico_id", diagnostico_id).select();
+  result = data?.[0];
+} else {
+  const { data } = await supabase.from("cotizaciones").insert([{ diagnostico_id, mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas }]).select();
+  result = data?.[0];
 }
 
-  await supabase.from("diagnosticos").update({ estado: "COTIZADO" }).eq("id", diagnostico_id);
-  res.json(result);
+// ✅ Siempre actualizar costo_estimado, con o sin detalle de mano de obra
+await supabase
+  .from("diagnosticos")
+  .update({
+    ...(mano_de_obra_detalle ? { mano_de_obra_detalle } : {}),
+    costo_estimado: totalCalculado
+  })
+  .eq("id", diagnostico_id);
+
+
+res.json(result);
 });
 
 app.patch("/cotizaciones/:id/aprobar", async (req, res) => {

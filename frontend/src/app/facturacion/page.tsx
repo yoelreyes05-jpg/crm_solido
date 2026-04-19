@@ -263,7 +263,7 @@ export default function FacturaPage() {
       const diags = await dRes.json() || [];
       // Solo diagnósticos que NO estén facturados ni completados sin cotización
       setDiagnosticos(diags.filter((d: any) =>
-        d.estado !== "FACTURADO" && d.costo_estimado
+        d.estado !== "FACTURADO" 
       ));
     } catch (err) { console.error(err); }
   };
