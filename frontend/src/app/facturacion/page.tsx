@@ -2,7 +2,7 @@
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
 
-// ─── DATOS EMPRESA (actualiza con tu RNC real) ─────────────────────────────
+// ─── DATOS EMPRESA ──────nueva ────────────────────────────────────────────────────
 const EMPRESA = {
   nombre: "SÓLIDO AUTO SERVICIO SRL",
   telefono: "809-712-2027",
@@ -12,23 +12,13 @@ const EMPRESA = {
   logo: "/logo.png"
 };
 
-// ─── GENERADOR HTML DGII COMPLIANT ─────────────────────────────────────────
-// Layout: empresa (izquierda) | info documento/NCF (derecha) — requerimiento DGII
-function generarHTML(
-  factura: any,
-  items: any[],
-  clienteExtra: any = {},
-  esCotizacion = false
-) {
+function generarHTML(factura: any, items: any[], clienteExtra: any = {}, esCotizacion = false) {
   const subtotal = Number(factura.subtotal || 0);
   const itbis    = Number(factura.itbis    || 0);
   const total    = Number(factura.total    || 0);
-
   const fecha = new Date(factura.created_at || Date.now()).toLocaleString("es-DO", {
-    day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit"
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit"
   });
-
   const ncfVence = factura.ncf_vence
     ? new Date(factura.ncf_vence).toLocaleDateString("es-DO")
     : (() => {
@@ -36,7 +26,6 @@ function generarHTML(
         d.setFullYear(d.getFullYear() + 2);
         return d.toLocaleDateString("es-DO");
       })();
-
   const lineas = items.map(p => {
     const cant   = Number(p.cantidad ?? p.qty ?? 1);
     const precio = Number(p.precio_unitario ?? p.price ?? 0);
@@ -53,7 +42,6 @@ function generarHTML(
         <td style="padding:9px 8px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">RD$ ${linea.toFixed(2)}</td>
       </tr>`;
   }).join("");
-
   const banner = esCotizacion
     ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN PREVENTIVA — Válida por 15 días</div>`
     : factura.estado === "CANCELADA"
@@ -65,76 +53,43 @@ function generarHTML(
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:30px;max-width:780px;margin:auto;}
-
-    /* CABECERA: empresa izquierda — documento derecha (DGII) */
-    .cabecera{display:flex;justify-content:space-between;align-items:flex-start;
-      border-bottom:3px solid #111;padding-bottom:18px;margin-bottom:20px;gap:24px;}
-
-    /* IZQUIERDA — EMPRESA */
+    .cabecera{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111;padding-bottom:18px;margin-bottom:20px;gap:24px;}
     .cab-empresa{flex:1.2;}
     .cab-empresa img{height:56px;margin-bottom:8px;object-fit:contain;}
     .empresa-nombre{font-size:18px;font-weight:900;letter-spacing:.5px;text-transform:uppercase;line-height:1.2;}
     .empresa-meta{font-size:12px;color:#555;margin-top:6px;line-height:1.8;}
-
-    /* DERECHA — DOCUMENTO */
     .cab-doc{flex:1;text-align:right;border-left:2px solid #f0f0f0;padding-left:20px;}
     .doc-tipo{font-size:22px;font-weight:900;text-transform:uppercase;color:#111;}
     .doc-num{font-size:14px;color:#444;margin-top:3px;font-weight:600;}
     .doc-meta{font-size:12px;color:#666;margin-top:4px;line-height:1.7;}
-    .doc-badge{display:inline-block;background:#111;color:#fff;padding:3px 10px;border-radius:4px;
-      font-size:11px;font-weight:700;letter-spacing:.5px;margin-top:6px;}
-
-    /* NCF BAR */
-    .ncf-box{background:#1a1a2e;color:#fff;display:flex;justify-content:space-between;
-      align-items:center;padding:14px 20px;border-radius:8px;margin:18px 0;}
+    .doc-badge{display:inline-block;background:#111;color:#fff;padding:3px 10px;border-radius:4px;font-size:11px;font-weight:700;letter-spacing:.5px;margin-top:6px;}
+    .ncf-box{background:#1a1a2e;color:#fff;display:flex;justify-content:space-between;align-items:center;padding:14px 20px;border-radius:8px;margin:18px 0;}
     .ncf-label{font-size:10px;letter-spacing:1.5px;opacity:.55;margin-bottom:3px;text-transform:uppercase;}
     .ncf-num{font-size:22px;font-weight:900;letter-spacing:4px;}
     .ncf-right{text-align:right;font-size:12px;color:rgba(255,255,255,.65);line-height:1.8;}
-
-    /* DATOS DOS COLUMNAS */
     .dos-col{display:flex;gap:14px;margin-bottom:20px;}
     .info-box{flex:1;background:#f8f8f8;border-radius:8px;padding:14px 16px;border:1px solid #ebebeb;}
-    .info-box h3{font-size:10px;text-transform:uppercase;color:#888;margin-bottom:8px;
-      letter-spacing:1px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;}
+    .info-box h3{font-size:10px;text-transform:uppercase;color:#888;margin-bottom:8px;letter-spacing:1px;border-bottom:1px solid #e2e8f0;padding-bottom:4px;}
     .info-box p{margin-bottom:4px;font-size:13px;line-height:1.5;}
-
-    /* TABLA */
     table{width:100%;border-collapse:collapse;margin-bottom:16px;}
     thead th{background:#111;color:#fff;padding:10px 8px;font-size:12px;text-align:left;}
     thead th:nth-child(2),thead th:nth-child(4){text-align:center;}
     thead th:nth-child(3),thead th:nth-child(5){text-align:right;}
-
-    /* TOTALES */
     .totales{margin-left:auto;width:300px;margin-top:8px;}
     .t-row{display:flex;justify-content:space-between;padding:7px 0;font-size:14px;border-bottom:1px solid #eee;}
-    .t-total{font-size:20px;font-weight:900;border-top:3px solid #111;border-bottom:none;
-      padding-top:12px;margin-top:6px;}
-
-    /* FOOTER */
-    .footer{text-align:center;margin-top:30px;padding-top:16px;
-      border-top:1px dashed #ccc;color:#777;font-size:12px;line-height:2;}
+    .t-total{font-size:20px;font-weight:900;border-top:3px solid #111;border-bottom:none;padding-top:12px;margin-top:6px;}
+    .footer{text-align:center;margin-top:30px;padding-top:16px;border-top:1px dashed #ccc;color:#777;font-size:12px;line-height:2;}
     .dgii-note{font-size:10.5px;color:#aaa;margin-top:3px;}
   </style></head><body>
-
-  <!-- CABECERA DGII: empresa izq | doc info der -->
   <div class="cabecera">
     <div class="cab-empresa">
       <img src="${EMPRESA.logo}" alt="Logo" onerror="this.style.display='none'"/>
       <div class="empresa-nombre">${EMPRESA.nombre}</div>
-      <div class="empresa-meta">
-        <strong>RNC:</strong> ${EMPRESA.rnc}<br/>
-        <strong>Tel:</strong> ${EMPRESA.telefono}<br/>
-        ${EMPRESA.direccion}<br/>
-        ${EMPRESA.email}
-      </div>
+      <div class="empresa-meta"><strong>RNC:</strong> ${EMPRESA.rnc}<br/><strong>Tel:</strong> ${EMPRESA.telefono}<br/>${EMPRESA.direccion}<br/>${EMPRESA.email}</div>
     </div>
     <div class="cab-doc">
       <div class="doc-tipo">${esCotizacion ? "Cotización" : "Factura"}</div>
-      <div class="doc-num">
-        ${esCotizacion
-          ? "PRO-FORMA"
-          : "FAC-" + String(factura.id).padStart(5, "0")}
-      </div>
+      <div class="doc-num">${esCotizacion ? "PRO-FORMA" : "FAC-" + String(factura.id).padStart(5, "0")}</div>
       <div class="doc-meta">
         <strong>Fecha:</strong> ${fecha}<br/>
         ${!esCotizacion ? `<strong>Vence NCF:</strong> ${ncfVence}<br/>` : ""}
@@ -144,24 +99,12 @@ function generarHTML(
       ${!esCotizacion ? `<div class="doc-badge">${factura.ncf_tipo || "B02"}</div>` : ""}
     </div>
   </div>
-
   ${banner}
-
-  <!-- NCF -->
   ${!esCotizacion ? `
   <div class="ncf-box">
-    <div>
-      <div class="ncf-label">Número de Comprobante Fiscal (NCF)</div>
-      <div class="ncf-num">${factura.ncf || "—"}</div>
-    </div>
-    <div class="ncf-right">
-      Tipo: ${factura.ncf_tipo || "B02"}<br/>
-      Vencimiento: ${ncfVence}<br/>
-      ${factura.estado === "CANCELADA" ? "⚠️ CANCELADA" : "✓ Vigente"}
-    </div>
+    <div><div class="ncf-label">Número de Comprobante Fiscal (NCF)</div><div class="ncf-num">${factura.ncf || "—"}</div></div>
+    <div class="ncf-right">Tipo: ${factura.ncf_tipo || "B02"}<br/>Vencimiento: ${ncfVence}<br/>${factura.estado === "CANCELADA" ? "⚠️ CANCELADA" : "✓ Vigente"}</div>
   </div>` : ""}
-
-  <!-- CLIENTE + VEHÍCULO -->
   <div class="dos-col">
     <div class="info-box">
       <h3>Cliente</h3>
@@ -172,13 +115,9 @@ function generarHTML(
     </div>
     <div class="info-box">
       <h3>Vehículo</h3>
-      ${factura.vehiculo_info
-        ? `<p>🚗 ${factura.vehiculo_info}</p>`
-        : "<p style='color:#888'>Sin vehículo asociado</p>"}
+      ${factura.vehiculo_info ? `<p>🚗 ${factura.vehiculo_info}</p>` : "<p style='color:#888'>Sin vehículo asociado</p>"}
     </div>
   </div>
-
-  <!-- ITEMS -->
   <table>
     <thead><tr>
       <th>Descripción</th>
@@ -189,22 +128,17 @@ function generarHTML(
     </tr></thead>
     <tbody>${lineas}</tbody>
   </table>
-
-  <!-- TOTALES -->
   <div class="totales">
     <div class="t-row"><span>Subtotal:</span><span>RD$ ${subtotal.toFixed(2)}</span></div>
     <div class="t-row"><span>ITBIS (18%):</span><span>RD$ ${itbis.toFixed(2)}</span></div>
     <div class="t-row t-total"><span>TOTAL:</span><span>RD$ ${total.toFixed(2)}</span></div>
   </div>
-
-  <!-- FOOTER -->
   <div class="footer">
     <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
     ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}
     <p class="dgii-note">Documento fiscal emitido conforme a la Norma General 06-2018 de la DGII — República Dominicana</p>
     <p class="dgii-note">Valide este comprobante en: <strong>www.dgii.gov.do</strong></p>
   </div>
-
   <script>window.onload=function(){window.print();}</script>
   </body></html>`;
 }
@@ -236,14 +170,12 @@ export default function FacturaPage() {
   const [montoRecibido, setMontoRecibido]     = useState("");
   const [diagCargado, setDiagCargado]         = useState<number | null>(null);
 
-  // Búsqueda RNC/nombre
-  const [busqRNC, setBusqRNC]   = useState("");
+  const [busqRNC, setBusqRNC]     = useState("");
   const [resultRNC, setResultRNC] = useState<any[]>([]);
-  const [modoRNC, setModoRNC]   = useState(false);
+  const [modoRNC, setModoRNC]     = useState(false);
 
-  // Modal edición historial
-  const [modalFac, setModalFac]       = useState<any>(null);
-  const [modalMethod, setModalMethod] = useState("EFECTIVO");
+  const [modalFac, setModalFac]         = useState<any>(null);
+  const [modalMethod, setModalMethod]   = useState("EFECTIVO");
   const [modalCliente, setModalCliente] = useState("");
 
   // ── Carga inicial ────────────────────────────────────────────────────────
@@ -261,10 +193,9 @@ export default function FacturaPage() {
       setItems(await iRes.json() || []);
       setFacturas(await fRes.json() || []);
       const diags = await dRes.json() || [];
-      // Solo diagnósticos que NO estén facturados ni completados sin cotización
-      setDiagnosticos(diags.filter((d: any) =>
-        d.estado !== "FACTURADO" 
-      ));
+      // ✅ FIX: mostrar todos los diagnósticos no facturados,
+      //    sin importar si costo_estimado es 0 o null
+      setDiagnosticos(diags.filter((d: any) => d.estado !== "FACTURADO"));
     } catch (err) { console.error(err); }
   };
 
@@ -295,13 +226,11 @@ export default function FacturaPage() {
 
   // ── Cargar diagnóstico ───────────────────────────────────────────────────
   const cargarDiagnostico = (diag: any) => {
-    // Setear cliente
     const cli = clientes.find((c: any) => c.id === Number(diag.cliente_id));
     if (cli) { setClienteSel(cli); setClienteId(String(cli.id)); }
     setVehiculoId(String(diag.vehiculo_id));
     setDiagCargado(diag.id);
 
-    // Descripción de la mano de obra
     const descripcionMO = diag.mano_de_obra_detalle?.trim()
       ? diag.mano_de_obra_detalle
       : diag.tipo_servicio
@@ -321,7 +250,6 @@ export default function FacturaPage() {
       _diagId:         diag.id
     };
 
-    // Reemplazar MO previa si existe, agregar si no
     setCarrito(prev => [
       itemMO,
       ...prev.filter(p => !String(p.id).startsWith("MO-"))
@@ -402,7 +330,6 @@ export default function FacturaPage() {
     const snap = [...carrito];
     try {
       const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
-
       const body = {
         items: snap.map(p => ({
           tipo:            p.tipo,
@@ -436,7 +363,6 @@ export default function FacturaPage() {
       setUltimaFactura({ factura: data, items: snap });
       abrirImpresion(generarHTML(data, snap, clienteSeleccionado, false));
 
-      // Limpiar formulario
       setCarrito([]); setClienteId(""); setClienteSel(null);
       setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
       fetchData();
@@ -486,7 +412,7 @@ export default function FacturaPage() {
     f.ncf?.toLowerCase().includes(busHistorial.toLowerCase())
   );
 
-  // ═════════════════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════════════════════════════════════
   return (
     <div style={container}>
       <h1 style={title}>🧾 Facturación — {EMPRESA.nombre}</h1>
@@ -497,9 +423,7 @@ export default function FacturaPage() {
             style={{ ...tabBtn,
               background: tab === t ? "#111827" : "#fff",
               color:      tab === t ? "#fff"    : "#111" }}>
-            {t === "nueva"
-              ? "➕ Nueva Factura / Cotización"
-              : `📋 Historial (${facturas.length})`}
+            {t === "nueva" ? "➕ Nueva Factura / Cotización" : `📋 Historial (${facturas.length})`}
           </button>
         ))}
       </div>
@@ -530,7 +454,7 @@ export default function FacturaPage() {
                   {diagnosticos.map((d: any) => (
                     <option key={d.id} value={d.id}>
                       #{d.id} · {d.tipo_servicio} · {d.cliente_nombre} · {d.vehiculo_info}
-                      {d.costo_estimado ? ` · RD$${Number(d.costo_estimado).toLocaleString()}` : ""}
+                      {d.costo_estimado ? ` · RD$${Number(d.costo_estimado).toLocaleString()}` : " · Sin costo asignado"}
                     </option>
                   ))}
                 </select>
@@ -552,7 +476,6 @@ export default function FacturaPage() {
             {/* CLIENTE */}
             <div style={{ ...card, marginBottom: 16 }}>
               <h2 style={cardTitle}>👤 Cliente y Documento</h2>
-
               <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
                 {["Lista", "Buscar por nombre / RNC"].map((label, i) => (
                   <button key={i} onClick={() => setModoRNC(i === 1)}
@@ -564,7 +487,6 @@ export default function FacturaPage() {
                 ))}
               </div>
 
-              {/* Selector clásico */}
               {!modoRNC && (
                 <>
                   <label style={label}>Cliente</label>
@@ -585,7 +507,6 @@ export default function FacturaPage() {
                 </>
               )}
 
-              {/* Búsqueda por RNC/nombre */}
               {modoRNC && (
                 <div style={{ position: "relative", marginBottom: 12 }}>
                   <label style={label}>Buscar por nombre o RNC</label>
@@ -628,17 +549,13 @@ export default function FacturaPage() {
                 </div>
               )}
 
-              {/* Vehículo */}
               {clienteId && (
                 <>
                   <label style={label}>Vehículo</label>
-                  <select value={vehiculoId} onChange={e => setVehiculoId(e.target.value)}
-                    style={input}>
+                  <select value={vehiculoId} onChange={e => setVehiculoId(e.target.value)} style={input}>
                     <option value="">— Sin vehículo —</option>
                     {vehiculosFiltrados.map((v: any) => (
-                      <option key={v.id} value={v.id}>
-                        {v.marca} {v.modelo} · {v.placa}
-                      </option>
+                      <option key={v.id} value={v.id}>{v.marca} {v.modelo} · {v.placa}</option>
                     ))}
                   </select>
                 </>
@@ -647,8 +564,7 @@ export default function FacturaPage() {
               <div style={{ display: "flex", gap: 10 }}>
                 <div style={{ flex: 1 }}>
                   <label style={label}>Tipo NCF</label>
-                  <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)}
-                    style={input}>
+                  <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)} style={input}>
                     <option value="B02">B02 — Consumidor Final</option>
                     <option value="B01">B01 — Crédito Fiscal</option>
                     <option value="B14">B14 — Régimen Especial</option>
@@ -678,28 +594,21 @@ export default function FacturaPage() {
                   <div key={i.id} style={productoRow}>
                     <div>
                       <div style={{ fontWeight: 600, fontSize: 14 }}>{i.name}</div>
-                      <div style={{ fontSize: 12,
-                        color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>
-                        Stock: {i.stock}
-                        {i.code ? ` · Cód: ${i.code}` : ""}
+                      <div style={{ fontSize: 12, color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>
+                        Stock: {i.stock}{i.code ? ` · Cód: ${i.code}` : ""}
                       </div>
                     </div>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontWeight: 700 }}>
-                        RD$ {Number(i.price).toFixed(2)}
-                      </span>
+                      <span style={{ fontWeight: 700 }}>RD$ {Number(i.price).toFixed(2)}</span>
                       <button onClick={() => addItem(i)} disabled={i.stock <= 0}
-                        style={{ ...btnAdd,
-                          background: i.stock <= 0 ? "#ccc" : "#111827" }}>
+                        style={{ ...btnAdd, background: i.stock <= 0 ? "#ccc" : "#111827" }}>
                         + Agregar
                       </button>
                     </div>
                   </div>
                 ))}
                 {itemsFiltrados.length === 0 && (
-                  <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>
-                    Sin resultados
-                  </p>
+                  <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>Sin resultados</p>
                 )}
               </div>
             </div>
@@ -708,14 +617,11 @@ export default function FacturaPage() {
           {/* COLUMNA DERECHA — CARRITO */}
           <div style={card}>
             <h2 style={cardTitle}>🛒 Detalle de Servicios y Piezas</h2>
-
             {carrito.length === 0 ? (
               <div style={{ color: "#888", textAlign: "center", padding: 40 }}>
                 <div style={{ fontSize: 32, marginBottom: 8 }}>🛒</div>
                 <div>Carrito vacío</div>
-                <div style={{ fontSize: 12, marginTop: 6 }}>
-                  Carga un diagnóstico o agrega repuestos
-                </div>
+                <div style={{ fontSize: 12, marginTop: 6 }}>Carga un diagnóstico o agrega repuestos</div>
               </div>
             ) : (
               carrito.map(p => (
@@ -733,18 +639,13 @@ export default function FacturaPage() {
                     </div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{p.descripcion}</div>
                     <div style={{ fontSize: 12, color: "#888" }}>
-                      RD$ {Number(p.precio_unitario).toFixed(2)} c/u ·{" "}
-                      {p.itbis_aplica ? "ITBIS 18%" : "Sin ITBIS"}
+                      RD$ {Number(p.precio_unitario).toFixed(2)} c/u · {p.itbis_aplica ? "ITBIS 18%" : "Sin ITBIS"}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <button onClick={() => updateCantidad(p.id, p.cantidad - 1)}
-                      style={btnQty}>−</button>
-                    <span style={{ fontWeight: 700, minWidth: 24, textAlign: "center" }}>
-                      {p.cantidad}
-                    </span>
-                    <button onClick={() => updateCantidad(p.id, p.cantidad + 1)}
-                      style={btnQty}>+</button>
+                    <button onClick={() => updateCantidad(p.id, p.cantidad - 1)} style={btnQty}>−</button>
+                    <span style={{ fontWeight: 700, minWidth: 24, textAlign: "center" }}>{p.cantidad}</span>
+                    <button onClick={() => updateCantidad(p.id, p.cantidad + 1)} style={btnQty}>+</button>
                     <span style={{ minWidth: 90, textAlign: "right", fontWeight: 600 }}>
                       RD$ {(Number(p.precio_unitario) * Number(p.cantidad)).toFixed(2)}
                     </span>
@@ -753,65 +654,43 @@ export default function FacturaPage() {
               ))
             )}
 
-            {/* TOTALES */}
             <div style={totalesBox}>
-              <div style={totalesRow}>
-                <span>Subtotal</span>
-                <span>RD$ {subtotal.toFixed(2)}</span>
-              </div>
-              <div style={totalesRow}>
-                <span>ITBIS (18%)</span>
-                <span>RD$ {itbis.toFixed(2)}</span>
-              </div>
-              <div style={{ ...totalesRow, fontWeight: 700, fontSize: 18,
-                borderTop: "2px solid #e2e8f0", paddingTop: 10, marginTop: 4 }}>
-                <span>TOTAL</span>
-                <span>RD$ {total.toFixed(2)}</span>
+              <div style={totalesRow}><span>Subtotal</span><span>RD$ {subtotal.toFixed(2)}</span></div>
+              <div style={totalesRow}><span>ITBIS (18%)</span><span>RD$ {itbis.toFixed(2)}</span></div>
+              <div style={{ ...totalesRow, fontWeight: 700, fontSize: 18, borderTop: "2px solid #e2e8f0", paddingTop: 10, marginTop: 4 }}>
+                <span>TOTAL</span><span>RD$ {total.toFixed(2)}</span>
               </div>
             </div>
 
-            {/* VUELTO */}
             <div style={vueltoBx}>
               <label style={label}>💵 Monto recibido (RD$)</label>
               <input type="number" value={montoRecibido}
                 onChange={e => setMontoRecibido(e.target.value)}
                 placeholder="0.00"
-                style={{ ...input, fontSize: 18, fontWeight: 700,
-                  borderColor: "#fde68a" }} />
+                style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a" }} />
               {Number(montoRecibido) > 0 && (
-                <div style={{ marginTop: 10, padding: 10, borderRadius: 8,
-                  textAlign: "center",
+                <div style={{ marginTop: 10, padding: 10, borderRadius: 8, textAlign: "center",
                   background: vuelto >= 0 ? "#dcfce7" : "#fee2e2",
                   color:      vuelto >= 0 ? "#166534" : "#dc2626",
                   fontWeight: 800, fontSize: 20 }}>
-                  {vuelto >= 0
-                    ? `Vuelto: RD$ ${vuelto.toFixed(2)}`
-                    : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
+                  {vuelto >= 0 ? `Vuelto: RD$ ${vuelto.toFixed(2)}` : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
                 </div>
               )}
             </div>
 
-            {/* BOTONES */}
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
-              <button onClick={handleCotizacion}
-                style={{ ...btnFacturar, background: "#64748b", marginTop: 0 }}>
+              <button onClick={handleCotizacion} style={{ ...btnFacturar, background: "#64748b", marginTop: 0 }}>
                 📄 Cotización
               </button>
-              <button onClick={generarFactura}
-                disabled={loading || carrito.length === 0}
-                style={{ ...btnFacturar,
-                  background: carrito.length === 0 ? "#aaa" : "#10b981",
-                  marginTop: 0, flex: 2 }}>
+              <button onClick={generarFactura} disabled={loading || carrito.length === 0}
+                style={{ ...btnFacturar, background: carrito.length === 0 ? "#aaa" : "#10b981", marginTop: 0, flex: 2 }}>
                 {loading ? "Procesando..." : "🖨️ Facturar"}
               </button>
             </div>
 
             {ultimaFactura && (
-              <button onClick={() =>
-                abrirImpresion(generarHTML(
-                  ultimaFactura.factura, ultimaFactura.items, {}, false
-                ))
-              } style={btnReimprimir}>
+              <button onClick={() => abrirImpresion(generarHTML(ultimaFactura.factura, ultimaFactura.items, {}, false))}
+                style={btnReimprimir}>
                 🔁 Reimprimir FAC-{String(ultimaFactura.factura.id).padStart(5, "0")}
               </button>
             )}
@@ -822,12 +701,10 @@ export default function FacturaPage() {
       {/* ══════════════ HISTORIAL ══════════════ */}
       {tab === "historial" && (
         <div style={card}>
-          <div style={{ display: "flex", justifyContent: "space-between",
-            alignItems: "center", marginBottom: 16 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
             <h2 style={cardTitle}>📋 Historial de Facturas</h2>
             <input placeholder="Buscar por cliente o NCF..."
-              value={busHistorial}
-              onChange={e => setBusHistorial(e.target.value)}
+              value={busHistorial} onChange={e => setBusHistorial(e.target.value)}
               style={{ ...input, width: 280, marginBottom: 0 }} />
           </div>
           <div style={{ overflowX: "auto" }}>
@@ -849,27 +726,16 @@ export default function FacturaPage() {
                       <td style={td}>{f.cliente_nombre}</td>
                       <td style={{ ...td, fontSize: 12, color: "#888" }}>{f.cliente_rnc || "—"}</td>
                       <td style={td}>{f.metodo_pago}</td>
-                      <td style={{ ...td, fontWeight: 700 }}>
-                        RD$ {Number(f.total).toFixed(2)}
-                      </td>
-                      <td style={td}>
-                        {cancelada ? "🔴 CANCELADA" : "🟢 ACTIVA"}
-                      </td>
+                      <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(f.total).toFixed(2)}</td>
+                      <td style={td}>{cancelada ? "🔴 CANCELADA" : "🟢 ACTIVA"}</td>
                       <td style={{ ...td, fontSize: 11 }}>
-                        {f.created_at
-                          ? new Date(f.created_at).toLocaleString("es-DO")
-                          : "—"}
+                        {f.created_at ? new Date(f.created_at).toLocaleString("es-DO") : "—"}
                       </td>
                       <td style={td}>
                         <div style={{ display: "flex", gap: 4 }}>
-                          <button onClick={() => reimprimirFactura(f)}
-                            style={btnAcc("#111827")}>🖨️</button>
-                          {!cancelada && (
-                            <button onClick={() => cancelarFactura(f)}
-                              style={btnAcc("#f59e0b")}>⛔</button>
-                          )}
-                          <button onClick={() => eliminarFactura(f.id)}
-                            style={btnAcc("#dc2626")}>🗑️</button>
+                          <button onClick={() => reimprimirFactura(f)} style={btnAcc("#111827")}>🖨️</button>
+                          {!cancelada && <button onClick={() => cancelarFactura(f)} style={btnAcc("#f59e0b")}>⛔</button>}
+                          <button onClick={() => eliminarFactura(f.id)} style={btnAcc("#dc2626")}>🗑️</button>
                         </div>
                       </td>
                     </tr>
@@ -877,8 +743,7 @@ export default function FacturaPage() {
                 })}
                 {facturasFiltradas.length === 0 && (
                   <tr>
-                    <td colSpan={10} style={{ textAlign: "center",
-                      color: "#888", padding: 32 }}>
+                    <td colSpan={10} style={{ textAlign: "center", color: "#888", padding: 32 }}>
                       Sin facturas registradas
                     </td>
                   </tr>
@@ -895,25 +760,20 @@ export default function FacturaPage() {
           <div style={modal}>
             <h2 style={{ marginBottom: 16 }}>✏️ Editar Factura</h2>
             <label style={label}>Cliente</label>
-            <input value={modalCliente}
-              onChange={e => setModalCliente(e.target.value)} style={input} />
+            <input value={modalCliente} onChange={e => setModalCliente(e.target.value)} style={input} />
             <label style={label}>Método de pago</label>
-            <select value={modalMethod}
-              onChange={e => setModalMethod(e.target.value)} style={input}>
+            <select value={modalMethod} onChange={e => setModalMethod(e.target.value)} style={input}>
               <option value="EFECTIVO">💵 Efectivo</option>
               <option value="TARJETA">💳 Tarjeta</option>
               <option value="TRANSFERENCIA">🏦 Transferencia</option>
             </select>
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <button onClick={guardarEdicion}
-                style={{ flex: 1, padding: 12, background: "#111827",
-                  color: "#fff", borderRadius: 8, border: "none",
-                  cursor: "pointer", fontWeight: 700 }}>
+                style={{ flex: 1, padding: 12, background: "#111827", color: "#fff", borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700 }}>
                 💾 Guardar
               </button>
               <button onClick={() => setModalFac(null)}
-                style={{ flex: 1, padding: 12, background: "#eee",
-                  borderRadius: 8, border: "none", cursor: "pointer" }}>
+                style={{ flex: 1, padding: 12, background: "#eee", borderRadius: 8, border: "none", cursor: "pointer" }}>
                 Cerrar
               </button>
             </div>
@@ -925,14 +785,14 @@ export default function FacturaPage() {
 }
 
 // ─── ESTILOS ───────────────────────────────────────────────────────────────
-const container: React.CSSProperties  = { padding: 20, background: "#f5f7fb", minHeight: "100vh" };
-const title: React.CSSProperties      = { fontSize: 24, fontWeight: "bold", marginBottom: 20 };
-const grid: React.CSSProperties       = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 };
-const card: React.CSSProperties       = { background: "#fff", padding: 20, borderRadius: 15, boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
-const cardTitle: React.CSSProperties  = { marginBottom: 14, fontSize: 18, fontWeight: 600 };
-const tabBtn: React.CSSProperties     = { padding: "10px 20px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
-const label: React.CSSProperties      = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
-const input: React.CSSProperties      = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
+const container: React.CSSProperties   = { padding: 20, background: "#f5f7fb", minHeight: "100vh" };
+const title: React.CSSProperties       = { fontSize: 24, fontWeight: "bold", marginBottom: 20 };
+const grid: React.CSSProperties        = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 };
+const card: React.CSSProperties        = { background: "#fff", padding: 20, borderRadius: 15, boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
+const cardTitle: React.CSSProperties   = { marginBottom: 14, fontSize: 18, fontWeight: 600 };
+const tabBtn: React.CSSProperties      = { padding: "10px 20px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
+const label: React.CSSProperties       = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
+const input: React.CSSProperties       = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
 const productoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0" };
 const carritoRow: React.CSSProperties  = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0", gap: 8 };
 const totalesBox: React.CSSProperties  = { marginTop: 16, padding: 16, background: "#f8fafc", borderRadius: 10 };
@@ -943,8 +803,8 @@ const btnQty: React.CSSProperties      = { padding: "2px 10px", background: "#f1
 const btnFacturar: React.CSSProperties = { padding: 14, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 16, fontSize: 16, fontWeight: 700 };
 const btnReimprimir: React.CSSProperties = { padding: 10, background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 10, fontSize: 13 };
 const btnAcc = (bg: string): React.CSSProperties => ({ padding: "5px 9px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 });
-const tableStyle: React.CSSProperties = { width: "100%", borderCollapse: "collapse" };
-const th: React.CSSProperties         = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
-const td: React.CSSProperties         = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
-const overlay: React.CSSProperties    = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
-const modal: React.CSSProperties      = { background: "#fff", padding: 28, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
+const tableStyle: React.CSSProperties  = { width: "100%", borderCollapse: "collapse" };
+const th: React.CSSProperties          = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
+const td: React.CSSProperties          = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
+const overlay: React.CSSProperties     = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
+const modal: React.CSSProperties       = { background: "#fff", padding: 28, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
