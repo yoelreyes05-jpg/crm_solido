@@ -16,7 +16,7 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 app.get("/", (req, res) => res.send("🔥 SÓLIDO AUTO SERVICIO — SISTEMA ACTIVO"));
 
-// ==nueva===================================================
+// =====================================================
 // 📌 CLIENTES
 // =====================================================
 app.get("/clientes", async (req, res) => {
@@ -53,9 +53,9 @@ app.get("/clientes/:id/historial", async (req, res) => {
 // =====================================================
 app.get("/vehiculos/catalogo", (req, res) => {
   res.json({
-    Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "4Runner", "Highlander", "Yaris"],
+    Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "Yaris"],
     Honda: ["Civic", "Accord", "CR-V", "Fit"],
-    Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rougue", "Frontier"],
+    Nissan: ["Sentra", "Altima", "Versa", "Frontier"],
     Hyundai: ["Elantra", "Tucson", "Santa Fe"],
     Kia: ["Rio", "Sportage", "Sorento"],
     Ford: ["F-150", "Explorer", "Ranger"],
@@ -189,7 +189,7 @@ app.post("/suplidores", async (req, res) => {
 });
 
 // =====================================================
-// 💰 VENTAS  (definidas UNA SOLA VEZ)
+// 💰 VENTAS
 // =====================================================
 app.get("/ventas", async (req, res) => {
   const { data } = await supabase.from("ventas").select("*").order("id", { ascending: false });
@@ -232,7 +232,6 @@ app.post("/ventas", async (req, res) => {
   res.json(venta[0]);
 });
 
-// IMPORTANTE: /ventas/:id/items debe ir ANTES de /ventas/:id
 app.get("/ventas/:id/items", async (req, res) => {
   const { id } = req.params;
   const { data: venta } = await supabase.from("ventas").select("*").eq("id", id).single();
@@ -349,7 +348,8 @@ app.get("/diagnosticos/:id", async (req, res) => {
 });
 
 app.post("/diagnosticos", async (req, res) => {
-  const { data, error } = await supabase.from("diagnosticos").insert([{ ...req.body, estado: "PENDIENTE", created_at: new Date() }]).select();
+  const { data, error } = await supabase.from("diagnosticos")
+    .insert([{ ...req.body, estado: "PENDIENTE", created_at: new Date() }]).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
@@ -362,35 +362,60 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 });
 
 // =====================================================
-// 📋 COTIZACIONES
+// 💰 COTIZACIONES
 // =====================================================
 app.post("/cotizaciones", async (req, res) => {
   const { diagnostico_id, mano_obra, repuestos, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
 
-  // ✅ FIX: nombre de variable consistente (era "totalCalculado" → crash silencioso)
+  // ✅ FIX: nombre de variable consistente (era "totalcalculado" → crash silencioso)
   const totalCalculado = Number(mano_obra) + Number(repuestos);
 
   const { data: exist } = await supabase
-    .from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
+    .from("cotizaciones")
+    .select("id")
+    .eq("diagnostico_id", diagnostico_id)
+    .single();
 
   let result;
   if (exist) {
-    const { data } = await supabase.from("cotizaciones")
-      .update({ mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas })
-      .eq("diagnostico_id", diagnostico_id).select();
+    // ✅ FIX: incluir mano_de_obra_detalle en el UPDATE
+    const { data } = await supabase
+      .from("cotizaciones")
+      .update({
+        mano_obra: Number(mano_obra),
+        repuestos: Number(repuestos),
+        total: totalCalculado,
+        tiempo_estimado,
+        notas,
+        mano_de_obra_detalle: mano_de_obra_detalle || null
+      })
+      .eq("diagnostico_id", diagnostico_id)
+      .select();
     result = data?.[0];
   } else {
-    const { data } = await supabase.from("cotizaciones")
-      .insert([{ diagnostico_id, mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas }])
+    const { data } = await supabase
+      .from("cotizaciones")
+      .insert([{
+        diagnostico_id,
+        mano_obra: Number(mano_obra),
+        repuestos: Number(repuestos),
+        total: totalCalculado,
+        tiempo_estimado,
+        notas,
+        mano_de_obra_detalle: mano_de_obra_detalle || null
+      }])
       .select();
     result = data?.[0];
   }
 
   // ✅ FIX: siempre actualizar costo_estimado, con o sin mano_de_obra_detalle
-  await supabase.from("diagnosticos").update({
-    ...(mano_de_obra_detalle ? { mano_de_obra_detalle } : {}),
-    costo_estimado: totalCalculado
-  }).eq("id", diagnostico_id);
+  await supabase
+    .from("diagnosticos")
+    .update({
+      ...(mano_de_obra_detalle ? { mano_de_obra_detalle } : {}),
+      costo_estimado: totalCalculado
+    })
+    .eq("id", diagnostico_id);
 
   await supabase.from("diagnosticos").update({ estado: "COTIZADO" }).eq("id", diagnostico_id);
   res.json(result);
@@ -399,8 +424,11 @@ app.post("/cotizaciones", async (req, res) => {
 app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
   const { id } = req.params;
   const { firma_cliente } = req.body;
-  const { data } = await supabase.from("cotizaciones")
-    .update({ aprobado: true, aprobado_at: new Date(), firma_cliente }).eq("id", id).select();
+  const { data } = await supabase
+    .from("cotizaciones")
+    .update({ aprobado: true, aprobado_at: new Date(), firma_cliente })
+    .eq("id", id)
+    .select();
   if (data?.[0]) {
     await supabase.from("diagnosticos").update({ estado: "APROBADO" }).eq("id", data[0].diagnostico_id);
   }
@@ -408,7 +436,7 @@ app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
 });
 
 // =====================================================
-// 🔧 AVANCES DE REPARACIÓN
+// ⚙️ AVANCES
 // =====================================================
 app.post("/avances", async (req, res) => {
   const { diagnostico_id, descripcion, tecnico_nombre } = req.body;
@@ -456,7 +484,7 @@ app.get("/dashboard/stats", async (req, res) => {
       }
     });
   } catch (err) {
-    res.json({ error: err });
+    res.json({ error: String(err) });
   }
 });
 
@@ -464,7 +492,8 @@ app.get("/dashboard/stats", async (req, res) => {
 // 👤 USUARIOS Y AUTENTICACIÓN
 // =====================================================
 app.get("/usuarios", async (req, res) => {
-  const { data } = await supabase.from("usuarios").select("id, nombre, email, rol, activo, created_at").order("id");
+  const { data } = await supabase.from("usuarios")
+    .select("id, nombre, email, rol, activo, created_at").order("id");
   res.json(data || []);
 });
 
@@ -481,8 +510,8 @@ app.post("/usuarios", async (req, res) => {
 
 app.patch("/usuarios/:id", async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase.from("usuarios").update(req.body).eq("id", id)
-    .select("id, nombre, email, rol, activo");
+  const { data, error } = await supabase.from("usuarios")
+    .update(req.body).eq("id", id).select("id, nombre, email, rol, activo");
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
@@ -496,8 +525,8 @@ app.delete("/usuarios/:id", async (req, res) => {
 
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
-  const { data } = await supabase.from("usuarios").select("*")
-    .eq("email", email).eq("password_hash", password).eq("activo", true).single();
+  const { data } = await supabase.from("usuarios")
+    .select("*").eq("email", email).eq("password_hash", password).eq("activo", true).single();
   if (!data) return res.json({ error: "Credenciales incorrectas o usuario inactivo" });
   const { password_hash, ...usuario } = data;
   res.json({ ok: true, usuario });
@@ -526,10 +555,14 @@ app.get("/facturacion/rnc/:rnc", async (req, res) => {
 });
 
 // =====================================================
-// 🧾 FACTURAS (definidas UNA SOLA VEZ)
+// 🧾 FACTURAS
+// ✅ GET /facturas — SOLO UNA VEZ (bug del duplicado eliminado)
 // =====================================================
 app.get("/facturas", async (req, res) => {
-  const { data, error } = await supabase.from("facturas").select("*").order("id", { ascending: false });
+  const { data, error } = await supabase
+    .from("facturas")
+    .select("*")
+    .order("id", { ascending: false });
   if (error) return res.json({ error: error.message });
   res.json(data || []);
 });
@@ -552,7 +585,6 @@ app.post("/facturas", async (req, res) => {
     return res.json({ error: "Sin items en la factura" });
 
   try {
-    // 1. Calcular totales
     let subtotal = 0;
     let itbis = 0;
     for (const item of items) {
@@ -562,12 +594,13 @@ app.post("/facturas", async (req, res) => {
     }
     const total = subtotal + itbis;
 
-    // 2. Generar NCF secuencial
     const tipo = ncf_tipo || "B02";
     const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
+
     let ncf;
     const fechaVence = new Date();
     fechaVence.setFullYear(fechaVence.getFullYear() + 2);
+
     if (ncfData) {
       const nuevo = (ncfData.secuencia_actual || 0) + 1;
       await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
@@ -576,34 +609,34 @@ app.post("/facturas", async (req, res) => {
       ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
     }
 
-    // 3. Insertar factura
-    const { data: factura, error: errFac } = await supabase.from("facturas").insert([{
-      ncf,
-      ncf_tipo: tipo,
-      ncf_vence: fechaVence.toISOString().split("T")[0],
-      estado: "ACTIVA",
-      cliente_id: cliente_id || null,
-      cliente_nombre: cliente_nombre || "Consumidor Final",
-      cliente_rnc: cliente_rnc || null,
-      vehiculo_id: vehiculo_id || null,
-      vehiculo_info: vehiculo_info || null,
-      diagnostico_id: diagnostico_id || null,
-      subtotal,
-      itbis,
-      total,
-      metodo_pago: metodo_pago || "EFECTIVO",
-      notas: notas || null,
-      created_at: new Date()
-    }]).select();
+    const { data: factura, error: errFac } = await supabase
+      .from("facturas")
+      .insert([{
+        ncf,
+        ncf_tipo: tipo,
+        ncf_vence: fechaVence.toISOString().split("T")[0],
+        estado: "ACTIVA",
+        cliente_id: cliente_id || null,
+        cliente_nombre: cliente_nombre || "Consumidor Final",
+        cliente_rnc: cliente_rnc || null,
+        vehiculo_id: vehiculo_id || null,
+        vehiculo_info: vehiculo_info || null,
+        diagnostico_id: diagnostico_id || null,
+        subtotal,
+        itbis,
+        total,
+        metodo_pago: metodo_pago || "EFECTIVO",
+        notas: notas || null,
+        created_at: new Date()
+      }])
+      .select();
 
     if (errFac) return res.json({ error: errFac.message });
     const facturaId = factura[0].id;
 
-    // 4. Insertar items y descontar stock
     for (const item of items) {
       const subtotalItem = Number(item.precio_unitario) * Number(item.cantidad);
-     
- const { error: itemError } = await supabase.from("factura_items").insert([{
+      await supabase.from("factura_items").insert([{
         factura_id: facturaId,
         tipo: item.tipo || "repuesto",
         descripcion: item.descripcion,
@@ -614,40 +647,41 @@ app.post("/facturas", async (req, res) => {
         inventario_id: item.inventario_id || null
       }]);
 
-    if (itemError) {
-  console.error("ERROR ITEM:", itemError);
-  return res.json({ error: itemError.message });
-}
+      if (item.tipo === "repuesto" && item.inventario_id) {
+        const { data: prod } = await supabase.from("inventario").select("stock").eq("id", item.inventario_id).single();
+        if (prod) {
+          await supabase.from("inventario").update({ stock: prod.stock - Number(item.cantidad) }).eq("id", item.inventario_id);
+          await supabase.from("inventario_movimientos").insert([{
+            part_id: item.inventario_id,
+            tipo: "SALIDA",
+            cantidad: Number(item.cantidad),
+            descripcion: `Factura ${ncf}`,
+            created_at: new Date()
+          }]);
+        }
       }
     }
 
-    // 5. Marcar diagnóstico como FACTURADO
- 
- if (diagnostico_id) {
-  const { error: diagError } = await supabase
-    .from("diagnosticos")
-    .update({ estado: "FACTURADO" })
-    .eq("id", diagnostico_id);
+    if (diagnostico_id) {
+      await supabase.from("diagnosticos").update({ estado: "FACTURADO" }).eq("id", diagnostico_id);
+    }
 
-  if (diagError) console.error("ERROR DIAGNOSTICO:", diagError);
-}
-    // 6. Registrar ingreso en caja
-    
-const { error: cajaError } = await supabase.from("caja_movimientos").insert([{
-  tipo: "INGRESO",
-  concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
-  monto: total,
-  metodo_pago: metodo_pago || "EFECTIVO",
-  factura_id: facturaId,
-  created_at: new Date()
-}]);
+    await supabase.from("caja_movimientos").insert([{
+      tipo: "INGRESO",
+      concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+      monto: total,
+      metodo_pago: metodo_pago || "EFECTIVO",
+      factura_id: facturaId,
+      created_at: new Date()
+    }]);
 
-if (cajaError) {
-  console.error("ERROR CAJA:", cajaError);
-}
+    res.json(factura[0]);
+  } catch (err) {
+    console.error("Error creando factura:", err);
+    res.json({ error: err.message || "Error interno" });
+  }
 });
 
-// IMPORTANTE: /facturas/:id/items debe ir ANTES de /facturas/:id
 app.get("/facturas/:id/items", async (req, res) => {
   const { id } = req.params;
   const { data: factura } = await supabase.from("facturas").select("*").eq("id", id).single();
