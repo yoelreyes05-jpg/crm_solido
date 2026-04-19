@@ -1,10 +1,8 @@
 // frontend/src/app/api/facturacion/rnc/[rnc]/route.ts
-// Proxy entre el frontend Next.js y el crm-backend Express
-// Ejemplo: GET /api/facturacion/rnc/130263241
-
 import { NextRequest, NextResponse } from 'next/server';
 
-const BACKEND_URL = process.env.BACKEND_URL || 'https://crm-automotriz-3wde-production.up.railway.app/facturacion/rnc/:rnc';
+const BACKEND = process.env.NEXT_PUBLIC_API_URL
+  || 'https://crm-automotriz-3wde-production.up.railway.app';
 
 export async function GET(
   request: NextRequest,
@@ -17,14 +15,12 @@ export async function GET(
   }
 
   try {
-    const respuesta = await fetch(`${BACKEND_URL}/facturacion/rnc/${rnc}`, {
+    const respuesta = await fetch(`${BACKEND}/facturacion/rnc/${rnc}`, {
       headers: { 'Content-Type': 'application/json' },
-      // Next.js no cachea fetch por defecto en route handlers, pero lo dejamos explícito:
       cache: 'no-store',
     });
 
     const datos = await respuesta.json();
-
     return NextResponse.json(datos, { status: respuesta.status });
 
   } catch (error) {
