@@ -56,13 +56,10 @@ app.get("/vehiculos/catalogo", (req, res) => {
     Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "Venza", "Camry", "Highlander", "Yaris"],
     Honda: ["Civic", "Accord", "CR-V", "Fit"],
     Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rouge", "Qashqui", "Frontier"],
-<<<<<<< HEAD
     Hyundai: ["Elantra", "Tucson", "Santa Fe", "Sonata"],
     Kia: ["Rio", "Sportage", "Sorento"],
-=======
     Hyundai: ["Elantra", "Avante", "Accent", "Tucson", "Santa Fe", "Sonata"],
     Kia: ["Rio", "Sportage", "Sorento", "K5"],
->>>>>>> e741211 (actualizar)
     Ford: ["F-150", "Explorer", "Ranger"],
     Chevrolet: ["Silverado", "Tahoe", "Spark"],
     BMW: ["X5", "X3", "Serie 3"],
