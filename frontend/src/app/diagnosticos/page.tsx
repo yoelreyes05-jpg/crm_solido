@@ -126,7 +126,13 @@ export default function DiagnosticosPage() {
   });
 
   const [cotForm, setCotForm] = useState({ mano_obra: "", repuestos: "", tiempo_estimado: "", notas: "" });
-  const [detalleManoObra, setDetalleManoObra] = useState("");
+  ///////MODIFICADO/////////
+
+const [manoObraItems, setManoObraItems] = useState<any[]>([
+  { descripcion: "", precio: "" }
+]);
+
+const [detalleManoObra, setDetalleManoObra] = useState("");
 const [avanceForm, setAvanceForm] = useState({ descripcion: "", tecnico_nombre: "" });
   const [firmaCliente, setFirmaCliente] = useState("");
 
@@ -401,29 +407,9 @@ const [avanceForm, setAvanceForm] = useState({ descripcion: "", tecnico_nombre: 
               {/* COTIZACIÓN */}
               <div style={{ ...card, marginBottom: 16 }}>
                 <h2 style={cardTitle}>💰 Cotización</h2>
-                {detalle.cotizacion?.aprobado && (
-                  <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#166534", fontWeight: 600 }}>
-                    ✅ Aprobada por: {detalle.cotizacion.firma_cliente}
-                  </div>
-                )}
-                <label style={label}>Mano de Obra (RD$)</label>
-                <input type="number" value={cotForm.mano_obra} onChange={e => setCotForm({ ...cotForm, mano_obra: e.target.value })} style={input} placeholder="0.00" />
-                <label style={label}>Repuestos (RD$)</label>
-                <input type="number" value={cotForm.repuestos} onChange={e => setCotForm({ ...cotForm, repuestos: e.target.value })} style={input} placeholder="0.00" />
-                <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontWeight: 700, fontSize: 16 }}>
-                  Total: RD$ {(Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
-                </div>
-                <label style={label}>Tiempo Estimado</label>
-                <input value={cotForm.tiempo_estimado} onChange={e => setCotForm({ ...cotForm, tiempo_estimado: e.target.value })} style={input} placeholder="Ej: 2 días" />
-                <label style={label}>Notas</label>
-		<label style={label}>Detalle de Mano de Obra</label>
-
-///////MODIFICADO/////////
-
-const [manoObraItems, setManoObraItems] = useState<any[]>([
-  { descripcion: "", precio: "" }
-]);
-
+     
+//////////MODIFICADO//////
+           
 <label style={label}>Detalle de Mano de Obra</label>
 
 {manoObraItems.map((item, index) => (
@@ -471,10 +457,32 @@ const [manoObraItems, setManoObraItems] = useState<any[]>([
   ➕ Agregar Servicio
 </button>
 
-  rows={3}
-  placeholder="Ej: Cambio de aceite, revisión de frenos, ajuste de suspensión..."
-  style={{ ...input, resize: "vertical" }}
-/>
+
+
+
+{detalle.cotizacion?.aprobado && (
+                  <div style={{ background: "#dcfce7", border: "1px solid #86efac", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontSize: 13, color: "#166534", fontWeight: 600 }}>
+                    ✅ Aprobada por: {detalle.cotizacion.firma_cliente}
+                  </div>
+                )}
+                <label style={label}>Mano de Obra (RD$)</label>
+                <input type="number" value={cotForm.mano_obra} onChange={e => setCotForm({ ...cotForm, mano_obra: e.target.value })} style={input} placeholder="0.00" />
+                <label style={label}>Repuestos (RD$)</label>
+                <input type="number" value={cotForm.repuestos} onChange={e => setCotForm({ ...cotForm, repuestos: e.target.value })} style={input} placeholder="0.00" />
+                <div style={{ background: "#f0fdf4", borderRadius: 8, padding: "10px 14px", marginBottom: 12, fontWeight: 700, fontSize: 16 }}>
+                  Total: RD$ {(Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0)).toLocaleString(undefined, { minimumFractionDigits: 2 })}
+                </div>
+                <label style={label}>Tiempo Estimado</label>
+                <input value={cotForm.tiempo_estimado} onChange={e => setCotForm({ ...cotForm, tiempo_estimado: e.target.value })} style={input} placeholder="Ej: 2 días" />
+                <label style={label}>Notas</label>
+		<label style={label}>Detalle de Mano de Obra</label>
+
+
+
+<label style={label}>Detalle de Mano de Obra</label>
+
+
+
                 <textarea value={cotForm.notas} onChange={e => setCotForm({ ...cotForm, notas: e.target.value })} rows={2} style={{ ...input, resize: "vertical" }} />
                 
 
