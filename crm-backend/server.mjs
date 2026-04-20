@@ -53,15 +53,16 @@ app.get("/clientes/:id/historial", async (req, res) => {
 // =====================================================
 app.get("/vehiculos/catalogo", (req, res) => {
   res.json({
-    Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "Yaris"],
+    Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "Venza", "Camry", "Highlander", "Yaris"],
     Honda: ["Civic", "Accord", "CR-V", "Fit"],
-    Nissan: ["Sentra", "Altima", "Versa", "Frontier"],
-    Hyundai: ["Elantra", "Tucson", "Santa Fe"],
+    Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rouge", "Qashqui" "Frontier"],
+    Hyundai: ["Elantra", "Tucson", "Santa Fe", "Sonata"],
     Kia: ["Rio", "Sportage", "Sorento"],
     Ford: ["F-150", "Explorer", "Ranger"],
     Chevrolet: ["Silverado", "Tahoe", "Spark"],
     BMW: ["X5", "X3", "Serie 3"],
     Mercedes: ["C-Class", "E-Class", "GLC"],
+    Volkswagen: ["Jetta", "Amarok", "Polo"],
     Jeep: ["Wrangler", "Grand Cherokee"],
     OTRO: ["Personalizado"]
   });
