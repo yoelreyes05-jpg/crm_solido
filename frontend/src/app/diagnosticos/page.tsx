@@ -416,16 +416,69 @@ const [avanceForm, setAvanceForm] = useState({ descripcion: "", tecnico_nombre: 
                 <label style={label}>Tiempo Estimado</label>
                 <input value={cotForm.tiempo_estimado} onChange={e => setCotForm({ ...cotForm, tiempo_estimado: e.target.value })} style={input} placeholder="Ej: 2 días" />
                 <label style={label}>Notas</label>
+		<label style={label}>Detalle de Mano de Obra</label>
+
+///////MODIFICADO/////////
+
+const [manoObraItems, setManoObraItems] = useState<any[]>([
+  { descripcion: "", precio: "" }
+]);
+
 <label style={label}>Detalle de Mano de Obra</label>
-<textarea 
-  value={detalleManoObra}
-  onChange={e => setDetalleManoObra(e.target.value)}
+
+{manoObraItems.map((item, index) => (
+  <div key={index} style={{ display: "flex", gap: 10, marginBottom: 8 }}>
+    
+    <input
+      placeholder="Descripción (Ej: Cambio de aceite)"
+      value={item.descripcion}
+      onChange={(e) => {
+        const newItems = [...manoObraItems];
+        newItems[index].descripcion = e.target.value;
+        setManoObraItems(newItems);
+      }}
+      style={{ ...input, flex: 2 }}
+    />
+
+    <input
+      type="number"
+      placeholder="Precio"
+      value={item.precio}
+      onChange={(e) => {
+        const newItems = [...manoObraItems];
+        newItems[index].precio = e.target.value;
+        setManoObraItems(newItems);
+      }}
+      style={{ ...input, flex: 1 }}
+    />
+
+    <button
+      onClick={() => {
+        const newItems = manoObraItems.filter((_, i) => i !== index);
+        setManoObraItems(newItems);
+      }}
+      style={{ background: "#ef4444", color: "#fff", border: "none", borderRadius: 6, padding: "0 10px" }}
+    >
+      X
+    </button>
+  </div>
+))}
+
+<button
+  onClick={() => setManoObraItems([...manoObraItems, { descripcion: "", precio: "" }])}
+  style={{ ...btnPrimary, background: "#8b5cf6", marginBottom: 10 }}
+>
+  ➕ Agregar Servicio
+</button>
+
   rows={3}
   placeholder="Ej: Cambio de aceite, revisión de frenos, ajuste de suspensión..."
   style={{ ...input, resize: "vertical" }}
 />
                 <textarea value={cotForm.notas} onChange={e => setCotForm({ ...cotForm, notas: e.target.value })} rows={2} style={{ ...input, resize: "vertical" }} />
-                <button onClick={guardarCotizacion} style={btnPrimary}>💾 Guardar Cotización</button>
+                
+
+<button onClick={guardarCotizacion} style={btnPrimary}>💾 Guardar Cotización</button>
 
                 {detalle.cotizacion && !detalle.cotizacion.aprobado && (
                   <div style={{ marginTop: 12 }}>
