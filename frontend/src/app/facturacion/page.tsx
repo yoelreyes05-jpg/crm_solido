@@ -8,7 +8,7 @@ const EMPRESA = {
   telefono:  "809-712-2027",
   rnc:       "1-32-XXXXX-X",
   direccion: "Santo Domingo, República Dominicana",
-  email:     "solidoautoservicio@gmail.com",
+  email:     "info@solidoauto.com",
   logo:      "/logo.png"
 };
 
@@ -259,33 +259,46 @@ export default function FacturaPage() {
   const [modalMethod,  setModalMethod]  = useState("EFECTIVO");
   const [modalCliente, setModalCliente] = useState("");
 
-  // ── fetchData ─────────────────────────────────────────────────────────────
-  const fetchData = async () => {
+  // ── fetchData: cada endpoint es INDEPENDIENTE ────────────────────────────
+  // Si uno falla (404, HTML, error de red), los demás igual cargan.
+  const safeFetch = async (url: string): Promise<any[]> => {
     try {
-      const [cRes, vRes, iRes, fRes, dRes] = await Promise.all([
-        fetch(`${API}/clientes`),
-        fetch(`${API}/vehiculos`),
-        fetch(`${API}/inventario`),
-        fetch(`${API}/facturas`),
-        fetch(`${API}/diagnosticos`)
-      ]);
-      const c = await cRes.json(); const v = await vRes.json();
-      const i = await iRes.json(); const f = await fRes.json();
-      const d = await dRes.json();
-      setClientes(Array.isArray(c) ? c : []);
-      setVehiculos(Array.isArray(v) ? v : []);
-      setItems(Array.isArray(i) ? i : []);
-      setFacturas(Array.isArray(f) ? f : []);
-      // Solo diagnósticos con costo estimado y que no estén ya facturados
-      setDiagnosticos(
-        Array.isArray(d)
-          ? d.filter((x: any) =>
-              x.estado !== "FACTURADO" &&
-              (x.costo_estimado > 0 || x.estado === "COTIZADO" || x.estado === "APROBADO" || x.estado === "COMPLETADO")
-            )
-          : []
-      );
-    } catch (err) { console.error("fetchData error:", err); }
+      const res = await fetch(url);
+      const ct  = res.headers.get("content-type") || "";
+      if (!ct.includes("application/json")) {
+        console.warn(`[fetchData] ${url} devolvió no-JSON (status ${res.status})`);
+        return [];
+      }
+      const data = await res.json();
+      return Array.isArray(data) ? data : [];
+    } catch (e) {
+      console.warn(`[fetchData] error en ${url}:`, e);
+      return [];
+    }
+  };
+
+  const fetchData = async () => {
+    const [c, v, i, f, d] = await Promise.all([
+      safeFetch(`${API}/clientes`),
+      safeFetch(`${API}/vehiculos`),
+      safeFetch(`${API}/inventario`),
+      safeFetch(`${API}/facturas`),
+      safeFetch(`${API}/diagnosticos`)
+    ]);
+    setClientes(c);
+    setVehiculos(v);
+    setItems(i);
+    setFacturas(f);
+    // Diagnósticos disponibles para facturar
+    setDiagnosticos(
+      d.filter((x: any) =>
+        x.estado !== "FACTURADO" &&
+        (Number(x.costo_estimado) > 0 ||
+          x.estado === "COTIZADO" ||
+          x.estado === "APROBADO" ||
+          x.estado === "COMPLETADO")
+      )
+    );
   };
 
   useEffect(() => { fetchData(); }, []);
