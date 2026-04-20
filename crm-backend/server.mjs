@@ -55,7 +55,7 @@ app.get("/vehiculos/catalogo", (req, res) => {
   res.json({
     Toyota: ["Corolla", "Hilux", "RAV4", "4Runner", "Venza", "Camry", "Highlander", "Yaris"],
     Honda: ["Civic", "Accord", "CR-V", "Fit"],
-    Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rouge", "Qashqui" "Frontier"],
+    Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rouge", "Qashqui", "Frontier"],
     Hyundai: ["Elantra", "Tucson", "Santa Fe", "Sonata"],
     Kia: ["Rio", "Sportage", "Sorento"],
     Ford: ["F-150", "Explorer", "Ranger"],
