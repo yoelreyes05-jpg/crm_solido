@@ -1,32 +1,46 @@
 {
   "name": "Sólido Auto Servicio",
   "short_name": "Sólido Auto",
-  "description": "CONSULTA PRECIOS Y ESTATUS DE TU VEHICULO",
+  "description": "Consulta precios y estatus de tu vehículo",
   "start_url": "/cliente",
+  "scope": "/",
   "display": "standalone",
   "orientation": "portrait",
-  "background_color": "#111827",
-  "theme_color": "#111827",
+  "background_color": "#080c14",
+  "theme_color": "#080c14",
   "lang": "es",
   "icons": [
     {
-      "src": "/logo.png",
+      "src": "/logo-192x192.png",
       "sizes": "192x192",
       "type": "image/png",
       "purpose": "any"
     },
     {
-      "src": "/logo.png",
+      "src": "/logo-192x192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "maskable"
+    },
+    {
+      "src": "/logo-512x512.png",
       "sizes": "512x512",
       "type": "image/png",
       "purpose": "any"
+    },
+    {
+      "src": "/logo-512x512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
     }
   ],
   "screenshots": [
     {
-      "src": "/logo.png",
+      "src": "/logo-512x512.png",
       "sizes": "512x512",
-      "type": "image/png"
+      "type": "image/png",
+      "form_factor": "narrow"
     }
   ]
 }

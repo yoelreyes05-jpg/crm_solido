@@ -2,7 +2,6 @@
 import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
 
-/* ─── DATA ─────────────────────────────────────────────────────────── */
 const ESTADO_INFO = {
   RECIBIDO:        { color: "#60a5fa", grad: "linear-gradient(135deg,#1e3a5f,#2563eb)", emoji: "📋", paso: 1, msg: "Tu vehículo fue recibido. Pronto será evaluado." },
   DIAGNOSTICO:     { color: "#fbbf24", grad: "linear-gradient(135deg,#451a03,#d97706)", emoji: "🔍", paso: 2, msg: "Nuestro técnico está evaluando tu vehículo." },
@@ -15,7 +14,6 @@ const ESTADO_INFO = {
 const PASOS       = ["RECIBIDO","DIAGNOSTICO","REPARACION","CONTROL_CALIDAD","LISTO","ENTREGADO"];
 const PASOS_LABEL = ["Recibido","Diagnóstico","Reparación","C. Calidad","Listo","Entregado"];
 
-/* ─── COMPONENT ─────────────────────────────────────────────────────── */
 export default function ClienteApp() {
   const [placa, setPlaca]               = useState("");
   const [resultado, setResultado]       = useState<any>(null);
@@ -26,23 +24,28 @@ export default function ClienteApp() {
   const [instalable, setInstalable]     = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showProductos, setShowProductos]   = useState(false);
-  const [mounted, setMounted]           = useState(false);
+  const [loadingProductos, setLoadingProductos] = useState(false);
+  // ── NUEVO: qué ítem del acordeón está abierto ──
+  const [productoAbierto, setProductoAbierto] = useState<number | null>(null);
 
   useEffect(() => {
-    setMounted(true);
     const handler = (e: any) => { e.preventDefault(); setDeferredPrompt(e); setInstalable(true); };
     window.addEventListener("beforeinstallprompt", handler);
     return () => window.removeEventListener("beforeinstallprompt", handler);
   }, []);
 
   const verProductos = async () => {
-    setShowProductos(v => !v);
-    if (productos.length > 0) return;
+    const nuevoEstado = !showProductos;
+    setShowProductos(nuevoEstado);
+    setProductoAbierto(null);
+    if (!nuevoEstado || productos.length > 0) return;
+    setLoadingProductos(true);
     try {
       const res  = await fetch(`${API}/inventario`);
       const data = await res.json();
       setProductos(data || []);
     } catch {}
+    finally { setLoadingProductos(false); }
   };
 
   const instalarApp = async () => {
@@ -62,8 +65,8 @@ export default function ClienteApp() {
         fetch(`${API}/ordenes`),
         fetch(`${API}/diagnosticos`),
       ]);
-      const vehiculos   = await vRes.json();
-      const ordenes     = await oRes.json();
+      const vehiculos    = await vRes.json();
+      const ordenes      = await oRes.json();
       const diagnosticos = await dRes.json();
 
       const vehiculo = vehiculos.find((v: any) =>
@@ -88,68 +91,46 @@ export default function ClienteApp() {
   const estadoInfo  = ultimaOrden ? (ESTADO_INFO[ultimaOrden.estado as keyof typeof ESTADO_INFO] || ESTADO_INFO.RECIBIDO) : null;
   const pasoActual  = estadoInfo ? estadoInfo.paso : 0;
 
-  /* ─── JSX ─────────────────────────────────────────────────────────── */
   return (
     <>
-      {/* ── GLOBAL STYLES ── */}
       <style>{`
         @import url('https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Sans:wght@300;400;500;600&display=swap');
 
         * { box-sizing: border-box; margin: 0; padding: 0; }
-
         body { background: #080c14; }
 
         .sas-root {
-          max-width: 480px;
-          margin: 0 auto;
-          min-height: 100vh;
-          background: #080c14;
-          font-family: 'DM Sans', sans-serif;
-          color: #e2e8f0;
-          position: relative;
-          overflow-x: hidden;
+          max-width: 480px; margin: 0 auto; min-height: 100vh;
+          background: #080c14; font-family: 'DM Sans', sans-serif;
+          color: #e2e8f0; position: relative; overflow-x: hidden;
         }
-
-        /* noise texture overlay */
         .sas-root::before {
-          content:'';
-          position:fixed; inset:0;
+          content:''; position:fixed; inset:0;
           background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.04'/%3E%3C/svg%3E");
           pointer-events:none; z-index:0; opacity:.4;
         }
-
         .sas-content { position:relative; z-index:1; }
 
-        /* HEADER */
         .sas-header {
           background: linear-gradient(170deg, #0f172a 0%, #1e293b 100%);
-          padding: 36px 24px 28px;
-          text-align: center;
+          padding: 36px 24px 28px; text-align: center;
           border-bottom: 1px solid rgba(255,255,255,0.06);
-          position: relative;
-          overflow: hidden;
+          position: relative; overflow: hidden;
         }
         .sas-header::after {
-          content:'';
-          position:absolute;
-          width:280px; height:280px;
+          content:''; position:absolute; width:280px; height:280px;
           border-radius:50%;
           background: radial-gradient(circle, rgba(59,130,246,0.15) 0%, transparent 70%);
-          top:-80px; left:50%; transform:translateX(-50%);
-          pointer-events:none;
+          top:-80px; left:50%; transform:translateX(-50%); pointer-events:none;
         }
         .sas-logo {
-          width:80px; height:80px; object-fit:contain;
-          border-radius:20px;
-          box-shadow: 0 0 30px rgba(59,130,246,0.3);
-          margin-bottom:14px;
+          width:80px; height:80px; object-fit:contain; border-radius:20px;
+          box-shadow: 0 0 30px rgba(59,130,246,0.3); margin-bottom:14px;
         }
         .sas-title {
-          font-family: 'Syne', sans-serif;
-          font-size: 20px; font-weight:800; letter-spacing:2px;
+          font-family: 'Syne', sans-serif; font-size: 20px; font-weight:800; letter-spacing:2px;
           background: linear-gradient(135deg, #fff 30%, #93c5fd);
-          -webkit-background-clip:text; -webkit-text-fill-color:transparent;
-          background-clip:text;
+          -webkit-background-clip:text; -webkit-text-fill-color:transparent; background-clip:text;
         }
         .sas-subtitle { font-size:12px; color:#64748b; margin-top:6px; letter-spacing:.5px; }
         .btn-install {
@@ -157,56 +138,83 @@ export default function ClienteApp() {
           background: linear-gradient(135deg,#1d4ed8,#3b82f6);
           color:#fff; border:none; border-radius:100px;
           font-family:'DM Sans',sans-serif; font-weight:600; font-size:13px;
-          cursor:pointer; letter-spacing:.3px;
-          box-shadow: 0 4px 15px rgba(59,130,246,0.3);
+          cursor:pointer; box-shadow: 0 4px 15px rgba(59,130,246,0.3);
         }
         .sas-hint { font-size:11px; color:#334155; margin-top:10px; }
 
-        /* QUICK ACTIONS */
         .quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
         .btn-quick {
           padding:15px 10px; border-radius:16px; border:none;
           font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
-          cursor:pointer; letter-spacing:.2px; transition:transform .15s, box-shadow .15s;
+          cursor:pointer; transition:transform .15s, box-shadow .15s;
         }
         .btn-quick:active { transform:scale(.97); }
         .btn-productos { background:linear-gradient(135deg,#064e3b,#059669); color:#fff; box-shadow:0 4px 14px rgba(5,150,105,.3); }
         .btn-wa-q     { background:linear-gradient(135deg,#14532d,#16a34a); color:#fff; box-shadow:0 4px 14px rgba(22,163,74,.3); }
 
-        /* CARD */
         .card {
-          background: rgba(15,23,42,0.9);
-          border: 1px solid rgba(255,255,255,0.07);
-          border-radius:20px; padding:20px;
-          backdrop-filter:blur(12px);
-          margin-bottom:12px;
+          background: rgba(15,23,42,0.9); border: 1px solid rgba(255,255,255,0.07);
+          border-radius:20px; padding:20px; backdrop-filter:blur(12px); margin-bottom:12px;
         }
         .card-title {
           font-family:'Syne',sans-serif; font-size:16px; font-weight:700;
           color:#f1f5f9; margin-bottom:14px; letter-spacing:.5px;
         }
 
-        /* PRODUCTOS */
-        .prod-row {
-          display:flex; justify-content:space-between; align-items:center;
-          padding:11px 0; border-bottom:1px solid rgba(255,255,255,0.05);
+        /* ── ACORDEÓN DE PRODUCTOS ── */
+        .prod-accordion { display:flex; flex-direction:column; gap:6px; }
+        .prod-item {
+          border-radius:14px;
+          border:1px solid rgba(255,255,255,0.07);
+          overflow:hidden;
+          transition:border-color .2s;
         }
-        .prod-row:last-child { border-bottom:none; }
-        .prod-name { font-weight:600; font-size:14px; color:#e2e8f0; }
-        .prod-stock { font-size:11px; color:#64748b; margin-top:2px; }
-        .prod-price { font-family:'Syne',sans-serif; font-weight:800; font-size:15px; color:#34d399; }
+        .prod-item.open { border-color:rgba(52,211,153,0.3); }
+        .prod-item-header {
+          display:flex; justify-content:space-between; align-items:center;
+          padding:13px 16px; cursor:pointer;
+          background:rgba(255,255,255,0.03);
+          transition:background .15s;
+          user-select:none;
+        }
+        .prod-item-header:active { background:rgba(255,255,255,0.07); }
+        .prod-item-name {
+          font-weight:600; font-size:14px; color:#e2e8f0;
+          display:flex; align-items:center; gap:8px;
+        }
+        .prod-item-arrow {
+          font-size:11px; color:#475569; transition:transform .25s;
+        }
+        .prod-item-arrow.open { transform:rotate(180deg); color:#34d399; }
+        .prod-item-body {
+          max-height:0; overflow:hidden;
+          transition:max-height .3s ease, padding .3s ease;
+          padding:0 16px;
+          background:rgba(0,0,0,0.2);
+        }
+        .prod-item-body.open {
+          max-height:120px;
+          padding:12px 16px 14px;
+        }
+        .prod-price-big {
+          font-family:'Syne',sans-serif; font-weight:800; font-size:22px; color:#34d399;
+          margin-bottom:4px;
+        }
+        .prod-stock-row { display:flex; gap:8px; align-items:center; }
+        .prod-stock-badge {
+          font-size:11px; font-weight:700; padding:3px 10px; border-radius:100px;
+        }
+        .stock-ok   { background:rgba(52,211,153,0.15); color:#34d399; }
+        .stock-no   { background:rgba(248,113,113,0.15); color:#f87171; }
 
-        /* BUSCADOR */
         .field-label { font-size:12px; font-weight:600; color:#64748b; letter-spacing:.8px; text-transform:uppercase; display:block; margin-bottom:10px; }
         .input-placa {
           display:block; width:100%; padding:18px;
           font-family:'Syne',sans-serif; font-size:28px; font-weight:800;
           text-align:center; letter-spacing:8px; text-transform:uppercase;
-          background: rgba(255,255,255,0.04);
-          border:2px solid rgba(255,255,255,0.1);
-          border-radius:14px; color:#fff;
-          margin-bottom:16px; transition:border-color .2s, box-shadow .2s;
-          outline:none;
+          background: rgba(255,255,255,0.04); border:2px solid rgba(255,255,255,0.1);
+          border-radius:14px; color:#fff; margin-bottom:16px;
+          transition:border-color .2s, box-shadow .2s; outline:none;
         }
         .input-placa:focus { border-color:#3b82f6; box-shadow:0 0 0 4px rgba(59,130,246,0.12); }
         .input-placa::placeholder { color:#334155; letter-spacing:4px; }
@@ -225,24 +233,19 @@ export default function ClienteApp() {
         .btn-buscar:disabled { opacity:.4; cursor:not-allowed; }
         .btn-buscar:not(:disabled):active { transform:scale(.98); }
 
-        /* VOLVER */
         .btn-volver {
           margin-bottom:14px; padding:10px 20px;
           background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
-          border-radius:100px; cursor:pointer; font-weight:600; font-size:13px;
-          color:#94a3b8; letter-spacing:.3px;
+          border-radius:100px; cursor:pointer; font-weight:600; font-size:13px; color:#94a3b8;
         }
 
-        /* CAR CARD */
         .car-card {
           background:linear-gradient(135deg,#0f1729 0%,#1e3a5f 100%);
-          border:1px solid rgba(59,130,246,0.2);
-          border-radius:22px; padding:22px; margin-bottom:12px;
-          position:relative; overflow:hidden;
+          border:1px solid rgba(59,130,246,0.2); border-radius:22px; padding:22px;
+          margin-bottom:12px; position:relative; overflow:hidden;
         }
         .car-card::before {
-          content:'';
-          position:absolute; right:-30px; top:-30px;
+          content:''; position:absolute; right:-30px; top:-30px;
           width:160px; height:160px; border-radius:50%;
           background:radial-gradient(circle,rgba(59,130,246,0.2) 0%,transparent 70%);
         }
@@ -252,30 +255,19 @@ export default function ClienteApp() {
         .car-meta  { font-size:13px; color:#64748b; margin-top:4px; }
         .placa-badge {
           margin-top:12px; display:inline-block;
-          background:rgba(255,255,255,0.07);
-          border:1px solid rgba(255,255,255,0.15);
+          background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15);
           padding:8px 20px; border-radius:10px;
           font-family:'Syne',sans-serif; font-weight:900; font-size:20px;
           letter-spacing:5px; color:#93c5fd;
         }
 
-        /* ESTADO */
-        .estado-card {
-          border-radius:22px; padding:22px; margin-bottom:12px;
-          position:relative; overflow:hidden;
-        }
-        .estado-top-label {
-          font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase;
-          color:rgba(255,255,255,0.4); margin-bottom:14px;
-        }
+        .estado-card { border-radius:22px; padding:22px; margin-bottom:12px; position:relative; overflow:hidden; }
+        .estado-top-label { font-size:10px; font-weight:700; letter-spacing:2px; text-transform:uppercase; color:rgba(255,255,255,0.4); margin-bottom:14px; }
         .estado-row { display:flex; align-items:center; gap:16px; margin-bottom:20px; }
         .estado-emoji { font-size:48px; }
-        .estado-name {
-          font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff;
-        }
+        .estado-name { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff; }
         .estado-msg { font-size:13px; color:rgba(255,255,255,0.6); margin-top:4px; line-height:1.6; }
 
-        /* PROGRESS */
         .progress-wrap { display:flex; justify-content:space-between; gap:4px; }
         .prog-step { display:flex; flex-direction:column; align-items:center; flex:1; }
         .prog-dot {
@@ -286,54 +278,42 @@ export default function ClienteApp() {
         .prog-dot-done   { background:rgba(255,255,255,0.2); color:#fff; }
         .prog-dot-active { background:#fff; color:#111; box-shadow:0 0 12px rgba(255,255,255,0.4); }
         .prog-dot-future { background:rgba(255,255,255,0.07); color:rgba(255,255,255,0.25); }
-        .prog-label {
-          font-size:8px; margin-top:5px; text-align:center; font-weight:600; letter-spacing:.3px;
-          white-space:nowrap;
-        }
+        .prog-label { font-size:8px; margin-top:5px; text-align:center; font-weight:600; letter-spacing:.3px; white-space:nowrap; }
         .prog-label-on  { color:rgba(255,255,255,0.85); }
         .prog-label-off { color:rgba(255,255,255,0.2); }
 
-        /* TABS */
         .tabs-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
         .tab-btn {
-          padding:13px 8px; border-radius:14px;
-          border:1px solid rgba(255,255,255,0.07);
+          padding:13px 8px; border-radius:14px; border:1px solid rgba(255,255,255,0.07);
           font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
-          cursor:pointer; transition:all .2s; letter-spacing:.2px;
+          cursor:pointer; transition:all .2s;
         }
         .tab-active   { background:linear-gradient(135deg,#1d4ed8,#3b82f6); color:#fff; border-color:transparent; box-shadow:0 4px 14px rgba(59,130,246,.3); }
         .tab-inactive { background:rgba(255,255,255,0.04); color:#64748b; }
 
-        /* ORDEN CARD */
         .orden-card {
           border-radius:18px; padding:18px; margin-bottom:10px;
-          background:rgba(15,23,42,0.95);
-          border:1px solid rgba(255,255,255,0.07);
-          border-left:4px solid;
+          background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.07); border-left:4px solid;
         }
         .orden-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
         .orden-id { font-family:'Syne',sans-serif; font-weight:800; font-size:15px; color:#f1f5f9; }
-        .orden-badge { padding:4px 14px; border-radius:100px; font-size:11px; font-weight:700; letter-spacing:.3px; }
+        .orden-badge { padding:4px 14px; border-radius:100px; font-size:11px; font-weight:700; }
         .orden-desc { font-size:13px; color:#64748b; line-height:1.6; }
         .btn-wa-card {
           margin-top:14px; width:100%; padding:12px;
           background:linear-gradient(135deg,#14532d,#16a34a);
           color:#fff; border:none; border-radius:12px;
           font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
-          cursor:pointer; letter-spacing:.2px;
-          box-shadow:0 4px 14px rgba(22,163,74,.25);
+          cursor:pointer; box-shadow:0 4px 14px rgba(22,163,74,.25);
         }
 
-        /* DIAG CARD */
         .diag-card {
           border-radius:18px; padding:18px; margin-bottom:10px;
-          background:rgba(15,23,42,0.95);
-          border:1px solid rgba(255,255,255,0.07);
+          background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.07);
         }
         .diag-tipo { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#e2e8f0; margin-bottom:6px; }
         .diag-obs  { font-size:13px; color:#64748b; line-height:1.6; }
 
-        /* WA FLOATING */
         .wa-float {
           position:fixed; bottom:22px; right:22px;
           background:linear-gradient(135deg,#15803d,#22c55e);
@@ -345,28 +325,31 @@ export default function ClienteApp() {
         }
         .wa-float:active { transform:scale(.93); }
 
-        /* FOOTER */
         .footer { text-align:center; padding:30px 0 80px; color:#1e293b; font-size:12px; }
         .footer-brand { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#334155; margin:6px 0 2px; }
 
-        /* FADE-IN */
         @keyframes fadeUp { from{ opacity:0; transform:translateY(16px); } to{ opacity:1; transform:translateY(0); } }
         .fade-up { animation: fadeUp .4s ease both; }
         .delay-1 { animation-delay:.05s; }
         .delay-2 { animation-delay:.10s; }
         .delay-3 { animation-delay:.15s; }
-        .delay-4 { animation-delay:.20s; }
 
-        /* DIVIDER */
         .search-intro { font-size:14px; color:#334155; line-height:1.7; margin-bottom:20px; }
+        .loading-dots { font-size:13px; color:#475569; text-align:center; padding:12px; }
       `}</style>
 
       <div className="sas-root">
         <div className="sas-content">
 
-          {/* ── HEADER ── */}
+          {/* HEADER */}
           <div className="sas-header">
-            <img src="/logo.png" alt="Logo Sólido" className="sas-logo" />
+            {/* ── FIX: usar logo-192x192.png con fallback ── */}
+            <img
+              src="/logo-192x192.png"
+              alt="Logo Sólido"
+              className="sas-logo"
+              onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
+            />
             <div className="sas-title">SÓLIDO AUTO SERVICIO</div>
             <div className="sas-subtitle">Portal del Cliente · 809-712-2027</div>
             {instalable && (
@@ -379,7 +362,7 @@ export default function ClienteApp() {
             )}
           </div>
 
-          {/* ── BODY ── */}
+          {/* BODY */}
           <div style={{ padding:"16px" }}>
 
             {/* QUICK ACTIONS */}
@@ -392,27 +375,56 @@ export default function ClienteApp() {
               </button>
             </div>
 
-            {/* PRODUCTOS */}
+            {/* ── PRODUCTOS — ACORDEÓN ── */}
             {showProductos && (
               <div className="card fade-up">
                 <div className="card-title">🛒 Productos Disponibles</div>
-                {productos.length === 0 ? (
-                  <div style={{ fontSize:13, color:"#475569" }}>Cargando productos...</div>
+
+                {loadingProductos ? (
+                  <div className="loading-dots">Cargando productos...</div>
+                ) : productos.length === 0 ? (
+                  <div className="loading-dots">Sin productos disponibles.</div>
                 ) : (
-                  productos.slice(0,10).map((p:any) => (
-                    <div key={p.id} className="prod-row">
-                      <div>
-                        <div className="prod-name">{p.name}</div>
-                        <div className="prod-stock">{p.stock > 0 ? "✓ Disponible" : "Sin stock"}</div>
-                      </div>
-                      <div className="prod-price">RD$ {Number(p.price).toFixed(2)}</div>
-                    </div>
-                  ))
+                  <div className="prod-accordion">
+                    {productos.slice(0,15).map((p: any) => {
+                      const abierto = productoAbierto === p.id;
+                      const hayStock = Number(p.stock) > 0;
+                      return (
+                        <div
+                          key={p.id}
+                          className={`prod-item ${abierto ? "open" : ""}`}
+                        >
+                          <div
+                            className="prod-item-header"
+                            onClick={() => setProductoAbierto(abierto ? null : p.id)}
+                          >
+                            <span className="prod-item-name">
+                              <span style={{ fontSize:16 }}>
+                                {hayStock ? "🟢" : "🔴"}
+                              </span>
+                              {p.name}
+                            </span>
+                            <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
+                          </div>
+                          <div className={`prod-item-body ${abierto ? "open" : ""}`}>
+                            <div className="prod-price-big">
+                              RD$ {Number(p.price).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                            </div>
+                            <div className="prod-stock-row">
+                              <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
+                                {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
                 )}
               </div>
             )}
 
-            {/* ── BUSCADOR ── */}
+            {/* BUSCADOR */}
             {!resultado && (
               <div className="card fade-up delay-1">
                 <div className="card-title">🔎 Consulta tu Vehículo</div>
@@ -439,14 +451,13 @@ export default function ClienteApp() {
               </div>
             )}
 
-            {/* ── RESULTADO ── */}
+            {/* RESULTADO */}
             {resultado && (
               <div>
                 <button onClick={() => { setResultado(null); setPlaca(""); }} className="btn-volver">
                   ← Nueva consulta
                 </button>
 
-                {/* VEHICLE CARD */}
                 <div className="car-card fade-up">
                   <div className="car-main">
                     <span className="car-emoji">🚗</span>
@@ -462,7 +473,6 @@ export default function ClienteApp() {
                   </div>
                 </div>
 
-                {/* ESTADO */}
                 {ultimaOrden && estadoInfo && (
                   <div className="estado-card fade-up delay-1" style={{ background: estadoInfo.grad }}>
                     <div className="estado-top-label">Estado Actual</div>
@@ -473,7 +483,6 @@ export default function ClienteApp() {
                         <div className="estado-msg">{estadoInfo.msg}</div>
                       </div>
                     </div>
-                    {/* PROGRESS STEPS */}
                     <div className="progress-wrap">
                       {PASOS.map((paso, i) => {
                         const alcanzado = i < pasoActual;
@@ -493,7 +502,6 @@ export default function ClienteApp() {
                   </div>
                 )}
 
-                {/* TABS */}
                 <div className="tabs-grid fade-up delay-2">
                   {[
                     { key:"estado",    label:`📋 Servicios (${resultado.ordenes.length})` },
@@ -506,7 +514,6 @@ export default function ClienteApp() {
                   ))}
                 </div>
 
-                {/* ÓRDENES */}
                 {tab === "estado" && (
                   <div className="fade-up delay-3">
                     {resultado.ordenes.map((o: any) => {
@@ -535,7 +542,6 @@ export default function ClienteApp() {
                   </div>
                 )}
 
-                {/* DIAGNÓSTICOS */}
                 {tab === "historial" && (
                   <div className="fade-up delay-3">
                     {resultado.diagnosticos.map((d: any) => (
@@ -557,7 +563,6 @@ export default function ClienteApp() {
           </div>
         </div>
 
-        {/* BOTÓN FLOTANTE WA */}
         <a href="https://wa.me/18097122027" target="_blank" className="wa-float">💬</a>
       </div>
     </>
