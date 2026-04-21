@@ -74,6 +74,11 @@ if (esPublica) return (
         <meta name="apple-mobile-web-app-title" content="Sólido Auto" />
         {/* Cambiado: Referencia al nuevo logo en el manifest e iconos */}
         <link rel="manifest" href="/manifest.json" />
+
+
+        <meta name="theme-color" content="#080c14" />
+
+
         <link rel="apple-touch-icon" href="/logo.png" />
         <link rel="icon" href="/logo.png" />
         <title>Sólido Auto Servicio</title>

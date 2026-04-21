@@ -9,6 +9,7 @@
   "background_color": "#080c14",
   "theme_color": "#080c14",
   "lang": "es",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/logo-192x192.png",
