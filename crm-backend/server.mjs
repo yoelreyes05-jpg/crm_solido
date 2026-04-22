@@ -422,7 +422,6 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 app.post("/cotizaciones", async (req, res) => {
   const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
 
-  // ✅ FIX: nombre consistente en mayúscula "C" — antes era "totalcalculado" (minúscula)
   const totalCalculado = Number(mano_obra || 0) + Number(repuestos || 0);
 
   const { data: exist } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
@@ -439,13 +438,11 @@ app.post("/cotizaciones", async (req, res) => {
     result = data?.[0];
   }
 
-  // ✅ FIX: Siempre guardar costo_estimado y mano_de_obra_detalle en diagnostico
-  // Antes solo se guardaba si habia mano_de_obra_detalle — ahora siempre se actualiza
   await supabase
     .from("diagnosticos")
     .update({
       mano_de_obra_detalle: mano_de_obra_detalle || null,
-      costo_estimado: totalCalculado   // ← antes era totalCalculado con "C" undefined
+      costo_estimado: totalCalculado
     })
     .eq("id", diagnostico_id);
 
@@ -751,6 +748,266 @@ app.delete("/facturas/:id", async (req, res) => {
   const { error } = await supabase.from("facturas").delete().eq("id", id);
   if (error) return res.json({ error: error.message });
   res.json({ ok: true });
+});
+
+// =====================================================
+// 🧮 CONTABILIDAD — CUADRE DE CAJA
+// =====================================================
+
+// GET /contabilidad/cuadre — historial de cuadres ordenado por fecha desc
+app.get("/api/contabilidad/cuadre", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("cuadre_caja")
+      .select("*")
+      .order("fecha", { ascending: false })
+      .limit(60);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /contabilidad/cuadre — guardar un nuevo cuadre de caja
+app.post("/api/contabilidad/cuadre", async (req, res) => {
+  try {
+    const {
+      fecha,
+      efectivo_inicial,
+      efectivo_final,
+      ventas_efectivo,
+      ventas_tarjeta,
+      ventas_transferencia,
+      gastos,
+      diferencia,
+      usuario
+    } = req.body;
+
+    if (!fecha) return res.status(400).json({ error: "La fecha es requerida" });
+
+    const { data, error } = await supabase
+      .from("cuadre_caja")
+      .insert([{
+        fecha,
+        efectivo_inicial:     Number(efectivo_inicial     || 0),
+        efectivo_final:       Number(efectivo_final       || 0),
+        ventas_efectivo:      Number(ventas_efectivo      || 0),
+        ventas_tarjeta:       Number(ventas_tarjeta       || 0),
+        ventas_transferencia: Number(ventas_transferencia || 0),
+        gastos:               Number(gastos               || 0),
+        diferencia:           Number(diferencia           || 0),
+        usuario:              usuario || "Sistema",
+        creado_en:            new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /contabilidad/cuadre/:id — eliminar un cuadre
+app.delete("/api/contabilidad/cuadre/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase.from("cuadre_caja").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 🧮 CONTABILIDAD — CAJA CHICA
+// =====================================================
+
+// GET /contabilidad/caja-chica — lista de movimientos + saldo actual
+app.get("/api/contabilidad/caja-chica", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("caja_chica")
+      .select("*")
+      .order("fecha", { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+
+    const movimientos = data || [];
+
+    // Calcular saldo actual: suma ingresos - suma egresos
+    const fondo_actual = movimientos.reduce((acc, m) => {
+      return m.tipo === "INGRESO"
+        ? acc + Number(m.monto)
+        : acc - Number(m.monto);
+    }, 0);
+
+    res.json({ movimientos, fondo_actual });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /contabilidad/caja-chica — registrar ingreso o egreso
+app.post("/api/contabilidad/caja-chica", async (req, res) => {
+  try {
+    const { descripcion, monto, tipo, usuario } = req.body;
+
+    if (!descripcion || !monto || !tipo)
+      return res.status(400).json({ error: "Descripción, monto y tipo son requeridos" });
+
+    if (!["INGRESO", "EGRESO"].includes(tipo))
+      return res.status(400).json({ error: "Tipo debe ser INGRESO o EGRESO" });
+
+    // Validar fondos suficientes si es egreso
+    if (tipo === "EGRESO") {
+      const { data: movs } = await supabase.from("caja_chica").select("monto, tipo");
+      const saldo = (movs || []).reduce((acc, m) =>
+        m.tipo === "INGRESO" ? acc + Number(m.monto) : acc - Number(m.monto), 0
+      );
+      if (Number(monto) > saldo) {
+        return res.status(400).json({ error: `Fondos insuficientes. Saldo actual: RD$ ${saldo.toFixed(2)}` });
+      }
+    }
+
+    const { data, error } = await supabase
+      .from("caja_chica")
+      .insert([{
+        descripcion,
+        monto:   Number(monto),
+        tipo,
+        usuario: usuario || "Sistema",
+        fecha:   new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /contabilidad/caja-chica/:id — eliminar movimiento
+app.delete("/api/contabilidad/caja-chica/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase.from("caja_chica").delete().eq("id", id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 📊 CONTABILIDAD — COSTOS Y UTILIDADES
+// =====================================================
+
+// GET /contabilidad/costos?desde=YYYY-MM-DD&hasta=YYYY-MM-DD
+// Reporte financiero del período consultando facturas reales
+app.get("/api/contabilidad/costos", async (req, res) => {
+  try {
+    const hoy  = new Date().toISOString().slice(0, 10);
+    const ini  = new Date(); ini.setDate(1);
+    const desde = req.query.desde || ini.toISOString().slice(0, 10);
+    const hasta = req.query.hasta || hoy;
+
+    // Facturas activas del período
+    const { data: facturas, error: errF } = await supabase
+      .from("facturas")
+      .select("*")
+      .neq("estado", "CANCELADA")
+      .gte("created_at", `${desde}T00:00:00`)
+      .lte("created_at", `${hasta}T23:59:59`);
+
+    if (errF) return res.status(500).json({ error: errF.message });
+
+    const facs = facturas || [];
+
+    // Totales generales
+    const ingresos_totales = facs.reduce((a, f) => a + Number(f.total    || 0), 0);
+    const itbis_total      = facs.reduce((a, f) => a + Number(f.itbis    || 0), 0);
+    const subtotal_total   = facs.reduce((a, f) => a + Number(f.subtotal || 0), 0);
+
+    // Por método de pago
+    const metodoMap = {};
+    facs.forEach(f => {
+      const m = f.metodo_pago || "EFECTIVO";
+      metodoMap[m] = (metodoMap[m] || 0) + Number(f.total || 0);
+    });
+    const por_metodo = Object.entries(metodoMap).map(([metodo, total]) => ({ metodo, total }));
+
+    // Por tipo NCF
+    const ncfMap = {};
+    facs.forEach(f => {
+      const t = f.ncf_tipo || "B02";
+      ncfMap[t] = (ncfMap[t] || 0) + Number(f.total || 0);
+    });
+    const por_ncf = Object.entries(ncfMap).map(([tipo, total]) => ({ tipo, total }));
+
+    // Costo de repuestos desde compras en el período
+    const { data: compras } = await supabase
+      .from("compras_inventario")
+      .select("total")
+      .neq("estado", "CANCELADA")
+      .gte("created_at", `${desde}T00:00:00`)
+      .lte("created_at", `${hasta}T23:59:59`);
+
+    const costo_repuestos = (compras || []).reduce((a, c) => a + Number(c.total || 0), 0);
+
+    // Gastos de caja chica en el período
+    const { data: gastosCC } = await supabase
+      .from("caja_chica")
+      .select("monto, tipo")
+      .gte("fecha", `${desde}T00:00:00`)
+      .lte("fecha", `${hasta}T23:59:59`);
+
+    const gastos_caja_chica = (gastosCC || [])
+      .filter(g => g.tipo === "EGRESO")
+      .reduce((a, g) => a + Number(g.monto || 0), 0);
+
+    // Utilidades
+    const utilidad_bruta  = subtotal_total - costo_repuestos;
+    const utilidad_neta   = utilidad_bruta - gastos_caja_chica;
+
+    res.json({
+      periodo:            { desde, hasta },
+      facturas_count:     facs.length,
+      ingresos_totales,
+      itbis_total,
+      subtotal_total,
+      costo_repuestos,
+      gastos_caja_chica,
+      utilidad_bruta,
+      utilidad_neta,
+      ticket_promedio:    facs.length ? ingresos_totales / facs.length : 0,
+      por_metodo,
+      por_ncf,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 🧾 COMPRAS DE INVENTARIO (ya existentes, expuestas aquí)
+// =====================================================
+app.get("/compras", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("compras_inventario")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // =====================================================
