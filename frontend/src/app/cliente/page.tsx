@@ -17,23 +17,27 @@ const PASOS_LABEL = ["Recibido","Diagnóstico","Reparación","C. Calidad","Listo
 export default function ClienteApp() {
   const [placa, setPlaca]                   = useState("");
   const [resultado, setResultado]           = useState<any>(null);
-  const [productos, setProductos]           = useState<any[]>([]);
+  const [repuestos, setRepuestos]           = useState<any[]>([]);
   const [loading, setLoading]               = useState(false);
   const [error, setError]                   = useState("");
   const [tab, setTab]                       = useState("estado");
   const [instalable, setInstalable]         = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
-  const [showProductos, setShowProductos]   = useState(false);
-  const [loadingProductos, setLoadingProductos] = useState(false);
-  const [productoAbierto, setProductoAbierto]   = useState<number | null>(null);
+  const [showRepuestos, setShowRepuestos]   = useState(false);
+  const [loadingRepuestos, setLoadingRepuestos] = useState(false);
+  const [repuestoAbierto, setRepuestoAbierto]   = useState<number | null>(null);
   const [esIOS, setEsIOS]                   = useState(false);
 
+  // ── CAFETERÍA ──
+  const [showCafe, setShowCafe]             = useState(false);
+  const [cafe, setCafe]                     = useState<any[]>([]);
+  const [loadingCafe, setLoadingCafe]       = useState(false);
+  const [cafeAbierto, setCafeAbierto]       = useState<number | null>(null);
+
   useEffect(() => {
-    // Detectar iOS
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     setEsIOS(ios);
 
-    // Registrar Service Worker
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
         navigator.serviceWorker.register('/sw.js')
@@ -42,7 +46,6 @@ export default function ClienteApp() {
       });
     }
 
-    // Capturar prompt instalación (Chrome/Android/Samsung/Edge)
     const handler = (e: any) => {
       e.preventDefault();
       setDeferredPrompt(e);
@@ -52,18 +55,32 @@ export default function ClienteApp() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
-  const verProductos = async () => {
-    const nuevoEstado = !showProductos;
-    setShowProductos(nuevoEstado);
-    setProductoAbierto(null);
-    if (!nuevoEstado || productos.length > 0) return;
-    setLoadingProductos(true);
+  const verRepuestos = async () => {
+    const nuevoEstado = !showRepuestos;
+    setShowRepuestos(nuevoEstado);
+    setRepuestoAbierto(null);
+    if (!nuevoEstado || repuestos.length > 0) return;
+    setLoadingRepuestos(true);
     try {
       const res  = await fetch(`${API}/inventario`);
       const data = await res.json();
-      setProductos(data || []);
+      setRepuestos(data || []);
     } catch {}
-    finally { setLoadingProductos(false); }
+    finally { setLoadingRepuestos(false); }
+  };
+
+  const verCafe = async () => {
+    const nuevo = !showCafe;
+    setShowCafe(nuevo);
+    setCafeAbierto(null);
+    if (!nuevo || cafe.length > 0) return;
+    setLoadingCafe(true);
+    try {
+      const res  = await fetch(`${API}/cafeteria/productos`);
+      const data = await res.json();
+      setCafe(Array.isArray(data) ? data : []);
+    } catch {}
+    finally { setLoadingCafe(false); }
   };
 
   const instalarApp = async () => {
@@ -172,14 +189,15 @@ export default function ClienteApp() {
         }
         .sas-hint { font-size:11px; color:#334155; margin-top:10px; }
 
-        .quick-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:14px; }
+        .quick-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:14px; }
         .btn-quick {
           padding:15px 10px; border-radius:16px; border:none;
           font-family:'DM Sans',sans-serif; font-weight:700; font-size:13px;
           cursor:pointer; transition:transform .15s;
         }
         .btn-quick:active { transform:scale(.97); }
-        .btn-productos { background:linear-gradient(135deg,#064e3b,#059669); color:#fff; box-shadow:0 4px 14px rgba(5,150,105,.3); }
+        .btn-repuestos { background:linear-gradient(135deg,#1e3a5f,#2563eb); color:#fff; box-shadow:0 4px 14px rgba(37,99,235,.3); }
+        .btn-cafe      { background:linear-gradient(135deg,#7c2d12,#ea580c); color:#fff; box-shadow:0 4px 14px rgba(234,88,12,.3); }
         .btn-wa-q      { background:linear-gradient(135deg,#14532d,#16a34a); color:#fff; box-shadow:0 4px 14px rgba(22,163,74,.3); }
 
         .card {
@@ -191,7 +209,7 @@ export default function ClienteApp() {
           color:#f1f5f9; margin-bottom:14px; letter-spacing:.5px;
         }
 
-        /* ACORDEÓN PRODUCTOS */
+        /* ACORDEÓN */
         .prod-accordion { display:flex; flex-direction:column; gap:6px; }
         .prod-item { border-radius:14px; border:1px solid rgba(255,255,255,0.07); overflow:hidden; transition:border-color .2s; }
         .prod-item.open { border-color:rgba(52,211,153,0.3); }
@@ -359,21 +377,16 @@ export default function ClienteApp() {
             <div className="sas-title">SÓLIDO AUTO SERVICIO & CAFE</div>
             <div className="sas-subtitle">Portal del Cliente · 809-712-2027</div>
 
-            {/* Botón instalar — Android/Chrome/Samsung/Edge */}
             {instalable && (
               <button onClick={instalarApp} className="btn-install">
                 📲 Instalar App
               </button>
             )}
-
-            {/* Instrucciones iOS — Safari únicamente */}
             {!instalable && esIOS && (
               <div className="ios-hint">
                 🍎 iPhone/iPad: toca <strong>Compartir</strong> → <strong>Agregar a inicio</strong>
               </div>
             )}
-
-            {/* Hint genérico si no es iOS ni tiene prompt */}
             {!instalable && !esIOS && (
               <div className="sas-hint">📲 Menú del navegador → Agregar a pantalla de inicio</div>
             )}
@@ -382,10 +395,13 @@ export default function ClienteApp() {
           {/* ── BODY ── */}
           <div style={{ padding:"16px" }}>
 
-            {/* ACCIONES RÁPIDAS */}
+            {/* ── ACCIONES RÁPIDAS (3 botones) ── */}
             <div className="quick-grid fade-up">
-              <button onClick={verProductos} className="btn-quick btn-productos">
-                🛒 {showProductos ? "Ocultar" : "Ver"} Productos
+              <button onClick={verRepuestos} className="btn-quick btn-repuestos">
+                🔩 {showRepuestos ? "Ocultar" : "Repuestos"}
+              </button>
+              <button onClick={verCafe} className="btn-quick btn-cafe">
+                ☕ {showCafe ? "Ocultar" : "Menú Café"}
               </button>
               <button
                 onClick={() => window.open("https://wa.me/18097122027","_blank")}
@@ -395,24 +411,24 @@ export default function ClienteApp() {
               </button>
             </div>
 
-            {/* ACORDEÓN PRODUCTOS */}
-            {showProductos && (
+            {/* ── ACORDEÓN REPUESTOS ── */}
+            {showRepuestos && (
               <div className="card fade-up">
-                <div className="card-title">🛒 Productos Disponibles</div>
-                {loadingProductos ? (
-                  <div className="loading-dots">Cargando productos...</div>
-                ) : productos.length === 0 ? (
-                  <div className="loading-dots">Sin productos disponibles.</div>
+                <div className="card-title">🔩 Repuestos Disponibles</div>
+                {loadingRepuestos ? (
+                  <div className="loading-dots">Cargando repuestos...</div>
+                ) : repuestos.length === 0 ? (
+                  <div className="loading-dots">Sin repuestos disponibles.</div>
                 ) : (
                   <div className="prod-accordion">
-                    {productos.slice(0,15).map((p: any) => {
-                      const abierto  = productoAbierto === p.id;
+                    {repuestos.slice(0,15).map((p: any) => {
+                      const abierto  = repuestoAbierto === p.id;
                       const hayStock = Number(p.stock) > 0;
                       return (
                         <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
                           <div
                             className="prod-item-header"
-                            onClick={() => setProductoAbierto(abierto ? null : p.id)}
+                            onClick={() => setRepuestoAbierto(abierto ? null : p.id)}
                           >
                             <span className="prod-item-name">
                               <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
@@ -436,7 +452,53 @@ export default function ClienteApp() {
               </div>
             )}
 
-            {/* BUSCADOR */}
+            {/* ── ACORDEÓN MENÚ CAFETERÍA ── */}
+            {showCafe && (
+              <div className="card fade-up">
+                <div className="card-title">☕ Menú Cafetería</div>
+                {loadingCafe ? (
+                  <div className="loading-dots">Cargando menú...</div>
+                ) : cafe.length === 0 ? (
+                  <div className="loading-dots">Sin productos en el menú.</div>
+                ) : (
+                  <div className="prod-accordion">
+                    {cafe.slice(0,20).map((p: any) => {
+                      const abierto  = cafeAbierto === p.id;
+                      const hayStock = Number(p.stock) > 0;
+                      return (
+                        <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
+                          <div
+                            className="prod-item-header"
+                            onClick={() => setCafeAbierto(abierto ? null : p.id)}
+                          >
+                            <span className="prod-item-name">
+                              <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
+                              {p.nombre}
+                              {p.categoria && (
+                                <span style={{ fontSize:11, color:"#475569", fontWeight:400 }}>
+                                  · {p.categoria}
+                                </span>
+                              )}
+                            </span>
+                            <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
+                          </div>
+                          <div className={`prod-item-body ${abierto ? "open" : ""}`}>
+                            <div className="prod-price-big">
+                              RD$ {Number(p.precio).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                            </div>
+                            <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
+                              {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ── BUSCADOR ── */}
             {!resultado && (
               <div className="card fade-up delay-1">
                 <div className="card-title">🔎 Consulta tu Vehículo</div>
@@ -463,7 +525,7 @@ export default function ClienteApp() {
               </div>
             )}
 
-            {/* RESULTADO */}
+            {/* ── RESULTADO ── */}
             {resultado && (
               <div>
                 <button
