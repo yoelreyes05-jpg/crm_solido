@@ -1,35 +1,57 @@
-const CACHE_NAME = 'solido-v1';
-const ASSETS = [
-  '/cliente',
-  '/logo-192x192.png',
-  '/logo-512x512.png',
-  '/logo.png',
-];
+// public/sw.js
+const CACHE_NAME = 'solido-v2';
 
-// Instalar y cachear assets
+// Al instalar, no pre-cacheamos nada — evita errores de URLs que no existen
 self.addEventListener('install', (e) => {
-  e.waitUntil(
-    caches.open(CACHE_NAME).then(cache => cache.addAll(ASSETS))
-  );
   self.skipWaiting();
 });
 
-// Limpiar caches viejos
 self.addEventListener('activate', (e) => {
+  // Eliminar caches viejos
   e.waitUntil(
     caches.keys().then(keys =>
-      Promise.all(keys.filter(k => k !== CACHE_NAME).map(k => caches.delete(k)))
+      Promise.all(
+        keys
+          .filter(k => k !== CACHE_NAME)
+          .map(k => caches.delete(k))
+      )
     )
   );
   self.clients.claim();
 });
 
-// ← ESTE ES EL FETCH HANDLER REAL que Chrome exige
+// Estrategia: Network first, cache como fallback
 self.addEventListener('fetch', (e) => {
+  // Solo manejar GET requests
+  if (e.request.method !== 'GET') return;
+
+  // No interceptar requests a la API
+  const url = new URL(e.request.url);
+  if (url.pathname.startsWith('/api/') || 
+      url.hostname !== self.location.hostname) {
+    return;
+  }
+
   e.respondWith(
-    caches.match(e.request).then(cached => {
-      // Sirve desde cache si existe, si no va a la red
-      return cached || fetch(e.request).catch(() => caches.match('/cliente'));
-    })
+    fetch(e.request)
+      .then(response => {
+        // Si la respuesta es válida, guardarla en caché
+        if (response && response.status === 200) {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then(cache => {
+            cache.put(e.request, responseClone);
+          });
+        }
+        return response;
+      })
+      .catch(() => {
+        // Sin internet — servir desde caché
+        return caches.match(e.request).then(cached => {
+          return cached || new Response('Sin conexión', {
+            status: 503,
+            headers: { 'Content-Type': 'text/plain' }
+          });
+        });
+      })
   );
 });
