@@ -59,6 +59,21 @@ function generarHTML(
     ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
     : "";
 
+  // ✅ FIX CHROME PRINT: usa setTimeout para que el DOM cargue antes de imprimir,
+  // y agrega botón manual como fallback por si el diálogo es bloqueado.
+  const printScript = `
+    <script>
+      function imprimirAhora() {
+        window.print();
+      }
+      window.onload = function() {
+        setTimeout(function() {
+          window.print();
+        }, 600);
+      };
+    <\/script>
+  `;
+
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
   <title>${esCotizacion ? "Cotización" : "Factura"} ${factura.ncf || ""}</title>
   <style>
@@ -97,6 +112,9 @@ function generarHTML(
     .footer{text-align:center;margin-top:30px;padding-top:16px;
       border-top:1px dashed #ccc;color:#777;font-size:12px;line-height:2;}
     .dgii-note{font-size:10.5px;color:#aaa;margin-top:3px;}
+    .btn-imprimir{display:block;margin:16px auto 0;padding:12px 32px;background:#111;
+      color:#fff;border:none;border-radius:8px;font-size:15px;font-weight:700;cursor:pointer;}
+    @media print { .btn-imprimir { display:none !important; } }
   </style></head><body>
 
   <div class="cabecera">
@@ -173,6 +191,8 @@ function generarHTML(
     <div class="t-row t-total"><span>TOTAL:</span><span>RD$ ${total.toFixed(2)}</span></div>
   </div>
 
+  <button class="btn-imprimir" onclick="imprimirAhora()">🖨️ Imprimir / Guardar PDF</button>
+
   <div class="footer">
     <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
     ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}
@@ -180,7 +200,7 @@ function generarHTML(
     <p class="dgii-note">Valide este comprobante en: <strong>www.dgii.gov.do</strong></p>
   </div>
 
-  <script>window.onload=function(){window.print();}</script>
+  ${printScript}
   </body></html>`;
 }
 
@@ -188,6 +208,9 @@ function abrirImpresion(html: string) {
   const w = window.open("", "_blank", "width=820,height=1000");
   if (w) { w.document.write(html); w.document.close(); }
 }
+
+// ─── TIPOS NCF QUE REQUIEREN RNC ────────────────────────────────────────────
+const NCF_REQUIERE_RNC = ["B01", "B14", "B15"];
 
 // ═══════════════════════════════════════════════════════════════════════════
 export default function FacturaPage() {
@@ -203,6 +226,8 @@ export default function FacturaPage() {
   const [vehiculoId, setVehiculoId]           = useState("");
   const [method, setMethod]                   = useState("EFECTIVO");
   const [ncfTipo, setNcfTipo]                 = useState("B02");
+  // ✅ NUEVO: RNC manual para cuando no hay cliente seleccionado pero se emite B01/B14/B15
+  const [rncManual, setRncManual]             = useState("");
   const [loading, setLoading]                 = useState(false);
   const [tab, setTab]                         = useState("nueva");
   const [busqueda, setBusqueda]               = useState("");
@@ -236,9 +261,6 @@ export default function FacturaPage() {
       setFacturas(await fRes.json() || []);
       const diags = await dRes.json() || [];
 
-      // ✅ FIX: Mostrar todos los diagnósticos no facturados/completados,
-      // sin importar si costo_estimado está vacío. Antes el filtro
-      // "&& d.costo_estimado" excluía diagnósticos con costo vacío.
       setDiagnosticos(diags.filter((d: any) =>
         !["FACTURADO", "COMPLETADO"].includes(d.estado)
       ));
@@ -246,6 +268,11 @@ export default function FacturaPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // ── Cuando cambia el tipo NCF, limpiar RNC manual si no aplica ───────────
+  useEffect(() => {
+    if (!NCF_REQUIERE_RNC.includes(ncfTipo)) setRncManual("");
+  }, [ncfTipo]);
 
   // ── Búsqueda cliente por RNC/nombre ─────────────────────────────────────
   const buscarCliente = (q: string) => {
@@ -264,25 +291,24 @@ export default function FacturaPage() {
     setClienteSel(c);
     setClienteId(String(c.id));
     setVehiculoId("");
-    setNcfTipo(c.tipo_cliente === "contribuyente" ? "B01" : "B02");
+    const tipoNcf = c.tipo_cliente === "contribuyente" ? "B01" : "B02";
+    setNcfTipo(tipoNcf);
+    // Pre-llenar RNC manual con el del cliente si aplica
+    if (NCF_REQUIERE_RNC.includes(tipoNcf) && c.rnc) setRncManual(c.rnc);
     setBusqRNC("");
     setResultRNC([]);
     setModoRNC(false);
   };
 
   // ── Cargar diagnóstico ───────────────────────────────────────────────────
-  // ✅ FIX: Ahora hace fetch del detalle completo para obtener mano_obra
-  // de la cotización si costo_estimado está vacío en el diagnóstico.
   const cargarDiagnostico = async (diag: any) => {
     setCargandoDiag(true);
     try {
-      // Setear cliente y vehículo
       const cli = clientes.find((c: any) => c.id === Number(diag.cliente_id));
       if (cli) { setClienteSel(cli); setClienteId(String(cli.id)); }
       setVehiculoId(String(diag.vehiculo_id));
       setDiagCargado(diag.id);
 
-      // Intentar obtener precio y detalle desde costo_estimado
       let precioMO = Number(diag.costo_estimado || 0);
       let descripcionMO = diag.mano_de_obra_detalle?.trim()
         ? diag.mano_de_obra_detalle
@@ -290,15 +316,12 @@ export default function FacturaPage() {
           ? `Mano de Obra — ${diag.tipo_servicio}`
           : "Mano de Obra Técnica";
 
-      // ✅ Si costo_estimado está vacío, buscar en la cotización asociada
       if (!precioMO) {
         try {
           const res = await fetch(`${API}/diagnosticos/${diag.id}`);
           const detalle = await res.json();
           if (detalle.cotizacion) {
-            // Usar mano_obra de la cotización como precio de la mano de obra
             precioMO = Number(detalle.cotizacion.mano_obra || 0);
-            // Si tampoco hay descripción, usar las notas de la cotización
             if (!detalle.diag?.mano_de_obra_detalle?.trim() && detalle.cotizacion.notas) {
               descripcionMO = detalle.cotizacion.notas;
             }
@@ -308,6 +331,7 @@ export default function FacturaPage() {
         }
       }
 
+      // ✅ NUEVO: itbis_aplica por defecto false para MO; el usuario puede activarlo desde el carrito
       const itemMO = {
         id:              `MO-${diag.id}`,
         descripcion:     descripcionMO,
@@ -319,7 +343,6 @@ export default function FacturaPage() {
         _diagId:         diag.id
       };
 
-      // Reemplazar MO previa si existe, agregar si no
       setCarrito(prev => [
         itemMO,
         ...prev.filter(p => !String(p.id).startsWith("MO-"))
@@ -368,6 +391,13 @@ export default function FacturaPage() {
     setCarrito(carrito.map(p => p.id === id ? { ...p, cantidad: cant } : p));
   };
 
+  // ✅ NUEVO: toggle ITBIS para cualquier ítem del carrito (especialmente mano de obra)
+  const toggleItbis = (id: any) => {
+    setCarrito(carrito.map(p =>
+      p.id === id ? { ...p, itbis_aplica: !p.itbis_aplica } : p
+    ));
+  };
+
   // ── Totales ───────────────────────────────────────────────────────────────
   const subtotal = carrito.reduce(
     (acc, p) => acc + Number(p.precio_unitario) * Number(p.cantidad), 0
@@ -378,16 +408,22 @@ export default function FacturaPage() {
   const total  = subtotal + itbis;
   const vuelto = Number(montoRecibido || 0) - total;
 
+  // ── RNC efectivo a usar en la factura ─────────────────────────────────────
+  const rncEfectivo = clienteSeleccionado?.rnc || rncManual || null;
+
   // ── Cotización (sin guardar en BD) ────────────────────────────────────────
   const handleCotizacion = () => {
     if (carrito.length === 0) return alert("Carrito vacío");
+    if (NCF_REQUIERE_RNC.includes(ncfTipo) && !rncEfectivo) {
+      return alert("Este tipo de NCF requiere el RNC/Cédula del cliente.");
+    }
     const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
     const mockFac = {
       subtotal, itbis, total,
       metodo_pago: method,
       vehiculo_info: veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "",
       cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
-      cliente_rnc:    clienteSeleccionado?.rnc || "",
+      cliente_rnc:    rncEfectivo,
       created_at: new Date()
     };
     abrirImpresion(generarHTML(mockFac, carrito, clienteSeleccionado, true));
@@ -396,6 +432,9 @@ export default function FacturaPage() {
   // ── Generar factura real ──────────────────────────────────────────────────
   const generarFactura = async () => {
     if (carrito.length === 0) return alert("Carrito vacío");
+    if (NCF_REQUIERE_RNC.includes(ncfTipo) && !rncEfectivo) {
+      return alert(`El tipo NCF ${ncfTipo} requiere RNC/Cédula del cliente. Por favor ingrésalo.`);
+    }
     if (Number(montoRecibido) > 0 && vuelto < 0)
       return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
 
@@ -420,7 +459,7 @@ export default function FacturaPage() {
         total,
         cliente_id:     clienteId ? Number(clienteId) : null,
         cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
-        cliente_rnc:    clienteSeleccionado?.rnc || null,
+        cliente_rnc:    rncEfectivo,
         vehiculo_id:    vehiculoId ? Number(vehiculoId) : null,
         vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : null,
         diagnostico_id: diagCargado || null
@@ -435,10 +474,11 @@ export default function FacturaPage() {
       if (data.error) { alert(data.error); return; }
 
       setUltimaFactura({ factura: data, items: snap });
-      abrirImpresion(generarHTML(data, snap, clienteSeleccionado, false));
+      abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false));
 
       setCarrito([]); setClienteId(""); setClienteSel(null);
       setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
+      setRncManual(""); setNcfTipo("B02");
       fetchData();
     } catch (e: any) { alert("Error generando factura: " + e.message); }
     finally { setLoading(false); }
@@ -574,7 +614,12 @@ export default function FacturaPage() {
                     setVehiculoId("");
                     const cli = clientes.find((c: any) => c.id === Number(e.target.value));
                     setClienteSel(cli || null);
-                    if (cli?.tipo_cliente === "contribuyente") setNcfTipo("B01");
+                    if (cli?.tipo_cliente === "contribuyente") {
+                      setNcfTipo("B01");
+                      if (cli.rnc) setRncManual(cli.rnc);
+                    } else {
+                      setRncManual("");
+                    }
                   }} style={input}>
                     <option value="">Consumidor Final</option>
                     {clientes.map((c: any) => (
@@ -620,7 +665,7 @@ export default function FacturaPage() {
                           {clienteSeleccionado.telefono}
                         </div>
                       </div>
-                      <button onClick={() => { setClienteSel(null); setClienteId(""); }}
+                      <button onClick={() => { setClienteSel(null); setClienteId(""); setRncManual(""); }}
                         style={{ background: "none", border: "none", color: "#ef4444",
                           cursor: "pointer", fontSize: 18 }}>✕</button>
                     </div>
@@ -662,6 +707,44 @@ export default function FacturaPage() {
                   </select>
                 </div>
               </div>
+
+              {/* ✅ NUEVO: Campo RNC visible solo cuando NCF lo requiere */}
+              {NCF_REQUIERE_RNC.includes(ncfTipo) && (
+                <div style={{ background: "#fef3c7", border: "1px solid #fde68a",
+                  borderRadius: 10, padding: "12px 14px", marginTop: 4 }}>
+                  <label style={{ ...labelS, color: "#92400e" }}>
+                    🏢 RNC / Cédula del Cliente <span style={{ color: "#dc2626" }}>*</span>
+                    <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
+                      (requerido para {ncfTipo})
+                    </span>
+                  </label>
+                  <input
+                    value={clienteSeleccionado?.rnc || rncManual}
+                    onChange={e => {
+                      if (!clienteSeleccionado) setRncManual(e.target.value);
+                    }}
+                    placeholder="Ej: 1-01-12345-6 ó 001-1234567-8"
+                    style={{
+                      ...input,
+                      marginBottom: 0,
+                      borderColor: (!clienteSeleccionado?.rnc && !rncManual) ? "#f87171" : "#fde68a",
+                      background: "#fffbeb",
+                      fontWeight: 600
+                    }}
+                    readOnly={!!clienteSeleccionado?.rnc}
+                  />
+                  {clienteSeleccionado?.rnc && (
+                    <p style={{ fontSize: 11, color: "#78350f", marginTop: 4 }}>
+                      ✅ RNC tomado del cliente seleccionado
+                    </p>
+                  )}
+                  {!clienteSeleccionado?.rnc && !rncManual && (
+                    <p style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>
+                      ⚠️ Sin RNC no podrás generar este comprobante
+                    </p>
+                  )}
+                </div>
+              )}
             </div>
 
             {/* REPUESTOS */}
@@ -713,7 +796,7 @@ export default function FacturaPage() {
               carrito.map(p => (
                 <div key={p.id} style={carritoRow}>
                   <div style={{ flex: 1 }}>
-                    <div style={{ display: "flex", gap: 6, marginBottom: 3 }}>
+                    <div style={{ display: "flex", gap: 6, marginBottom: 3, flexWrap: "wrap" }}>
                       <span style={{
                         fontSize: 10,
                         background: p.tipo === "mano_obra" ? "#fef3c7" : "#dcfce7",
@@ -722,11 +805,29 @@ export default function FacturaPage() {
                       }}>
                         {p.tipo === "mano_obra" ? "MANO OBRA" : "REPUESTO"}
                       </span>
+                      {/* ✅ NUEVO: Toggle ITBIS en el carrito */}
+                      <button
+                        onClick={() => toggleItbis(p.id)}
+                        title="Activar / desactivar ITBIS 18%"
+                        style={{
+                          fontSize: 10,
+                          padding: "2px 7px",
+                          borderRadius: 4,
+                          fontWeight: 700,
+                          border: "none",
+                          cursor: "pointer",
+                          background: p.itbis_aplica ? "#dcfce7" : "#f1f5f9",
+                          color:      p.itbis_aplica ? "#166534" : "#64748b"
+                        }}>
+                        {p.itbis_aplica ? "✓ ITBIS 18%" : "+ ITBIS"}
+                      </button>
                     </div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{p.descripcion}</div>
                     <div style={{ fontSize: 12, color: "#888" }}>
                       RD$ {Number(p.precio_unitario).toFixed(2)} c/u ·{" "}
-                      {p.itbis_aplica ? "ITBIS 18%" : "Sin ITBIS"}
+                      {p.itbis_aplica
+                        ? `ITBIS: RD$ ${(Number(p.precio_unitario) * p.cantidad * 0.18).toFixed(2)}`
+                        : "Sin ITBIS"}
                     </div>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
