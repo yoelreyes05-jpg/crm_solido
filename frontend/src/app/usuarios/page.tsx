@@ -5,15 +5,15 @@ import { API_URL as API } from "@/config";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },
-  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación" },
+  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación, contabilidad" },
   { value: "tecnico",    label: "🔧 Técnico",            desc: "Órdenes de trabajo y Diagnósticos" },
   { value: "almacen",    label: "📦 Almacén",            desc: "Inventario, Suplidores, Ventas" },
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },
 ];
 
 const PERMISOS = {
-  gerente:    ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Diagnósticos", "Inventario", "Suplidores", "Ventas", "Facturación", "Cafetería", "Usuarios"],
-  secretaria: ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Facturación"],
+  gerente:    ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Diagnósticos", "Inventario", "Suplidores", "Ventas", "Facturación", "Contabilidad", "Cafetería", "Usuarios"],
+  secretaria: ["Dashboard", "Clientes", "Vehículos", "Diagnostico", "Órdenes", "Contabilidad", "Facturación"],
   tecnico:    ["Órdenes", "Diagnósticos"],
   almacen:    ["Inventario", "Suplidores", "Ventas"],
   cafeteria:  ["Cafetería"],

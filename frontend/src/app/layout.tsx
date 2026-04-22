@@ -6,9 +6,9 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion"],
-  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion"],
-  tecnico:    ["ordenes","diagnosticos"],
+  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario", "contabilidad", "suplidores","ventas","facturacion","cafeteria","usuarios","configuracion"],
+  secretaria: ["dashboard","clientes","vehiculos", "contabilidad", "diagnostico", "ordenes","facturacion"],
+  tecnico:    ["ordenes", "dashboard", "diagnosticos"],
   almacen:    ["inventario","suplidores","ventas"],
   cafeteria:  ["cafeteria"],
 };
