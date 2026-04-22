@@ -59,18 +59,14 @@ function generarHTML(
     ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
     : "";
 
-  // ✅ FIX CHROME PRINT: usa setTimeout para que el DOM cargue antes de imprimir,
-  // y agrega botón manual como fallback por si el diálogo es bloqueado.
+  // ✅ FIX EDGE/CHROME PRINT: botón manual + autoprint con delay robusto.
+  // NO usamos window.open() para imprimir — se llama desde abrirImpresion via iframe.
   const printScript = `
     <script>
-      function imprimirAhora() {
-        window.print();
-      }
-      window.onload = function() {
-        setTimeout(function() {
-          window.print();
-        }, 600);
-      };
+      function imprimirAhora() { window.print(); }
+      document.addEventListener("DOMContentLoaded", function() {
+        setTimeout(function() { window.print(); }, 800);
+      });
     <\/script>
   `;
 
@@ -160,8 +156,8 @@ function generarHTML(
 
   <div class="dos-col">
     <div class="info-box">
-      <h3>Cliente</h3>
-      <p><strong>${factura.cliente_nombre || clienteExtra?.nombre || "Consumidor Final"}</strong></p>
+      <h3>${(factura.ncf_tipo && ["B01","B14","B15"].includes(factura.ncf_tipo)) ? "Comprobante Fiscal" : "Cliente"}</h3>
+      <p><strong>${factura.cliente_nombre || clienteExtra?.nombre || (factura.cliente_rnc ? "—" : "Consumidor Final")}</strong></p>
       ${(factura.cliente_rnc || clienteExtra?.rnc) ? `<p>RNC/Cédula: ${factura.cliente_rnc || clienteExtra.rnc}</p>` : ""}
       ${clienteExtra?.telefono ? `<p>Tel: ${clienteExtra.telefono}</p>` : ""}
       ${clienteExtra?.direccion ? `<p>${clienteExtra.direccion}</p>` : ""}
@@ -204,9 +200,40 @@ function generarHTML(
   </body></html>`;
 }
 
+// ✅ FIX EDGE PRINT: en lugar de window.open (bloqueado por Edge), usamos un
+// iframe oculto inyectado en el DOM actual. Edge permite imprimir iframes sin popup.
 function abrirImpresion(html: string) {
-  const w = window.open("", "_blank", "width=820,height=1000");
-  if (w) { w.document.write(html); w.document.close(); }
+  // Eliminar iframe previo si existe
+  const prev = document.getElementById("__print_iframe__");
+  if (prev) prev.remove();
+
+  const iframe = document.createElement("iframe");
+  iframe.id = "__print_iframe__";
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:820px;height:1000px;border:none;opacity:0;";
+  document.body.appendChild(iframe);
+
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (!doc) {
+    // Fallback: intentar con window.open igual
+    const w = window.open("", "_blank", "width=820,height=1000");
+    if (w) { w.document.write(html); w.document.close(); }
+    return;
+  }
+  doc.open();
+  doc.write(html);
+  doc.close();
+
+  // Esperar que cargue antes de imprimir
+  iframe.onload = () => {
+    try {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+    } catch (e) {
+      // Si falla (CSP o popup blocker), abrir en nueva pestaña como último recurso
+      const w = window.open("", "_blank", "width=820,height=1000");
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+  };
 }
 
 // ─── TIPOS NCF QUE REQUIEREN RNC ────────────────────────────────────────────
@@ -227,7 +254,9 @@ export default function FacturaPage() {
   const [method, setMethod]                   = useState("EFECTIVO");
   const [ncfTipo, setNcfTipo]                 = useState("B02");
   // ✅ NUEVO: RNC manual para cuando no hay cliente seleccionado pero se emite B01/B14/B15
-  const [rncManual, setRncManual]             = useState("");
+  const [rncManual, setRncManual]         = useState("");
+  const [razonSocial, setRazonSocial]     = useState("");
+  const [buscandoRNC, setBuscandoRNC]     = useState(false);
   const [loading, setLoading]                 = useState(false);
   const [tab, setTab]                         = useState("nueva");
   const [busqueda, setBusqueda]               = useState("");
@@ -271,10 +300,26 @@ export default function FacturaPage() {
 
   // ── Cuando cambia el tipo NCF, limpiar RNC manual si no aplica ───────────
   useEffect(() => {
-    if (!NCF_REQUIERE_RNC.includes(ncfTipo)) setRncManual("");
+    if (!NCF_REQUIERE_RNC.includes(ncfTipo)) { setRncManual(""); setRazonSocial(""); }
   }, [ncfTipo]);
 
-  // ── Búsqueda cliente por RNC/nombre ─────────────────────────────────────
+  // ── Consulta DGII por RNC (proxy backend) ───────────────────────────────
+  // El backend debe exponer GET /dgii/rnc/:rnc → { nombre, rnc, estado }
+  // Si no tienes ese endpoint, la búsqueda simplemente no retorna nada y el
+  // usuario escribe el nombre manualmente. No rompe nada.
+  const consultarRNC = async (rnc: string) => {
+    const limpio = rnc.replace(/[-\s]/g, "");
+    if (limpio.length < 9) return;
+    setBuscandoRNC(true);
+    try {
+      const res = await fetch(`${API}/dgii/rnc/${limpio}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data?.nombre) setRazonSocial(data.nombre);
+      }
+    } catch { /* silencioso — el usuario escribe manualmente */ }
+    finally { setBuscandoRNC(false); }
+  };
   const buscarCliente = (q: string) => {
     setBusqRNC(q);
     if (q.length < 2) { setResultRNC([]); return; }
@@ -293,8 +338,8 @@ export default function FacturaPage() {
     setVehiculoId("");
     const tipoNcf = c.tipo_cliente === "contribuyente" ? "B01" : "B02";
     setNcfTipo(tipoNcf);
-    // Pre-llenar RNC manual con el del cliente si aplica
     if (NCF_REQUIERE_RNC.includes(tipoNcf) && c.rnc) setRncManual(c.rnc);
+    setRazonSocial(c.nombre || "");
     setBusqRNC("");
     setResultRNC([]);
     setModoRNC(false);
@@ -408,8 +453,9 @@ export default function FacturaPage() {
   const total  = subtotal + itbis;
   const vuelto = Number(montoRecibido || 0) - total;
 
-  // ── RNC efectivo a usar en la factura ─────────────────────────────────────
-  const rncEfectivo = clienteSeleccionado?.rnc || rncManual || null;
+  // ── RNC y nombre efectivos a usar en la factura ───────────────────────────
+  const rncEfectivo    = clienteSeleccionado?.rnc || rncManual || null;
+  const nombreEfectivo = clienteSeleccionado?.nombre || razonSocial || "";
 
   // ── Cotización (sin guardar en BD) ────────────────────────────────────────
   const handleCotizacion = () => {
@@ -458,7 +504,7 @@ export default function FacturaPage() {
         itbis,
         total,
         cliente_id:     clienteId ? Number(clienteId) : null,
-        cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
+        cliente_nombre: nombreEfectivo || "Consumidor Final",
         cliente_rnc:    rncEfectivo,
         vehiculo_id:    vehiculoId ? Number(vehiculoId) : null,
         vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : null,
@@ -478,7 +524,7 @@ export default function FacturaPage() {
 
       setCarrito([]); setClienteId(""); setClienteSel(null);
       setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
-      setRncManual(""); setNcfTipo("B02");
+      setRncManual(""); setRazonSocial(""); setNcfTipo("B02");
       fetchData();
     } catch (e: any) { alert("Error generando factura: " + e.message); }
     finally { setLoading(false); }
@@ -620,6 +666,7 @@ export default function FacturaPage() {
                     } else {
                       setRncManual("");
                     }
+                    setRazonSocial(cli?.nombre || "");
                   }} style={input}>
                     <option value="">Consumidor Final</option>
                     {clientes.map((c: any) => (
@@ -665,7 +712,7 @@ export default function FacturaPage() {
                           {clienteSeleccionado.telefono}
                         </div>
                       </div>
-                      <button onClick={() => { setClienteSel(null); setClienteId(""); setRncManual(""); }}
+                      <button onClick={() => { setClienteSel(null); setClienteId(""); setRncManual(""); setRazonSocial(""); }}
                         style={{ background: "none", border: "none", color: "#ef4444",
                           cursor: "pointer", fontSize: 18 }}>✕</button>
                     </div>
@@ -708,39 +755,76 @@ export default function FacturaPage() {
                 </div>
               </div>
 
-              {/* ✅ NUEVO: Campo RNC visible solo cuando NCF lo requiere */}
+              {/* ✅ NUEVO: Campo RNC + Razón Social visible solo cuando NCF lo requiere */}
               {NCF_REQUIERE_RNC.includes(ncfTipo) && (
                 <div style={{ background: "#fef3c7", border: "1px solid #fde68a",
                   borderRadius: 10, padding: "12px 14px", marginTop: 4 }}>
                   <label style={{ ...labelS, color: "#92400e" }}>
-                    🏢 RNC / Cédula del Cliente <span style={{ color: "#dc2626" }}>*</span>
+                    🏢 RNC / Cédula <span style={{ color: "#dc2626" }}>*</span>
                     <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
                       (requerido para {ncfTipo})
                     </span>
                   </label>
+                  <div style={{ display: "flex", gap: 6 }}>
+                    <input
+                      value={clienteSeleccionado?.rnc || rncManual}
+                      onChange={e => {
+                        if (!clienteSeleccionado) setRncManual(e.target.value);
+                      }}
+                      onBlur={e => {
+                        if (!clienteSeleccionado && e.target.value) consultarRNC(e.target.value);
+                      }}
+                      placeholder="Ej: 1-01-12345-6"
+                      style={{
+                        ...input, marginBottom: 0, flex: 1,
+                        borderColor: (!clienteSeleccionado?.rnc && !rncManual) ? "#f87171" : "#fde68a",
+                        background: "#fffbeb", fontWeight: 600
+                      }}
+                      readOnly={!!clienteSeleccionado?.rnc}
+                    />
+                    {!clienteSeleccionado && (
+                      <button
+                        type="button"
+                        onClick={() => consultarRNC(rncManual)}
+                        disabled={buscandoRNC || rncManual.length < 6}
+                        style={{ padding: "0 12px", background: "#92400e", color: "#fff",
+                          border: "none", borderRadius: 8, cursor: "pointer",
+                          fontSize: 12, fontWeight: 700, whiteSpace: "nowrap",
+                          opacity: (buscandoRNC || rncManual.length < 6) ? 0.5 : 1 }}>
+                        {buscandoRNC ? "..." : "🔍 Consultar"}
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Campo Razón Social */}
+                  <label style={{ ...labelS, color: "#92400e", marginTop: 10 }}>
+                    🏷️ Razón Social / Nombre
+                    {buscandoRNC && <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>Consultando DGII...</span>}
+                  </label>
                   <input
-                    value={clienteSeleccionado?.rnc || rncManual}
-                    onChange={e => {
-                      if (!clienteSeleccionado) setRncManual(e.target.value);
-                    }}
-                    placeholder="Ej: 1-01-12345-6 ó 001-1234567-8"
+                    value={clienteSeleccionado?.nombre || razonSocial}
+                    onChange={e => { if (!clienteSeleccionado) setRazonSocial(e.target.value); }}
+                    placeholder="Nombre de la empresa o persona"
                     style={{
-                      ...input,
-                      marginBottom: 0,
-                      borderColor: (!clienteSeleccionado?.rnc && !rncManual) ? "#f87171" : "#fde68a",
-                      background: "#fffbeb",
-                      fontWeight: 600
+                      ...input, marginBottom: 0,
+                      borderColor: "#fde68a", background: "#fffbeb"
                     }}
-                    readOnly={!!clienteSeleccionado?.rnc}
+                    readOnly={!!clienteSeleccionado?.nombre}
                   />
+
                   {clienteSeleccionado?.rnc && (
-                    <p style={{ fontSize: 11, color: "#78350f", marginTop: 4 }}>
-                      ✅ RNC tomado del cliente seleccionado
+                    <p style={{ fontSize: 11, color: "#78350f", marginTop: 6 }}>
+                      ✅ RNC y nombre tomados del cliente seleccionado
                     </p>
                   )}
                   {!clienteSeleccionado?.rnc && !rncManual && (
-                    <p style={{ fontSize: 11, color: "#dc2626", marginTop: 4 }}>
+                    <p style={{ fontSize: 11, color: "#dc2626", marginTop: 6 }}>
                       ⚠️ Sin RNC no podrás generar este comprobante
+                    </p>
+                  )}
+                  {!clienteSeleccionado && rncManual && !razonSocial && (
+                    <p style={{ fontSize: 11, color: "#b45309", marginTop: 6 }}>
+                      💡 Escribe la razón social manualmente o presiona "Consultar" para buscarla en DGII
                     </p>
                   )}
                 </div>
