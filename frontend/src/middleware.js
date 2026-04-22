@@ -11,37 +11,36 @@ const PERMISOS = {
 export function middleware(request) {
   const { pathname } = request.nextUrl;
 
-  // 1. RUTAS PÚBLICAS (No requieren login ni revisión de rol)
-  // Agregamos /cliente, /catalogo y archivos de configuración de la PWA
-  const esPublica = 
-    pathname === "/login" || 
-    pathname.startsWith("/cliente") || 
+  const esPublica =
+    pathname === "/login" ||
+    pathname.startsWith("/cliente") ||
     pathname.startsWith("/catalogo") ||
-    pathname.startsWith("/manifest.json") ||
-    pathname.startsWith("/sw.js") || // Service Worker
+    pathname === "/manifest.json" ||
+    pathname === "/sw.js" ||
+    pathname === "/workbox-*.js" ||
     pathname.startsWith("/icons") ||
-    pathname.startsWith("/_next") || 
+    pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
-    pathname.includes("favicon.ico");
+    pathname.endsWith(".png") ||   // ← NUEVO: todas las imágenes PNG
+    pathname.endsWith(".jpg") ||   // ← NUEVO
+    pathname.endsWith(".ico") ||   // ← NUEVO
+    pathname.endsWith(".svg") ||   // ← NUEVO
+    pathname.includes("favicon");
 
   if (esPublica) {
     return NextResponse.next();
   }
 
-  // 2. VERIFICACIÓN DE SESIÓN (Para empleados/gerente)
   const usuarioCookie = request.cookies.get("usuario")?.value;
-
   if (!usuarioCookie) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   try {
     const usuario = JSON.parse(decodeURIComponent(usuarioCookie));
-    
-    // El gerente tiene acceso total
+
     if (usuario.rol === "gerente") return NextResponse.next();
 
-    // 3. VERIFICACIÓN DE PERMISOS POR ROL
     const permitidas = PERMISOS[usuario.rol] || [];
     const tieneAcceso = permitidas.some(ruta =>
       pathname === ruta || pathname.startsWith(ruta + "/")
@@ -64,5 +63,8 @@ export function middleware(request) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+  // NUEVO: excluir archivos estáticos, imágenes y archivos PWA del matcher
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.png|.*\\.jpg|.*\\.svg|.*\\.ico|sw\\.js|workbox-.*\\.js|manifest\\.json).*)",
+  ],
 };

@@ -1,16 +1,48 @@
 /** @type {import('next').NextConfig} */
 const withPWA = require('next-pwa')({
-  dest: 'public',         // Donde se generarán los archivos del Service Worker
-  register: true,         // Registra el service worker automáticamente
-  skipWaiting: true,      // Activa el nuevo service worker de inmediato
-  disable: process.env.NODE_ENV === 'development' // Desactivar en desarrollo para evitar caché molesto
+  dest: 'public',
+  register: true,
+  skipWaiting: true,
+  disable: process.env.NODE_ENV === 'development',
+  // ── CRÍTICO para Vercel ──
+  buildExcludes: [/middleware-manifest\.json$/],
+  publicExcludes: ['!robots.txt', '!sitemap.xml'],
+  // Evita que next-pwa intente cachear rutas protegidas
+  runtimeCaching: [
+    {
+      // Archivos estáticos — cache first
+      urlPattern: /^https:\/\/crm-solido\.vercel\.app\/_next\/static\/.*/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'static-assets',
+        expiration: { maxEntries: 200, maxAgeSeconds: 30 * 24 * 60 * 60 },
+      },
+    },
+    {
+      // Imágenes — cache first
+      urlPattern: /^https:\/\/crm-solido\.vercel\.app\/.*\.(png|jpg|jpeg|svg|ico)$/i,
+      handler: 'CacheFirst',
+      options: {
+        cacheName: 'images',
+        expiration: { maxEntries: 50, maxAgeSeconds: 30 * 24 * 60 * 60 },
+      },
+    },
+    {
+      // Página /cliente — network first
+      urlPattern: /^https:\/\/crm-solido\.vercel\.app\/cliente.*/i,
+      handler: 'NetworkFirst',
+      options: {
+        cacheName: 'cliente-page',
+        expiration: { maxEntries: 10, maxAgeSeconds: 24 * 60 * 60 },
+      },
+    },
+  ],
 });
 
 const nextConfig = {
   env: {
     NEXT_PUBLIC_API_URL: process.env.NEXT_PUBLIC_API_URL,
   },
-  // Aquí puedes agregar otras configuraciones de Next.js si las necesitas
 };
 
 module.exports = withPWA(nextConfig);

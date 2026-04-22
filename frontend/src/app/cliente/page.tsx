@@ -356,7 +356,7 @@ export default function ClienteApp() {
               className="sas-logo"
               onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
             />
-            <div className="sas-title">SÓLIDO AUTO SERVICIO</div>
+            <div className="sas-title">SÓLIDO AUTO SERVICIO & CAFE</div>
             <div className="sas-subtitle">Portal del Cliente · 809-712-2027</div>
 
             {/* Botón instalar — Android/Chrome/Samsung/Edge */}
