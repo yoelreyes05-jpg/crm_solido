@@ -10,11 +10,19 @@ const EMPRESA = {
   direccion: "Santo Domingo, República Dominicana"
 };
 
+const NCF_LABEL_MAP: Record<string, string> = {
+  B01: "Crédito Fiscal",
+  B02: "Consumidor Final",
+  B14: "Régimen Especial",
+  B15: "Gubernamental",
+};
+
 function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
   const fecha = new Date(venta.created_at || Date.now()).toLocaleString("es-DO", {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit"
   });
+  const ncfLabel = NCF_LABEL_MAP[venta.ncf_tipo] || venta.ncf_tipo || "B02";
   const lineas = items.map((i: any) => `
     <tr>
       <td style="padding:8px 6px;border-bottom:1px solid #eee;">${i.nombre}</td>
@@ -48,9 +56,9 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
   <div style="font-size:12px;margin-bottom:10px;">
     <b>Fecha:</b> ${fecha}<br/>
     <b>Método:</b> ${metodoPago}<br/>
-    <b>NCF Tipo:</b> ${venta.ncf_tipo || "B02"}
+    <b>Comprobante:</b> ${venta.ncf_tipo || "B02"} — ${ncfLabel}
   </div>
-  ${venta.ncf ? `<div class="ncf-box"><div style="font-size:9px;opacity:0.7;margin-bottom:2px;">COMPROBANTE FISCAL</div><div class="ncf-num">${venta.ncf}</div></div>` : ""}
+  ${venta.ncf ? `<div class="ncf-box"><div style="font-size:9px;opacity:0.7;margin-bottom:2px;">COMPROBANTE FISCAL — ${ncfLabel}</div><div class="ncf-num">${venta.ncf}</div></div>` : ""}
   <table>
     <thead><tr>
       <th>Descripción</th><th style="text-align:center;">Cant.</th>
@@ -104,6 +112,10 @@ export default function CafeteriaPage() {
   const [editImagenB64, setEditImagenB64] = useState<string>("");
   const fileInputRef = useRef<HTMLInputElement>(null);
   const fileEditRef  = useRef<HTMLInputElement>(null);
+  // Editar producto completo
+  const [editandoId, setEditandoId]   = useState<number|null>(null);
+  const [editForm, setEditForm]       = useState<any>({});
+  const [guardandoEdit, setGuardandoEdit] = useState(false);
 
   const obtener = async () => {
     try {
@@ -189,6 +201,37 @@ export default function CafeteriaPage() {
     reader.readAsDataURL(file);
   };
 
+  // ── Editar producto completo ──────────────────────────────────────────────
+  const iniciarEdicion = (p: any) => {
+    setEditandoId(p.id);
+    setEditForm({ nombre: p.nombre, precio: p.precio, categoria: p.categoria || "", stock: p.stock });
+    setEditImagenId(null); // cerrar imagen si estaba abierto
+  };
+  const guardarEdicion = async () => {
+    if (!editandoId) return;
+    setGuardandoEdit(true);
+    try {
+      const res = await fetch(`${API}/cafeteria/productos/${editandoId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editForm),
+      });
+      const data = await res.json();
+      if (data.error) { alert("Error: " + data.error); return; }
+      setEditandoId(null);
+      setEditForm({});
+      obtener();
+    } catch { alert("Error al guardar"); }
+    finally { setGuardandoEdit(false); }
+  };
+  const eliminarProducto = async (id: number, nombre: string) => {
+    if (!confirm(`¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`)) return;
+    try {
+      await fetch(`${API}/cafeteria/productos/${id}`, { method: "DELETE" });
+      obtener();
+    } catch { alert("Error al eliminar"); }
+  };
+
   // ── Guardar imagen de producto existente ──────────────────────────────────
   const guardarImagenProducto = async () => {
     if (!editImagenId || !editImagenB64) return;
@@ -246,22 +289,45 @@ export default function CafeteriaPage() {
           <div style={card}>
             <h2 style={cardTitle}>🛒 Orden</h2>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 12 }}>
-              <div>
-                <label style={label}>Método de pago</label>
-                <select value={metodoPago} onChange={e => setMetodoPago(e.target.value)} style={input}>
-                  <option value="EFECTIVO">Efectivo</option>
-                  <option value="TARJETA">Tarjeta</option>
-                  <option value="TRANSFERENCIA">Transferencia</option>
-                </select>
+            {/* Método de pago */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={label}>Método de pago</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { k: "EFECTIVO",      l: "💵 Efectivo",     c: "#10b981" },
+                  { k: "TARJETA",       l: "💳 Tarjeta",      c: "#3b82f6" },
+                  { k: "TRANSFERENCIA", l: "📲 Transfer.",    c: "#8b5cf6" },
+                ].map(m => (
+                  <button key={m.k} onClick={() => setMetodoPago(m.k)} style={{
+                    flex: 1, padding: "9px 6px", borderRadius: 8, border: "none",
+                    cursor: "pointer", fontWeight: 700, fontSize: 12,
+                    background: metodoPago === m.k ? m.c : "#f1f5f9",
+                    color: metodoPago === m.k ? "#fff" : "#555",
+                    boxShadow: metodoPago === m.k ? `0 2px 8px ${m.c}55` : "none",
+                  }}>{m.l}</button>
+                ))}
               </div>
-              <div>
-                <label style={label}>Tipo Comprobante</label>
-                <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)} style={input}>
-                  <option value="B02">B02 — Consumidor Final</option>
-                  <option value="B01">B01 — Crédito Fiscal</option>
-                  <option value="B15">B15 — Gubernamental</option>
-                </select>
+            </div>
+            {/* Tipo comprobante — botones para evitar bug visual del select */}
+            <div style={{ marginBottom: 12 }}>
+              <label style={label}>🧾 Tipo Comprobante</label>
+              <div style={{ display: "flex", gap: 6 }}>
+                {[
+                  { k: "B02", l: "B02", d: "Consumidor Final" },
+                  { k: "B01", l: "B01", d: "Crédito Fiscal"   },
+                  { k: "B15", l: "B15", d: "Gubernamental"     },
+                ].map(n => (
+                  <button key={n.k} onClick={() => setNcfTipo(n.k)} style={{
+                    flex: 1, padding: "8px 4px", borderRadius: 8, border: "none",
+                    cursor: "pointer", fontWeight: 700, fontSize: 11, lineHeight: 1.3,
+                    background: ncfTipo === n.k ? "#1d4ed8" : "#f1f5f9",
+                    color: ncfTipo === n.k ? "#fff" : "#555",
+                    boxShadow: ncfTipo === n.k ? "0 2px 8px rgba(29,78,216,0.35)" : "none",
+                  }}>
+                    <div style={{ fontSize: 12, fontWeight: 900 }}>{n.l}</div>
+                    <div style={{ fontSize: 10, opacity: 0.8 }}>{n.d}</div>
+                  </button>
+                ))}
               </div>
             </div>
 
@@ -360,39 +426,98 @@ export default function CafeteriaPage() {
           <div style={card}>
             <h3 style={{ marginBottom:14, fontSize:16, fontWeight:700 }}>📋 Productos existentes ({productos.length})</h3>
             {productos.map(p => (
-              <div key={p.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 0", borderBottom:"1px solid #f0f0f0" }}>
-                {/* Thumbnail */}
-                {p.imagen
-                  ? <img src={p.imagen} alt={p.nombre} style={{ width:48, height:48, borderRadius:8, objectFit:"cover", border:"1px solid #e5e7eb", flexShrink:0 }} />
-                  : <div style={{ width:48, height:48, borderRadius:8, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>☕</div>
-                }
-                <div style={{ flex:1 }}>
-                  <div style={{ fontWeight:700, fontSize:14 }}>{p.nombre}</div>
-                  <div style={{ fontSize:12, color:"#888" }}>{p.categoria} · Stock: {p.stock} · RD$ {Number(p.precio).toFixed(2)}</div>
-                </div>
-                {/* Cambiar imagen */}
-                {editImagenId === p.id ? (
-                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
-                    <input ref={fileEditRef} type="file" accept="image/*"
-                      onChange={e => { const f = e.target.files?.[0]; if (f) leerImagen(f, b64 => setEditImagenB64(b64)); }}
-                      style={{ fontSize:11, maxWidth:140 }} />
-                    {editImagenB64 && (
-                      <img src={editImagenB64} alt="preview" style={{ width:36, height:36, borderRadius:6, objectFit:"cover" }} />
-                    )}
-                    <button onClick={guardarImagenProducto} disabled={!editImagenB64}
-                      style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                      ✓
-                    </button>
-                    <button onClick={() => { setEditImagenId(null); setEditImagenB64(""); }}
-                      style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:6, padding:"5px 10px", fontSize:12, cursor:"pointer" }}>
-                      ✕
-                    </button>
+              <div key={p.id}>
+                {/* ── Fila normal ── */}
+                {editandoId !== p.id && (
+                  <div style={{ display:"flex", alignItems:"center", gap:10, padding:"10px 0", borderBottom:"1px solid #f0f0f0" }}>
+                    {/* Thumbnail */}
+                    {p.imagen
+                      ? <img src={p.imagen} alt={p.nombre} style={{ width:50, height:50, borderRadius:8, objectFit:"cover", border:"1px solid #e5e7eb", flexShrink:0 }} />
+                      : <div style={{ width:50, height:50, borderRadius:8, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:22, flexShrink:0 }}>☕</div>
+                    }
+                    <div style={{ flex:1 }}>
+                      <div style={{ fontWeight:700, fontSize:14 }}>{p.nombre}</div>
+                      <div style={{ fontSize:12, color:"#888" }}>
+                        {p.categoria} ·{" "}
+                        <span style={{ color: p.stock <= 0 ? "#ef4444" : p.stock <= 3 ? "#f59e0b" : "#10b981", fontWeight:700 }}>
+                          Stock: {p.stock}
+                        </span>
+                        {" · "}RD$ {Number(p.precio).toFixed(2)}
+                      </div>
+                    </div>
+                    {/* Acciones */}
+                    <div style={{ display:"flex", gap:6, flexShrink:0 }}>
+                      <button onClick={() => { setEditImagenId(p.id); setEditandoId(null); setEditImagenB64(""); }}
+                        title="Cambiar imagen"
+                        style={{ background:"#f1f5f9", color:"#555", border:"1px solid #e2e8f0", borderRadius:7, padding:"5px 10px", fontSize:12, cursor:"pointer" }}>
+                        📸
+                      </button>
+                      <button onClick={() => iniciarEdicion(p)}
+                        style={{ background:"#eff6ff", color:"#1d4ed8", border:"1px solid #bfdbfe", borderRadius:7, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                        ✏️ Editar
+                      </button>
+                      <button onClick={() => eliminarProducto(p.id, p.nombre)}
+                        style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                        🗑
+                      </button>
+                    </div>
                   </div>
-                ) : (
-                  <button onClick={() => { setEditImagenId(p.id); setEditImagenB64(""); }}
-                    style={{ background:"#f1f5f9", color:"#555", border:"1px solid #e2e8f0", borderRadius:6, padding:"5px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
-                    📸 {p.imagen ? "Cambiar img" : "+ Imagen"}
-                  </button>
+                )}
+
+                {/* ── Formulario de imagen ── */}
+                {editImagenId === p.id && editandoId !== p.id && (
+                  <div style={{ background:"#f8fafc", border:"1px solid #e2e8f0", borderRadius:10, padding:"12px 14px", marginBottom:8 }}>
+                    <div style={{ fontSize:13, fontWeight:700, marginBottom:8 }}>📸 Cambiar imagen de "{p.nombre}"</div>
+                    <div style={{ display:"flex", alignItems:"center", gap:10, flexWrap:"wrap" }}>
+                      <input ref={fileEditRef} type="file" accept="image/*"
+                        onChange={e => { const f = e.target.files?.[0]; if (f) leerImagen(f, b64 => setEditImagenB64(b64)); }}
+                        style={{ fontSize:12 }} />
+                      {editImagenB64 && <img src={editImagenB64} alt="preview" style={{ width:40, height:40, borderRadius:6, objectFit:"cover" }} />}
+                      <button onClick={guardarImagenProducto} disabled={!editImagenB64}
+                        style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:7, padding:"6px 14px", fontSize:12, fontWeight:700, cursor:"pointer" }}>✓ Guardar</button>
+                      <button onClick={() => { setEditImagenId(null); setEditImagenB64(""); }}
+                        style={{ background:"#f1f5f9", color:"#555", border:"1px solid #ddd", borderRadius:7, padding:"6px 10px", fontSize:12, cursor:"pointer" }}>✕</button>
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Formulario de edición completa ── */}
+                {editandoId === p.id && (
+                  <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:12, padding:"14px 16px", marginBottom:8 }}>
+                    <div style={{ fontSize:13, fontWeight:800, color:"#1d4ed8", marginBottom:10 }}>✏️ Editando: {p.nombre}</div>
+                    <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:10 }}>
+                      <div>
+                        <label style={{ ...label, color:"#1d4ed8" }}>Nombre</label>
+                        <input value={editForm.nombre || ""} onChange={e => setEditForm((f:any) => ({...f, nombre:e.target.value}))}
+                          style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
+                      </div>
+                      <div>
+                        <label style={{ ...label, color:"#1d4ed8" }}>Categoría</label>
+                        <input value={editForm.categoria || ""} onChange={e => setEditForm((f:any) => ({...f, categoria:e.target.value}))}
+                          style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
+                      </div>
+                      <div>
+                        <label style={{ ...label, color:"#1d4ed8" }}>Precio (RD$)</label>
+                        <input type="number" value={editForm.precio || ""} onChange={e => setEditForm((f:any) => ({...f, precio:e.target.value}))}
+                          style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
+                      </div>
+                      <div>
+                        <label style={{ ...label, color:"#1d4ed8" }}>Stock</label>
+                        <input type="number" value={editForm.stock ?? ""} onChange={e => setEditForm((f:any) => ({...f, stock:Number(e.target.value)}))}
+                          style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button onClick={guardarEdicion} disabled={guardandoEdit}
+                        style={{ background:"#1d4ed8", color:"#fff", border:"none", borderRadius:8, padding:"9px 20px", fontSize:13, fontWeight:700, cursor:"pointer" }}>
+                        {guardandoEdit ? "Guardando..." : "✓ Guardar Cambios"}
+                      </button>
+                      <button onClick={() => { setEditandoId(null); setEditForm({}); }}
+                        style={{ background:"#f1f5f9", color:"#555", border:"1px solid #ddd", borderRadius:8, padding:"9px 16px", fontSize:13, cursor:"pointer" }}>
+                        Cancelar
+                      </button>
+                    </div>
+                  </div>
                 )}
               </div>
             ))}

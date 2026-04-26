@@ -4,7 +4,7 @@ import { API_URL as API } from "@/config";
 
 // ─── Empresa ─────────────────────────────────────────────────────────────────
 const EMPRESA = {
-  nombre: "SÓLIDO AUTO CAFÉ",
+  nombre: "SÓLIDO CAFE GARAGE",
   sub: "Sólido Auto Servicio SRL",
   telefono: "809-712-2027",
 };
@@ -21,10 +21,11 @@ const METODOS = [
 
 // ─── Tipos NCF ────────────────────────────────────────────────────────────────
 const NCF_TIPOS = [
-  { key: "B02", label: "B02 — Consumidor Final" },
-  { key: "B01", label: "B01 — Crédito Fiscal" },
-  { key: "B14", label: "B14 — Régimen Especial" },
+  { key: "B02", label: "B02 — Consumidor Final",  desc: "Consumidor Final"  },
+  { key: "B01", label: "B01 — Crédito Fiscal",    desc: "Crédito Fiscal"    },
+  { key: "B14", label: "B14 — Régimen Especial",  desc: "Régimen Especial"  },
 ];
+const NCF_DESC = Object.fromEntries(NCF_TIPOS.map(n => [n.key, n.desc]));
 
 // ─── Print via iframe (proven method) ────────────────────────────────────────
 function imprimirHTML(html) {
@@ -50,6 +51,7 @@ function imprimirHTML(html) {
 // ─── HTML del recibo ──────────────────────────────────────────────────────────
 function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId) {
   const fecha = new Date().toLocaleString("es-DO", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
+  const ncfDesc = NCF_DESC[ncfTipo] || ncfTipo;
   const lineas = items.map(p =>
     `<div class="item"><span>${p.nombre} x${p.qty}</span><span>RD$ ${(p.precio * p.qty).toFixed(2)}</span></div>`
   ).join("");
@@ -59,13 +61,14 @@ function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId) {
     body { font-family:'Courier New',monospace; font-size:13px; max-width:320px; margin:0 auto; padding:20px 16px; }
     .center { text-align:center; }
     .bold { font-weight:700; }
-    .lg { font-size:16px; }
+    .lg { font-size:17px; }
     .sm { font-size:11px; color:#666; }
     hr { border:none; border-top:1px dashed #ccc; margin:10px 0; }
-    .item { display:flex; justify-content:space-between; padding:4px 0; border-bottom:1px dotted #eee; }
-    .total-row { display:flex; justify-content:space-between; padding:8px 0; font-size:15px; font-weight:900; border-top:2px solid #111; margin-top:6px; }
+    .item { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px dotted #eee; }
+    .total-row { display:flex; justify-content:space-between; padding:9px 0; font-size:16px; font-weight:900; border-top:2px solid #111; margin-top:6px; }
     .ncf-box { background:#111; color:#fff; padding:10px 12px; border-radius:6px; margin:12px 0; text-align:center; }
     .ncf-num { font-size:17px; font-weight:900; letter-spacing:3px; }
+    .ncf-tipo { font-size:11px; color:rgba(255,255,255,.65); margin-top:3px; }
     @media print { body { padding:4px; } }
   </style></head><body>
   <div class="center">
@@ -74,16 +77,24 @@ function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId) {
     <div class="sm">Tel: ${EMPRESA.telefono}</div>
   </div>
   <hr/>
-  <div class="center sm">Fecha: ${fecha}<br/>Recibo: #${String(ventaId || "---").padStart(5,"0")}</div>
+  <div class="center sm">
+    Fecha: ${fecha}<br/>
+    Recibo: #${String(ventaId || "---").padStart(5,"0")}<br/>
+    Comprobante: <strong>${ncfDesc}</strong>
+  </div>
   <hr/>
   ${lineas}
   <div class="total-row"><span>TOTAL</span><span>RD$ ${total.toFixed(2)}</span></div>
-  <div style="display:flex;justify-content:space-between;font-size:12px;margin-top:4px;color:#666;">
-    <span>Método: ${metodo}</span><span>NCF: ${ncfTipo}</span>
+  <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:5px;color:#666;">
+    <span>Pago: ${metodo}</span><span>${ncfTipo} · ${ncfDesc}</span>
   </div>
-  ${ncf ? `<div class="ncf-box"><div class="sm" style="color:rgba(255,255,255,.6);margin-bottom:3px;">Comprobante Fiscal</div><div class="ncf-num">${ncf}</div></div>` : ""}
+  ${ncf ? `<div class="ncf-box">
+    <div class="sm" style="color:rgba(255,255,255,.6);margin-bottom:2px;">Número de Comprobante Fiscal</div>
+    <div class="ncf-num">${ncf}</div>
+    <div class="ncf-tipo">${ncfDesc}</div>
+  </div>` : ""}
   <hr/>
-  <div class="center sm">¡Gracias por su visita!<br/>Sólido Auto Servicio · ${EMPRESA.telefono}</div>
+  <div class="center sm">¡Gracias por su visita!<br/>${EMPRESA.nombre} · ${EMPRESA.telefono}</div>
   </body></html>`;
 }
 
@@ -361,13 +372,26 @@ export default function CafeteriaPOS() {
                 ))}
               </div>
 
-              {/* NCF tipo */}
-              <select value={ncfTipo} onChange={e => setNcfTipo(e.target.value)} style={{
-                width:"100%", background:"#334155", color:"#f1f5f9", border:"1px solid #475569",
-                borderRadius:8, padding:"8px 10px", fontSize:12, marginBottom:10, cursor:"pointer",
-              }}>
-                {NCF_TIPOS.map(n => <option key={n.key} value={n.key}>{n.label}</option>)}
-              </select>
+              {/* NCF tipo — botones explícitos para evitar bugs visuales del select */}
+              <div style={{ marginBottom:10 }}>
+                <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:5 }}>
+                  Comprobante Fiscal
+                </div>
+                <div style={{ display:"flex", gap:5 }}>
+                  {NCF_TIPOS.map(n => (
+                    <button key={n.key} onClick={() => setNcfTipo(n.key)} style={{
+                      flex:1, padding:"7px 4px", borderRadius:7, border:"none",
+                      cursor:"pointer", fontWeight:700, fontSize:10, lineHeight:1.3,
+                      background: ncfTipo === n.key ? "#1d4ed8" : "#334155",
+                      color: ncfTipo === n.key ? "#fff" : "#94a3b8",
+                      boxShadow: ncfTipo === n.key ? "0 2px 8px rgba(29,78,216,0.4)" : "none",
+                    }}>
+                      <div style={{ fontSize:11, fontWeight:900 }}>{n.key}</div>
+                      <div style={{ fontSize:9, opacity:0.85 }}>{n.desc}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
 
               {/* Botón cobrar */}
               <button

@@ -4,28 +4,33 @@ import { API_URL as API } from "@/config";
 
 // ─── Fases del taller ─────────────────────────────────────────────────────────
 const FASES = [
-  { key: "RECIBIDO",        label: "Recibido",      color: "#3b82f6", icon: "📋" },
-  { key: "DIAGNOSTICO",     label: "Diagnóstico",   color: "#f59e0b", icon: "🔍" },
-  { key: "REPARACION",      label: "Reparación",    color: "#ef4444", icon: "🔧" },
-  { key: "CONTROL_CALIDAD", label: "Ctrl. Calidad", color: "#8b5cf6", icon: "✅" },
-  { key: "LISTO",           label: "Listo",         color: "#10b981", icon: "🎉" },
-  { key: "ENTREGADO",       label: "Entregado",     color: "#6b7280", icon: "🏁" },
+  { key: "RECIBIDO",        label: "Recibido",      color: "#3b82f6", bg: "#eff6ff", icon: "📋" },
+  { key: "DIAGNOSTICO",     label: "Diagnóstico",   color: "#f59e0b", bg: "#fffbeb", icon: "🔍" },
+  { key: "REPARACION",      label: "Reparación",    color: "#ef4444", bg: "#fef2f2", icon: "🔧" },
+  { key: "CONTROL_CALIDAD", label: "Ctrl. Calidad", color: "#8b5cf6", bg: "#f5f3ff", icon: "✅" },
+  { key: "LISTO",           label: "Listo ✓",       color: "#10b981", bg: "#ecfdf5", icon: "🎉" },
+  { key: "ENTREGADO",       label: "Entregado",     color: "#6b7280", bg: "#f9fafb", icon: "🏁" },
 ];
 
-// ─── Slide rotación ─────────────────────────────────────────────────────────
-// Slides: [taller] → [cafe_prod_1] → [cafe_prod_2] → ... → [taller] ...
-// El slide de taller muestra el estado de todas las fases
-// Cada slide de cafetería muestra hasta ~12 productos (grid grande)
+const SLIDE_DURATION = 10_000;
+const PROD_POR_SLIDE = 8;
 
-const SLIDE_DURATION = 10_000; // 10 segundos por slide
+// ─── Etiqueta NCF legible ─────────────────────────────────────────────────────
+const NCF_LABEL: Record<string, string> = {
+  B01: "Crédito Fiscal",
+  B02: "Consumidor Final",
+  B14: "Régimen Especial",
+  B15: "Gubernamental",
+};
 
 export default function PantallaTV() {
-  const [ordenes,      setOrdenes]      = useState<any[]>([]);
-  const [productos,    setProductos]    = useState<any[]>([]);
-  const [slideIdx,     setSlideIdx]     = useState(0);
-  const [hora,         setHora]         = useState("");
+  const [ordenes,   setOrdenes]   = useState<any[]>([]);
+  const [productos, setProductos] = useState<any[]>([]);
+  const [slideIdx,  setSlideIdx]  = useState(0);
+  const [hora,      setHora]      = useState("");
+  const [fecha,     setFecha]     = useState("");
 
-  // ── Carga datos ────────────────────────────────────────────────────────────
+  // ── Carga datos ───────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
     try {
       const [oRes, pRes] = await Promise.all([
@@ -35,21 +40,22 @@ export default function PantallaTV() {
       const o = await oRes.json();
       const p = await pRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
-      setProductos(Array.isArray(p) ? p : []);
+      setProductos(Array.isArray(p) ? p.filter((x: any) => x.stock > 0) : []);
     } catch {}
   }, []);
 
   useEffect(() => {
     cargar();
-    const refresh = setInterval(cargar, 30_000);
-    return () => clearInterval(refresh);
+    const r = setInterval(cargar, 30_000);
+    return () => clearInterval(r);
   }, [cargar]);
 
   // ── Reloj ─────────────────────────────────────────────────────────────────
   useEffect(() => {
     const tick = () => {
       const now = new Date();
-      setHora(now.toLocaleTimeString("es-DO", { hour:"2-digit", minute:"2-digit" }));
+      setHora(now.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" }));
+      setFecha(now.toLocaleDateString("es-DO", { weekday: "long", day: "2-digit", month: "long" }));
     };
     tick();
     const id = setInterval(tick, 1000);
@@ -57,132 +63,195 @@ export default function PantallaTV() {
   }, []);
 
   // ── Slides ────────────────────────────────────────────────────────────────
-  // Slide 0 → taller
-  // Slides 1..N → cafetería (agrupadas de 12 productos por slide)
-  const PROD_POR_SLIDE = 12;
   const cafSlides: any[][] = [];
-  for (let i = 0; i < productos.length; i += PROD_POR_SLIDE) {
+  for (let i = 0; i < productos.length; i += PROD_POR_SLIDE)
     cafSlides.push(productos.slice(i, i + PROD_POR_SLIDE));
-  }
-  // Si no hay productos de cafetería, solo hay 1 slide (taller)
+
+  // slide 0 = taller, slides 1..n = cafetería
   const totalSlides = 1 + cafSlides.length;
 
   useEffect(() => {
-    const id = setInterval(() => {
-      setSlideIdx(prev => (prev + 1) % totalSlides);
-    }, SLIDE_DURATION);
+    const id = setInterval(() => setSlideIdx(prev => (prev + 1) % totalSlides), SLIDE_DURATION);
     return () => clearInterval(id);
   }, [totalSlides]);
 
-  // ── Agrupar órdenes por fase ───────────────────────────────────────────────
+  // ── Datos taller ──────────────────────────────────────────────────────────
   const byFase: Record<string, any[]> = {};
-  for (const f of FASES) byFase[f.key] = ordenes.filter(o => (o.estado || "RECIBIDO") === f.key);
+  for (const f of FASES)
+    byFase[f.key] = ordenes.filter(o => (o.estado || "RECIBIDO") === f.key);
   const activas = ordenes.filter(o => o.estado !== "ENTREGADO");
+  const listos  = byFase["LISTO"]?.length || 0;
 
   const esSliderTaller = slideIdx === 0;
   const cafSlide = cafSlides[slideIdx - 1] || [];
 
   return (
     <div style={{
-      width:"100vw", height:"100vh", overflow:"hidden",
-      background:"#050a14", color:"#f1f5f9",
-      fontFamily:"system-ui,-apple-system,sans-serif",
-      display:"flex", flexDirection:"column",
+      width: "100vw", height: "100vh", overflow: "hidden",
+      background: "#f8f9fb",
+      fontFamily: "'Segoe UI', system-ui, -apple-system, sans-serif",
+      color: "#111", display: "flex", flexDirection: "column",
     }}>
 
-      {/* ══ HEADER TV ════════════════════════════════════════════════════════ */}
+      {/* ══ HEADER ════════════════════════════════════════════════════════ */}
       <div style={{
-        display:"flex", alignItems:"center", justifyContent:"space-between",
-        padding:"12px 32px", background:"#0f172a",
-        borderBottom:"2px solid #1e3a5f", flexShrink:0,
+        display: "flex", alignItems: "stretch",
+        background: "#fff",
+        borderBottom: "3px solid #f97316",
+        boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
+        flexShrink: 0,
       }}>
-        <div style={{ display:"flex", alignItems:"center", gap:16 }}>
-          <span style={{ fontSize:32 }}>🚗</span>
+        {/* Logo / Brand */}
+        <div style={{
+          background: "linear-gradient(135deg,#ea580c,#f97316)",
+          padding: "16px 28px",
+          display: "flex", alignItems: "center", gap: 14,
+          minWidth: 260,
+        }}>
+          <div style={{
+            width: 52, height: 52, borderRadius: 14, overflow: "hidden",
+            background: "rgba(255,255,255,0.2)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+            boxShadow: "0 2px 8px rgba(0,0,0,0.2)", flexShrink: 0,
+          }}>
+            <img src="/logo.png" alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }}
+              onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+          </div>
           <div>
-            <div style={{ fontWeight:900, fontSize:20, letterSpacing:1 }}>SÓLIDO AUTO SERVICIO</div>
-            <div style={{ fontSize:12, color:"#64748b" }}>
-              {esSliderTaller ? "Estado del Taller" : "Menú Cafetería"}
+            <div style={{ fontWeight: 900, fontSize: 18, color: "#fff", letterSpacing: 0.5 }}>
+              SÓLIDO AUTO SERVICIO
+            </div>
+            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.82)", fontWeight: 600, marginTop: 2 }}>
+              ☕ Sólido Cafe Garage
             </div>
           </div>
         </div>
-        <div style={{ textAlign:"right" }}>
-          <div style={{ fontSize:40, fontWeight:900, color:"#3b82f6", fontVariantNumeric:"tabular-nums" }}>{hora}</div>
-          <div style={{ fontSize:12, color:"#64748b" }}>
-            {new Date().toLocaleDateString("es-DO", { weekday:"long", day:"2-digit", month:"long" })}
+
+        {/* Slide label */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", paddingLeft: 28 }}>
+          <div>
+            <div style={{
+              fontSize: 13, fontWeight: 700, color: "#f97316",
+              textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 2,
+            }}>
+              {esSliderTaller ? "🔧 Estado del Taller" : "☕ Menú Cafetería"}
+            </div>
+            <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>
+              {esSliderTaller
+                ? `${activas.length} vehículo${activas.length !== 1 ? "s" : ""} en servicio`
+                : "Productos disponibles hoy"}
+            </div>
           </div>
+        </div>
+
+        {/* Reloj */}
+        <div style={{
+          padding: "14px 28px", textAlign: "right",
+          display: "flex", flexDirection: "column", justifyContent: "center",
+        }}>
+          <div style={{ fontSize: 44, fontWeight: 900, color: "#111", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+            {hora}
+          </div>
+          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4, textTransform: "capitalize" }}>{fecha}</div>
         </div>
       </div>
 
-      {/* ══ CONTENIDO PRINCIPAL ══════════════════════════════════════════════ */}
-      <div style={{ flex:1, overflow:"hidden", position:"relative" }}>
+      {/* ══ CONTENIDO ═════════════════════════════════════════════════════ */}
+      <div style={{ flex: 1, overflow: "hidden" }}>
 
-        {/* ─ SLIDE TALLER ────────────────────────────────────────────────── */}
+        {/* ─ SLIDE TALLER ──────────────────────────────────────────────── */}
         {esSliderTaller && (
-          <div style={{ padding:"20px 32px", height:"100%", display:"flex", flexDirection:"column" }}>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "18px 24px", gap: 14 }}>
 
-            {/* Resumen rápido */}
-            <div style={{ display:"flex", gap:12, marginBottom:20, flexShrink:0 }}>
+            {/* Alerta listos */}
+            {listos > 0 && (
+              <div style={{
+                background: "linear-gradient(135deg,#065f46,#10b981)",
+                borderRadius: 14, padding: "12px 22px",
+                display: "flex", alignItems: "center", gap: 16,
+                boxShadow: "0 4px 16px rgba(16,185,129,0.35)",
+                flexShrink: 0,
+              }}>
+                <span style={{ fontSize: 30 }}>🎉</span>
+                <div style={{ color: "#fff" }}>
+                  <div style={{ fontWeight: 900, fontSize: 20 }}>
+                    {listos} vehículo{listos > 1 ? "s" : ""} LISTO{listos > 1 ? "S" : ""} PARA ENTREGAR
+                  </div>
+                  <div style={{ fontSize: 13, opacity: 0.85 }}>Puede pasar a recoger su vehículo</div>
+                </div>
+              </div>
+            )}
+
+            {/* KPIs rápidos */}
+            <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
               {[
-                { label:"En Taller",   valor: activas.length,                   color:"#3b82f6" },
-                { label:"Listos",      valor: byFase["LISTO"]?.length || 0,     color:"#10b981" },
-                { label:"Diagnóstico", valor: byFase["DIAGNOSTICO"]?.length||0, color:"#f59e0b" },
-                { label:"Reparación",  valor: byFase["REPARACION"]?.length||0,  color:"#ef4444" },
+                { label: "En Taller",   val: activas.length,                    color: "#3b82f6" },
+                { label: "Listos",      val: listos,                            color: "#10b981" },
+                { label: "Diagnóstico", val: byFase["DIAGNOSTICO"]?.length || 0, color: "#f59e0b" },
+                { label: "Reparación",  val: byFase["REPARACION"]?.length  || 0, color: "#ef4444" },
               ].map(k => (
                 <div key={k.label} style={{
-                  flex:1, background:"#0f172a", borderRadius:14, padding:"14px 16px",
-                  borderLeft:`4px solid ${k.color}`,
-                  boxShadow:`0 4px 20px ${k.color}22`,
+                  flex: 1, background: "#fff", borderRadius: 14,
+                  padding: "14px 18px", borderLeft: `5px solid ${k.color}`,
+                  boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
                 }}>
-                  <div style={{ fontSize:13, color:"#64748b", fontWeight:600 }}>{k.label}</div>
-                  <div style={{ fontSize:40, fontWeight:900, color:k.color }}>{k.valor}</div>
+                  <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>{k.label}</div>
+                  <div style={{ fontSize: 44, fontWeight: 900, color: k.color, lineHeight: 1, marginTop: 4 }}>{k.val}</div>
                 </div>
               ))}
             </div>
 
             {/* Kanban fases */}
-            <div style={{ flex:1, display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:12, overflow:"hidden" }}>
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12, overflow: "hidden" }}>
               {FASES.map(fase => {
                 const cards = byFase[fase.key] || [];
                 return (
                   <div key={fase.key} style={{
-                    background:"#0f172a", borderRadius:14,
-                    border:`1px solid ${fase.color}33`, overflow:"hidden",
-                    display:"flex", flexDirection:"column",
+                    background: "#fff", borderRadius: 16,
+                    border: `1.5px solid ${fase.color}33`,
+                    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+                    display: "flex", flexDirection: "column", overflow: "hidden",
                   }}>
-                    {/* Cabecera fase */}
+                    {/* Header fase */}
                     <div style={{
-                      padding:"10px 12px", background:`${fase.color}18`,
-                      borderBottom:`2px solid ${fase.color}`,
-                      display:"flex", justifyContent:"space-between", alignItems:"center", flexShrink:0,
+                      padding: "10px 14px", background: fase.bg,
+                      borderBottom: `3px solid ${fase.color}`,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}>
-                      <span style={{ fontSize:13, fontWeight:800 }}>{fase.icon} {fase.label}</span>
-                      <span style={{
-                        background:fase.color, color:"#fff", borderRadius:"50%",
-                        width:24, height:24, display:"flex", alignItems:"center", justifyContent:"center",
-                        fontSize:12, fontWeight:900,
-                      }}>{cards.length}</span>
+                      <div>
+                        <div style={{ fontSize: 15, fontWeight: 900, color: fase.color }}>{fase.icon}</div>
+                        <div style={{ fontSize: 14, fontWeight: 800, color: "#111", marginTop: 1 }}>{fase.label}</div>
+                      </div>
+                      <div style={{
+                        background: fase.color, color: "#fff",
+                        borderRadius: "50%", width: 30, height: 30,
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 15, fontWeight: 900,
+                      }}>{cards.length}</div>
                     </div>
-                    {/* Tarjetas */}
-                    <div style={{ flex:1, overflowY:"hidden", padding:8 }}>
+                    {/* Cards */}
+                    <div style={{ flex: 1, overflowY: "hidden", padding: "8px 10px" }}>
                       {cards.length === 0 && (
-                        <div style={{ textAlign:"center", color:"#334155", fontSize:12, padding:"12px 0" }}>Sin órdenes</div>
+                        <div style={{ textAlign: "center", color: "#d1d5db", fontSize: 13, padding: "16px 0", fontWeight: 600 }}>
+                          Sin órdenes
+                        </div>
                       )}
-                      {cards.slice(0, 6).map(orden => (
+                      {cards.slice(0, 5).map(orden => (
                         <div key={orden.id} style={{
-                          background:"#1e293b", borderRadius:9, padding:"8px 10px",
-                          marginBottom:6, border:`1px solid ${fase.color}22`,
+                          background: fase.bg, borderRadius: 10, padding: "9px 11px",
+                          marginBottom: 7, border: `1px solid ${fase.color}22`,
                         }}>
-                          <div style={{ fontSize:12, fontWeight:700, whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          <div style={{ fontSize: 14, fontWeight: 800, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {orden.cliente_nombre || "Sin cliente"}
                           </div>
-                          <div style={{ fontSize:11, color:"#64748b", whiteSpace:"nowrap", overflow:"hidden", textOverflow:"ellipsis" }}>
+                          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             🚗 {orden.vehiculo_info || "—"}
                           </div>
                         </div>
                       ))}
-                      {cards.length > 6 && (
-                        <div style={{ fontSize:11, color:"#475569", textAlign:"center", padding:"4px 0" }}>
-                          +{cards.length - 6} más
+                      {cards.length > 5 && (
+                        <div style={{ fontSize: 12, color: fase.color, textAlign: "center", fontWeight: 700 }}>
+                          +{cards.length - 5} más
                         </div>
                       )}
                     </div>
@@ -193,46 +262,79 @@ export default function PantallaTV() {
           </div>
         )}
 
-        {/* ─ SLIDE CAFETERÍA ──────────────────────────────────────────────── */}
+        {/* ─ SLIDE CAFETERÍA ──────────────────────────────────────────── */}
         {!esSliderTaller && (
-          <div style={{ padding:"20px 32px", height:"100%", display:"flex", flexDirection:"column" }}>
-            <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:20, flexShrink:0 }}>
-              <span style={{ fontSize:28 }}>☕</span>
-              <div style={{ fontWeight:900, fontSize:22 }}>Menú Cafetería</div>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "18px 24px" }}>
+
+            {/* Categoría / título slide */}
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexShrink: 0 }}>
+              <div style={{
+                background: "linear-gradient(135deg,#ea580c,#f97316)",
+                borderRadius: 12, padding: "8px 20px",
+                color: "#fff", fontWeight: 900, fontSize: 16,
+              }}>
+                ☕ Menú del Día
+              </div>
               {cafSlides.length > 1 && (
-                <span style={{ fontSize:13, color:"#64748b", background:"#1e293b", padding:"3px 10px", borderRadius:6 }}>
+                <span style={{ fontSize: 13, color: "#9ca3af", fontWeight: 600 }}>
                   Página {slideIdx} de {cafSlides.length}
                 </span>
               )}
             </div>
+
+            {/* Grid productos */}
             <div style={{
-              flex:1,
-              display:"grid",
-              gridTemplateColumns: cafSlide.length <= 4 ? "repeat(4,1fr)" : cafSlide.length <= 6 ? "repeat(3,1fr)" : "repeat(4,1fr)",
-              gap:14, alignContent:"start", overflow:"hidden",
+              flex: 1,
+              display: "grid",
+              gridTemplateColumns: cafSlide.length <= 4
+                ? "repeat(4,1fr)"
+                : cafSlide.length <= 6
+                  ? "repeat(3,1fr)"
+                  : "repeat(4,1fr)",
+              gap: 14,
+              alignContent: "start",
+              overflow: "hidden",
             }}>
               {cafSlide.map(prod => (
                 <div key={prod.id} style={{
-                  background:"#0f172a", borderRadius:16, overflow:"hidden",
-                  border:"1px solid #1e3a5f", display:"flex", flexDirection:"column",
-                  boxShadow:"0 4px 20px rgba(0,0,0,0.4)",
+                  background: "#fff", borderRadius: 18,
+                  boxShadow: "0 4px 18px rgba(0,0,0,0.09)",
+                  border: "1.5px solid #f3f4f6",
+                  overflow: "hidden",
+                  display: "flex", flexDirection: "column",
+                  transition: "transform 0.3s",
                 }}>
+                  {/* Imagen */}
                   {prod.imagen
-                    ? <img src={prod.imagen} alt={prod.nombre} style={{ width:"100%", height:160, objectFit:"cover" }} />
-                    : <div style={{ width:"100%", height:160, background:"#1e293b", display:"flex", alignItems:"center", justifyContent:"center", fontSize:52 }}>☕</div>
+                    ? <img src={prod.imagen} alt={prod.nombre}
+                        style={{ width: "100%", height: 150, objectFit: "cover" }} />
+                    : <div style={{
+                        width: "100%", height: 150,
+                        background: "linear-gradient(135deg,#fff7ed,#fed7aa)",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 52,
+                      }}>☕</div>
                   }
-                  <div style={{ padding:"12px 14px", flex:1 }}>
-                    <div style={{ fontWeight:800, fontSize:16, marginBottom:4 }}>{prod.nombre}</div>
+                  {/* Info */}
+                  <div style={{ padding: "12px 16px", flex: 1 }}>
+                    <div style={{
+                      fontWeight: 900, fontSize: 17, color: "#111",
+                      marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                    }}>{prod.nombre}</div>
                     {prod.categoria && (
-                      <div style={{ fontSize:11, color:"#64748b", marginBottom:6 }}>{prod.categoria}</div>
+                      <div style={{
+                        display: "inline-block", fontSize: 10, fontWeight: 700,
+                        background: "#fff7ed", color: "#ea580c",
+                        borderRadius: 6, padding: "2px 8px", marginBottom: 8,
+                        textTransform: "uppercase", letterSpacing: 0.5,
+                      }}>{prod.categoria}</div>
                     )}
-                    <div style={{ fontSize:22, fontWeight:900, color:"#10b981" }}>
+                    <div style={{ fontSize: 24, fontWeight: 900, color: "#10b981" }}>
                       RD$ {Number(prod.precio).toFixed(2)}
                     </div>
-                    {prod.stock <= 0 && (
-                      <div style={{ fontSize:11, color:"#ef4444", marginTop:4, fontWeight:700 }}>❌ Agotado</div>
-                    )}
                   </div>
+                  {/* Barra naranja inferior */}
+                  <div style={{ height: 4, background: "linear-gradient(90deg,#ea580c,#f97316,#fbbf24)" }} />
                 </div>
               ))}
             </div>
@@ -240,18 +342,22 @@ export default function PantallaTV() {
         )}
       </div>
 
-      {/* ══ FOOTER con indicador de slide ════════════════════════════════════ */}
+      {/* ══ FOOTER con dots ═══════════════════════════════════════════════ */}
       <div style={{
-        display:"flex", alignItems:"center", justifyContent:"center", gap:8,
-        padding:"10px 0", background:"#0f172a", borderTop:"1px solid #1e293b", flexShrink:0,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+        padding: "10px 0", background: "#fff",
+        borderTop: "2px solid #f3f4f6", flexShrink: 0,
       }}>
         {Array.from({ length: totalSlides }).map((_, i) => (
           <div key={i} style={{
-            width: i === slideIdx ? 28 : 8, height:8, borderRadius:4,
-            background: i === slideIdx ? "#3b82f6" : "#334155",
-            transition:"all 0.4s ease",
+            width: i === slideIdx ? 32 : 8, height: 8, borderRadius: 4,
+            background: i === slideIdx ? "#f97316" : "#e5e7eb",
+            transition: "all 0.4s ease",
           }} />
         ))}
+        <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 12, fontWeight: 600 }}>
+          Auto-actualiza cada 10s
+        </span>
       </div>
     </div>
   );
