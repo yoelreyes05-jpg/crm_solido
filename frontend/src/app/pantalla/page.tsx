@@ -276,7 +276,7 @@ export default function PantallaTV() {
                 background: "#ea580c", color: "#fff",
                 padding: "12px 16px", fontWeight: 900, fontSize: 15, flexShrink: 0,
               }}>
-                ☕ Menú Cafetería
+                ☕ MENÚ DE EXPERIENCIA
               </div>
               <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
                 {categorias.map((cat, i) => {

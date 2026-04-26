@@ -515,7 +515,7 @@ export default function ClienteApp() {
             {/* ── ACORDEÓN MENÚ CAFETERÍA ── */}
             {showCafe && (
               <div className="card fade-up">
-                <div className="card-title">☕ Menú Cafetería</div>
+                <div className="card-title">☕ MENÚ DE EXPERIENCIAS</div>
                 {loadingCafe ? (
                   <div className="loading-dots">Cargando menú...</div>
                 ) : cafe.length === 0 ? (
