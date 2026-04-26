@@ -311,7 +311,13 @@ app.delete("/ventas/:id", async (req, res) => {
 // ☕ CAFETERÍA
 // =====================================================
 app.get("/cafeteria/productos", async (req, res) => {
-  const { data } = await supabase.from("cafeteria_productos").select("*").order("id");
+  // Solo productos activos (soft delete: activo = true o activo IS NULL para compatibilidad)
+  const { data } = await supabase
+    .from("cafeteria_productos")
+    .select("*")
+    .or("activo.eq.true,activo.is.null")
+    .order("categoria")
+    .order("nombre");
   res.json(data || []);
 });
 
@@ -345,12 +351,14 @@ app.patch("/cafeteria/productos/:id", async (req, res) => {
 app.delete("/cafeteria/productos/:id", async (req, res) => {
   const id = Number(req.params.id);
   if (!id || isNaN(id)) return res.status(400).json({ error: "ID inválido" });
-  const { error, count } = await supabase
+  // Soft delete: marcar como inactivo para preservar historial de ventas
+  // (no podemos borrar físicamente porque cafeteria_detalle tiene FK a esta tabla)
+  const { error } = await supabase
     .from("cafeteria_productos")
-    .delete({ count: "exact" })
+    .update({ activo: false })
     .eq("id", id);
   if (error) return res.status(500).json({ error: error.message });
-  res.json({ ok: true, deleted: count });
+  res.json({ ok: true, archived: true });
 });
 
 app.get("/cafeteria/ordenes", async (req, res) => {

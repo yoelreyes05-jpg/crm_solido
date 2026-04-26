@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { API_URL as API } from "@/config";
 
 // ─── Fases del taller ─────────────────────────────────────────────────────────
@@ -12,16 +12,7 @@ const FASES = [
   { key: "ENTREGADO",       label: "Entregado",     color: "#6b7280", bg: "#f9fafb", icon: "🏁" },
 ];
 
-const SLIDE_DURATION = 10_000;
-const PROD_POR_SLIDE = 8;
-
-// ─── Etiqueta NCF legible ─────────────────────────────────────────────────────
-const NCF_LABEL: Record<string, string> = {
-  B01: "Crédito Fiscal",
-  B02: "Consumidor Final",
-  B14: "Régimen Especial",
-  B15: "Gubernamental",
-};
+const SLIDE_DURATION = 10_000; // 10 s por slide
 
 export default function PantallaTV() {
   const [ordenes,   setOrdenes]   = useState<any[]>([]);
@@ -40,6 +31,7 @@ export default function PantallaTV() {
       const o = await oRes.json();
       const p = await pRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
+      // Solo productos activos con stock
       setProductos(Array.isArray(p) ? p.filter((x: any) => x.stock > 0) : []);
     } catch {}
   }, []);
@@ -62,15 +54,17 @@ export default function PantallaTV() {
     return () => clearInterval(id);
   }, []);
 
-  // ── Slides ────────────────────────────────────────────────────────────────
-  const cafSlides: any[][] = [];
-  for (let i = 0; i < productos.length; i += PROD_POR_SLIDE)
-    cafSlides.push(productos.slice(i, i + PROD_POR_SLIDE));
+  // ── Slides: [0]=taller, [1..n]=una slide por categoría ──────────────────
+  const categorias = useMemo(() => {
+    const cats = new Set(productos.map((p: any) => p.categoria || "General"));
+    return Array.from(cats) as string[];
+  }, [productos]);
 
-  // slide 0 = taller, slides 1..n = cafetería
-  const totalSlides = 1 + cafSlides.length;
+  // totalSlides = 1 (taller) + N categorías
+  const totalSlides = 1 + categorias.length;
 
   useEffect(() => {
+    if (totalSlides < 2) return;
     const id = setInterval(() => setSlideIdx(prev => (prev + 1) % totalSlides), SLIDE_DURATION);
     return () => clearInterval(id);
   }, [totalSlides]);
@@ -78,12 +72,20 @@ export default function PantallaTV() {
   // ── Datos taller ──────────────────────────────────────────────────────────
   const byFase: Record<string, any[]> = {};
   for (const f of FASES)
-    byFase[f.key] = ordenes.filter(o => (o.estado || "RECIBIDO") === f.key);
-  const activas = ordenes.filter(o => o.estado !== "ENTREGADO");
+    byFase[f.key] = ordenes.filter((o: any) => (o.estado || "RECIBIDO") === f.key);
+  const activas = ordenes.filter((o: any) => o.estado !== "ENTREGADO");
   const listos  = byFase["LISTO"]?.length || 0;
 
+  // ── Datos cafetería (slide actual) ────────────────────────────────────────
   const esSliderTaller = slideIdx === 0;
-  const cafSlide = cafSlides[slideIdx - 1] || [];
+  const catActual      = categorias[slideIdx - 1] || "";
+  const prodsCatActual = productos.filter((p: any) => (p.categoria || "General") === catActual);
+
+  // ── Cols de grid según cantidad de productos ──────────────────────────────
+  const gridCols = prodsCatActual.length <= 3 ? 3
+    : prodsCatActual.length <= 4 ? 4
+    : prodsCatActual.length <= 6 ? 3
+    : 4;
 
   return (
     <div style={{
@@ -97,64 +99,62 @@ export default function PantallaTV() {
       <div style={{
         display: "flex", alignItems: "stretch",
         background: "#fff",
-        borderBottom: "3px solid #f97316",
+        borderBottom: "3px solid " + (esSliderTaller ? "#3b82f6" : "#f97316"),
         boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
         flexShrink: 0,
+        transition: "border-color 0.5s",
       }}>
-        {/* Logo / Brand */}
+        {/* Logo / Brand — blanco siempre */}
         <div style={{
-          background: esSliderTaller ? "#fff" : "linear-gradient(135deg,#ea580c,#f97316)",
-          padding: "16px 28px",
+          background: "#fff",
+          padding: "14px 24px",
           display: "flex", alignItems: "center", gap: 14,
-          minWidth: 260,
-          borderRight: esSliderTaller ? "2px solid #f3f4f6" : "none",
+          minWidth: 240,
+          borderRight: "2px solid #f3f4f6",
         }}>
           <div style={{
-            width: 52, height: 52, borderRadius: 14, overflow: "hidden",
-            background: esSliderTaller ? "#f3f4f6" : "rgba(255,255,255,0.2)",
+            width: 48, height: 48, borderRadius: 12, overflow: "hidden",
+            background: "#f3f4f6",
             display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.1)", flexShrink: 0,
+            flexShrink: 0,
           }}>
             <img src="/logo.png" alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }}
               onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
           </div>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 18, color: esSliderTaller ? "#111" : "#fff", letterSpacing: 0.5 }}>
+            <div style={{ fontWeight: 900, fontSize: 16, color: "#111", letterSpacing: 0.4 }}>
               SÓLIDO AUTO SERVICIO
             </div>
-            <div style={{ fontSize: 12, color: esSliderTaller ? "#6b7280" : "rgba(255,255,255,0.82)", fontWeight: 600, marginTop: 2 }}>
+            <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 600, marginTop: 2 }}>
               ☕ Sólido Cafe Garage
             </div>
           </div>
         </div>
 
-        {/* Slide label */}
-        <div style={{ flex: 1, display: "flex", alignItems: "center", paddingLeft: 28 }}>
-          <div>
-            <div style={{
-              fontSize: 13, fontWeight: 700,
-              color: esSliderTaller ? "#3b82f6" : "#f97316",
-              textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 2,
-            }}>
-              {esSliderTaller ? "🔧 Estado del Taller" : "☕ Menú Cafetería"}
-            </div>
-            <div style={{ fontSize: 22, fontWeight: 800, color: "#111" }}>
-              {esSliderTaller
-                ? `${activas.length} vehículo${activas.length !== 1 ? "s" : ""} en servicio`
-                : "Productos disponibles hoy"}
-            </div>
+        {/* Indicador de slide */}
+        <div style={{ flex: 1, display: "flex", alignItems: "center", paddingLeft: 24, gap: 14 }}>
+          <div style={{
+            background: esSliderTaller ? "#eff6ff" : "#fff7ed",
+            border: `1.5px solid ${esSliderTaller ? "#bfdbfe" : "#fed7aa"}`,
+            borderRadius: 10, padding: "6px 16px",
+            fontSize: 13, fontWeight: 800,
+            color: esSliderTaller ? "#1d4ed8" : "#ea580c",
+          }}>
+            {esSliderTaller ? "🔧 Estado del Taller" : `☕ ${catActual}`}
           </div>
+          {!esSliderTaller && (
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              {prodsCatActual.length} producto{prodsCatActual.length !== 1 ? "s" : ""} disponible{prodsCatActual.length !== 1 ? "s" : ""}
+            </div>
+          )}
         </div>
 
         {/* Reloj */}
-        <div style={{
-          padding: "14px 28px", textAlign: "right",
-          display: "flex", flexDirection: "column", justifyContent: "center",
-        }}>
-          <div style={{ fontSize: 44, fontWeight: 900, color: "#111", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
+        <div style={{ padding: "12px 24px", textAlign: "right", display: "flex", flexDirection: "column", justifyContent: "center" }}>
+          <div style={{ fontSize: 42, fontWeight: 900, color: "#111", lineHeight: 1, fontVariantNumeric: "tabular-nums" }}>
             {hora}
           </div>
-          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 4, textTransform: "capitalize" }}>{fecha}</div>
+          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 3, textTransform: "capitalize" }}>{fecha}</div>
         </div>
       </div>
 
@@ -163,96 +163,94 @@ export default function PantallaTV() {
 
         {/* ─ SLIDE TALLER ──────────────────────────────────────────────── */}
         {esSliderTaller && (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "18px 24px", gap: 14 }}>
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "16px 22px", gap: 12 }}>
 
             {/* Alerta listos */}
             {listos > 0 && (
               <div style={{
                 background: "linear-gradient(135deg,#065f46,#10b981)",
-                borderRadius: 14, padding: "12px 22px",
-                display: "flex", alignItems: "center", gap: 16,
-                boxShadow: "0 4px 16px rgba(16,185,129,0.35)",
+                borderRadius: 12, padding: "10px 20px",
+                display: "flex", alignItems: "center", gap: 14,
+                boxShadow: "0 4px 14px rgba(16,185,129,0.3)",
                 flexShrink: 0,
               }}>
-                <span style={{ fontSize: 30 }}>🎉</span>
+                <span style={{ fontSize: 26 }}>🎉</span>
                 <div style={{ color: "#fff" }}>
-                  <div style={{ fontWeight: 900, fontSize: 20 }}>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>
                     {listos} vehículo{listos > 1 ? "s" : ""} LISTO{listos > 1 ? "S" : ""} PARA ENTREGAR
                   </div>
-                  <div style={{ fontSize: 13, opacity: 0.85 }}>Puede pasar a recoger su vehículo</div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>Puede pasar a recoger su vehículo en recepción</div>
                 </div>
               </div>
             )}
 
-            {/* KPIs rápidos */}
-            <div style={{ display: "flex", gap: 12, flexShrink: 0 }}>
+            {/* KPIs */}
+            <div style={{ display: "flex", gap: 10, flexShrink: 0 }}>
               {[
-                { label: "En Taller",   val: activas.length,                    color: "#3b82f6" },
-                { label: "Listos",      val: listos,                            color: "#10b981" },
+                { label: "En Taller",   val: activas.length,                     color: "#3b82f6" },
+                { label: "Listos",      val: listos,                             color: "#10b981" },
                 { label: "Diagnóstico", val: byFase["DIAGNOSTICO"]?.length || 0, color: "#f59e0b" },
                 { label: "Reparación",  val: byFase["REPARACION"]?.length  || 0, color: "#ef4444" },
               ].map(k => (
                 <div key={k.label} style={{
-                  flex: 1, background: "#fff", borderRadius: 14,
-                  padding: "14px 18px", borderLeft: `5px solid ${k.color}`,
-                  boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+                  flex: 1, background: "#fff", borderRadius: 12,
+                  padding: "12px 16px", borderLeft: `5px solid ${k.color}`,
+                  boxShadow: "0 2px 8px rgba(0,0,0,0.06)",
                 }}>
-                  <div style={{ fontSize: 13, color: "#6b7280", fontWeight: 600 }}>{k.label}</div>
-                  <div style={{ fontSize: 44, fontWeight: 900, color: k.color, lineHeight: 1, marginTop: 4 }}>{k.val}</div>
+                  <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 600 }}>{k.label}</div>
+                  <div style={{ fontSize: 40, fontWeight: 900, color: k.color, lineHeight: 1, marginTop: 3 }}>{k.val}</div>
                 </div>
               ))}
             </div>
 
             {/* Kanban fases */}
-            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12, overflow: "hidden" }}>
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 10, overflow: "hidden" }}>
               {FASES.map(fase => {
                 const cards = byFase[fase.key] || [];
                 return (
                   <div key={fase.key} style={{
-                    background: "#fff", borderRadius: 16,
+                    background: "#fff", borderRadius: 14,
                     border: `1.5px solid ${fase.color}33`,
-                    boxShadow: "0 2px 10px rgba(0,0,0,0.06)",
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
                     display: "flex", flexDirection: "column", overflow: "hidden",
                   }}>
-                    {/* Header fase */}
                     <div style={{
-                      padding: "10px 14px", background: fase.bg,
+                      padding: "9px 12px", background: fase.bg,
                       borderBottom: `3px solid ${fase.color}`,
                       display: "flex", justifyContent: "space-between", alignItems: "center",
                     }}>
                       <div>
-                        <div style={{ fontSize: 15, fontWeight: 900, color: fase.color }}>{fase.icon}</div>
-                        <div style={{ fontSize: 14, fontWeight: 800, color: "#111", marginTop: 1 }}>{fase.label}</div>
+                        <div style={{ fontSize: 14 }}>{fase.icon}</div>
+                        <div style={{ fontSize: 13, fontWeight: 800, color: "#111", marginTop: 1 }}>{fase.label}</div>
                       </div>
                       <div style={{
                         background: fase.color, color: "#fff",
-                        borderRadius: "50%", width: 30, height: 30,
+                        borderRadius: "50%", width: 28, height: 28,
                         display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 15, fontWeight: 900,
+                        fontSize: 13, fontWeight: 900,
                       }}>{cards.length}</div>
                     </div>
-                    {/* Cards */}
-                    <div style={{ flex: 1, overflowY: "hidden", padding: "8px 10px" }}>
+                    <div style={{ flex: 1, overflowY: "hidden", padding: "7px 9px" }}>
                       {cards.length === 0 && (
-                        <div style={{ textAlign: "center", color: "#d1d5db", fontSize: 13, padding: "16px 0", fontWeight: 600 }}>
+                        <div style={{ textAlign: "center", color: "#d1d5db", fontSize: 12, padding: "14px 0", fontWeight: 600 }}>
                           Sin órdenes
                         </div>
                       )}
-                      {cards.slice(0, 5).map(orden => (
+                      {cards.slice(0, 5).map((orden: any) => (
                         <div key={orden.id} style={{
-                          background: fase.bg, borderRadius: 10, padding: "9px 11px",
-                          marginBottom: 7, border: `1px solid ${fase.color}22`,
+                          background: fase.bg, borderRadius: 9, padding: "8px 10px",
+                          marginBottom: 6, border: `1px solid ${fase.color}22`,
                         }}>
-                          <div style={{ fontSize: 14, fontWeight: 800, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ fontSize: 13, fontWeight: 800, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             {orden.cliente_nombre || "Sin cliente"}
                           </div>
-                          <div style={{ fontSize: 12, color: "#6b7280", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          <div style={{ fontSize: 11, color: "#6b7280", marginTop: 1, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
                             🚗 {orden.vehiculo_info || "—"}
                           </div>
                         </div>
                       ))}
                       {cards.length > 5 && (
-                        <div style={{ fontSize: 12, color: fase.color, textAlign: "center", fontWeight: 700 }}>
+                        <div style={{ fontSize: 11, color: fase.color, textAlign: "center", fontWeight: 700 }}>
                           +{cards.length - 5} más
                         </div>
                       )}
@@ -264,112 +262,163 @@ export default function PantallaTV() {
           </div>
         )}
 
-        {/* ─ SLIDE CAFETERÍA ──────────────────────────────────────────── */}
+        {/* ─ SLIDE CAFETERÍA (por categoría) ──────────────────────────── */}
         {!esSliderTaller && (
-          <div style={{ height: "100%", display: "flex", gap: 0, overflow: "hidden" }}>
+          <div style={{ height: "100%", display: "flex", overflow: "hidden" }}>
 
-            {/* Sidebar izquierdo */}
+            {/* Sidebar — lista de categorías */}
             <div style={{
-              width: 180, background: "#fff7ed",
-              borderRight: "2px solid #fed7aa",
+              width: 190, background: "#fff",
+              borderRight: "2px solid #f3f4f6",
               display: "flex", flexDirection: "column", flexShrink: 0,
             }}>
               <div style={{
                 background: "#ea580c", color: "#fff",
-                padding: "14px 16px", fontWeight: 900, fontSize: 16,
+                padding: "12px 16px", fontWeight: 900, fontSize: 15, flexShrink: 0,
               }}>
-                ☕ Menú del Día
+                ☕ Menú Cafetería
               </div>
-              <div style={{ padding: "12px 14px", flex: 1 }}>
-                <div style={{ fontSize: 11, color: "#9a3412", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
-                  Disponibles hoy
-                </div>
-                <div style={{ fontSize: 38, fontWeight: 900, color: "#ea580c", lineHeight: 1 }}>
-                  {cafSlide.length}
-                </div>
-                <div style={{ fontSize: 11, color: "#c2410c", marginTop: 4 }}>productos en pantalla</div>
-                {cafSlides.length > 1 && (
-                  <div style={{ marginTop: 16, fontSize: 11, color: "#9a3412", background: "#fed7aa", borderRadius: 8, padding: "6px 10px" }}>
-                    Página {slideIdx} de {cafSlides.length}
-                  </div>
-                )}
+              <div style={{ flex: 1, overflowY: "auto", padding: "8px" }}>
+                {categorias.map((cat, i) => {
+                  const isActive = cat === catActual;
+                  const count = productos.filter((p: any) => (p.categoria || "General") === cat).length;
+                  return (
+                    <div key={cat} style={{
+                      padding: "10px 12px", borderRadius: 10, marginBottom: 5,
+                      background: isActive ? "#fff7ed" : "transparent",
+                      border: isActive ? "1.5px solid #fed7aa" : "1.5px solid transparent",
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                      transition: "all 0.3s",
+                    }}>
+                      <div>
+                        <div style={{
+                          fontSize: 14, fontWeight: isActive ? 800 : 600,
+                          color: isActive ? "#ea580c" : "#374151",
+                        }}>{cat}</div>
+                        <div style={{ fontSize: 11, color: "#9ca3af" }}>{count} item{count !== 1 ? "s" : ""}</div>
+                      </div>
+                      {isActive && (
+                        <div style={{
+                          width: 8, height: 8, borderRadius: "50%",
+                          background: "#ea580c",
+                        }} />
+                      )}
+                    </div>
+                  );
+                })}
               </div>
-              <div style={{ padding: "12px 14px", borderTop: "1px solid #fed7aa", fontSize: 11, color: "#9a3412" }}>
-                Sólido Cafe Garage<br />809-712-2027
+              <div style={{
+                borderTop: "1px solid #f3f4f6", padding: "10px 14px",
+                fontSize: 11, color: "#9ca3af",
+              }}>
+                {productos.length} producto{productos.length !== 1 ? "s" : ""} en total
               </div>
             </div>
 
-            {/* Grid productos */}
-            <div style={{ flex: 1, padding: "16px 20px", overflow: "hidden" }}>
-              <div style={{
-                display: "grid",
-                gridTemplateColumns: cafSlide.length <= 4 ? "repeat(4,1fr)"
-                  : cafSlide.length <= 6 ? "repeat(3,1fr)" : "repeat(4,1fr)",
-                gap: 12, height: "100%", alignContent: "start",
-              }}>
-                {cafSlide.map(prod => (
-                  <div key={prod.id} style={{
-                    background: "#fff", borderRadius: 14,
-                    boxShadow: "0 2px 10px rgba(0,0,0,0.07)",
-                    border: "1px solid #f3f4f6",
-                    overflow: "hidden",
-                    display: "flex", flexDirection: "column",
-                  }}>
-                    {/* Imagen compacta */}
-                    {prod.imagen
-                      ? <img src={prod.imagen} alt={prod.nombre}
-                          style={{ width: "100%", height: 90, objectFit: "cover", flexShrink: 0 }} />
-                      : <div style={{
-                          width: "100%", height: 90, flexShrink: 0,
-                          background: "#fff7ed",
-                          display: "flex", alignItems: "center", justifyContent: "center",
-                          fontSize: 34,
-                        }}>☕</div>
-                    }
-                    {/* Info compacta */}
-                    <div style={{ padding: "9px 12px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
-                      <div>
-                        <div style={{
-                          fontWeight: 900, fontSize: 15, color: "#111",
-                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 2,
-                        }}>{prod.nombre}</div>
-                        {prod.categoria && (
-                          <div style={{
-                            display: "inline-block", fontSize: 9, fontWeight: 700,
-                            background: "#fff7ed", color: "#ea580c",
-                            borderRadius: 5, padding: "1px 6px",
-                            textTransform: "uppercase", letterSpacing: 0.5,
-                          }}>{prod.categoria}</div>
-                        )}
-                      </div>
-                      <div style={{ fontSize: 20, fontWeight: 900, color: "#16a34a", marginTop: 4 }}>
-                        RD$ {Number(prod.precio).toFixed(2)}
-                      </div>
-                    </div>
-                    <div style={{ height: 3, background: "#ea580c", flexShrink: 0 }} />
-                  </div>
-                ))}
+            {/* Grid de productos de la categoría */}
+            <div style={{ flex: 1, padding: "16px 20px", display: "flex", flexDirection: "column", gap: 14 }}>
+
+              {/* Título categoría */}
+              <div style={{ display: "flex", alignItems: "baseline", gap: 12, flexShrink: 0 }}>
+                <div style={{ fontSize: 26, fontWeight: 900, color: "#111" }}>{catActual}</div>
+                <div style={{ fontSize: 14, color: "#6b7280" }}>
+                  {prodsCatActual.length} producto{prodsCatActual.length !== 1 ? "s" : ""} disponible{prodsCatActual.length !== 1 ? "s" : ""}
+                </div>
               </div>
+
+              {/* Cards */}
+              {prodsCatActual.length === 0 ? (
+                <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", color: "#d1d5db", fontSize: 18 }}>
+                  Sin productos disponibles en esta categoría
+                </div>
+              ) : (
+                <div style={{
+                  flex: 1,
+                  display: "grid",
+                  gridTemplateColumns: `repeat(${gridCols}, 1fr)`,
+                  gap: 14,
+                  alignContent: "start",
+                  overflow: "hidden",
+                }}>
+                  {prodsCatActual.map((prod: any) => (
+                    <div key={prod.id} style={{
+                      background: "#fff", borderRadius: 16,
+                      boxShadow: "0 2px 10px rgba(0,0,0,0.07)",
+                      border: "1px solid #f3f4f6",
+                      overflow: "hidden",
+                      display: "flex", flexDirection: "column",
+                    }}>
+                      {/* Imagen compacta */}
+                      {prod.imagen
+                        ? <img src={prod.imagen} alt={prod.nombre}
+                            style={{ width: "100%", height: 100, objectFit: "cover", flexShrink: 0 }} />
+                        : <div style={{
+                            width: "100%", height: 100, flexShrink: 0,
+                            background: "#fff7ed",
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                            fontSize: 40,
+                          }}>☕</div>
+                      }
+                      {/* Info */}
+                      <div style={{ padding: "10px 14px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                        <div style={{
+                          fontWeight: 900, fontSize: 16, color: "#111",
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
+                        }}>{prod.nombre}</div>
+                        <div style={{ fontSize: 22, fontWeight: 900, color: "#16a34a", marginTop: 6 }}>
+                          RD$ {Number(prod.precio).toFixed(2)}
+                        </div>
+                      </div>
+                      {/* Barra naranja */}
+                      <div style={{ height: 4, background: "#ea580c", flexShrink: 0 }} />
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}
       </div>
 
-      {/* ══ FOOTER con dots ═══════════════════════════════════════════════ */}
+      {/* ══ FOOTER — dots y próxima categoría ════════════════════════════ */}
       <div style={{
-        display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-        padding: "10px 0", background: "#fff",
-        borderTop: "2px solid #f3f4f6", flexShrink: 0,
+        display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+        padding: "8px 0", background: "#fff",
+        borderTop: "1px solid #f3f4f6", flexShrink: 0,
       }}>
-        {Array.from({ length: totalSlides }).map((_, i) => (
-          <div key={i} style={{
-            width: i === slideIdx ? 32 : 8, height: 8, borderRadius: 4,
-            background: i === slideIdx ? "#f97316" : "#e5e7eb",
-            transition: "all 0.4s ease",
-          }} />
-        ))}
-        <span style={{ fontSize: 11, color: "#9ca3af", marginLeft: 12, fontWeight: 600 }}>
-          Auto-actualiza cada 10s
+        {/* Slide anterior */}
+        {Array.from({ length: totalSlides }).map((_, i) => {
+          const isActive = i === slideIdx;
+          const isTaller = i === 0;
+          const cat = categorias[i - 1];
+          return (
+            <div key={i} style={{
+              display: "flex", alignItems: "center", gap: 4,
+              padding: isActive ? "4px 12px" : "4px 6px",
+              borderRadius: 20,
+              background: isActive ? (isTaller ? "#eff6ff" : "#fff7ed") : "transparent",
+              border: isActive ? `1.5px solid ${isTaller ? "#bfdbfe" : "#fed7aa"}` : "none",
+              transition: "all 0.4s ease",
+            }}>
+              <div style={{
+                width: isActive ? 0 : 7, height: 7, borderRadius: "50%",
+                background: isTaller ? "#3b82f6" : "#f97316",
+                flexShrink: 0,
+                display: isActive ? "none" : "block",
+              }} />
+              {isActive && (
+                <span style={{
+                  fontSize: 11, fontWeight: 700,
+                  color: isTaller ? "#1d4ed8" : "#ea580c",
+                }}>
+                  {isTaller ? "🔧 Taller" : `☕ ${cat}`}
+                </span>
+              )}
+            </div>
+          );
+        })}
+        <span style={{ fontSize: 10, color: "#9ca3af", marginLeft: 8 }}>
+          Cambia cada 10s
         </span>
       </div>
     </div>

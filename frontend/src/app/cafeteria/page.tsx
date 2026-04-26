@@ -225,7 +225,7 @@ export default function CafeteriaPage() {
     finally { setGuardandoEdit(false); }
   };
   const eliminarProducto = async (id: number, nombre: string) => {
-    if (!confirm(`¿Eliminar "${nombre}"?\nEsta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Archivar "${nombre}"?\nEl producto ya no aparecerá en el POS ni en el menú.\nEl historial de ventas se conserva.`)) return;
     // Optimistic: quitar de UI inmediatamente
     setProductos((prev: any[]) => prev.filter((p: any) => p.id !== id));
     try {
@@ -471,8 +471,9 @@ export default function CafeteriaPage() {
                         ✏️ Editar
                       </button>
                       <button onClick={() => eliminarProducto(p.id, p.nombre)}
+                        title="Archivar producto"
                         style={{ background:"#fee2e2", color:"#dc2626", border:"1px solid #fca5a5", borderRadius:7, padding:"5px 10px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
-                        🗑
+                        📦 Archivar
                       </button>
                     </div>
                   </div>
