@@ -6,9 +6,9 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario", "contabilidad", "suplidores","ventas","facturacion","cafeteria","usuarios","configuracion"],
-  secretaria: ["dashboard","clientes","vehiculos", "contabilidad", "diagnostico", "ordenes","facturacion"],
-  tecnico:    ["ordenes", "dashboard", "diagnosticos"],
+  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo"],
+  secretaria: ["dashboard","clientes","vehiculos","contabilidad","diagnostico","ordenes","facturacion","historial-vehiculo"],
+  tecnico:    ["ordenes","dashboard","diagnosticos","historial-vehiculo"],
   almacen:    ["inventario","suplidores","ventas"],
   cafeteria:  ["cafeteria"],
 };
@@ -26,11 +26,12 @@ const MENU = [
   { href: "/cafeteria",     icon: "☕", label: "Cafetería POS",      key: "cafeteria" },
   { href: "/usuarios",      icon: "👥", label: "Usuarios",           key: "usuarios" },
   { href: "/contabilidad",  icon: "🧮", label: "Contabilidad",       key: "contabilidad" },
-  { href: "/configuracion", icon: "⚙️", label: "Configuración",      key: "configuracion" },
+  { href: "/configuracion",      icon: "⚙️", label: "Configuración",       key: "configuracion" },
+  { href: "/historial-vehiculo", icon: "📚", label: "Historial Vehículos", key: "historial-vehiculo" },
 ];
 
 // Rutas que NO usan el sidebar
-const RUTAS_PUBLICAS = ["/login", "/cliente"];
+const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado"];
 
 export default function RootLayout({ children }) {
   const router = useRouter();

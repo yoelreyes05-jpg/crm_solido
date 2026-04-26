@@ -413,6 +413,14 @@ app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase.from("diagnosticos").update(req.body).eq("id", id).select();
   if (error) return res.json({ error: error.message });
+
+  // 📚 Auto-crear historial cuando el diagnóstico pasa a FACTURADO o COMPLETADO
+  if (req.body.estado === "FACTURADO" || req.body.estado === "COMPLETADO") {
+    crearHistorialDesdeDiagnostico(Number(id)).catch(err =>
+      console.error("❌ Error creando historial automático:", err)
+    );
+  }
+
   res.json(data[0]);
 });
 
@@ -1005,6 +1013,165 @@ app.get("/compras", async (req, res) => {
       .order("created_at", { ascending: false });
     if (error) return res.status(500).json({ error: error.message });
     res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 📚 HISTORIAL DE VEHÍCULOS
+// =====================================================
+
+// Helper interno: captura y persiste el historial completo desde un diagnóstico
+async function crearHistorialDesdeDiagnostico(diagnosticoId) {
+  try {
+    const { data: diag } = await supabase.from("diagnosticos").select("*").eq("id", diagnosticoId).single();
+    if (!diag) return;
+
+    // Verificar que no exista ya un registro para este diagnóstico
+    const { data: existe } = await supabase
+      .from("vehiculo_historial")
+      .select("id")
+      .eq("diagnostico_id", diagnosticoId)
+      .single();
+    if (existe) {
+      console.log(`ℹ️ Historial ya existe para diagnóstico #${diagnosticoId}, omitiendo.`);
+      return;
+    }
+
+    const { data: vehiculo } = await supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).single();
+    const { data: cliente }  = await supabase.from("clientes").select("*").eq("id", diag.cliente_id).single();
+    const { data: cotizacion } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoId).single();
+    const { data: avances } = await supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoId).order("created_at");
+    const { data: factura } = await supabase.from("facturas").select("ncf").eq("diagnostico_id", diagnosticoId).single();
+
+    const trabajos = (avances || [])
+      .map(a => `[${new Date(a.created_at).toLocaleDateString("es-DO")}] ${a.tecnico_nombre || "Técnico"}: ${a.descripcion}`)
+      .join("\n") || diag.mano_de_obra_detalle || null;
+
+    await supabase.from("vehiculo_historial").insert([{
+      vehiculo_id:           diag.vehiculo_id || null,
+      placa:                 (vehiculo?.placa || "N/A").toUpperCase().trim(),
+      marca:                 vehiculo?.marca || "",
+      modelo:                vehiculo?.modelo || "",
+      ano:                   vehiculo?.ano || null,
+      color:                 vehiculo?.color || "",
+      cliente_id:            diag.cliente_id || null,
+      cliente_nombre:        cliente?.nombre || "Particular",
+      cliente_telefono:      cliente?.telefono || "",
+      diagnostico_id:        diagnosticoId,
+      fecha_servicio:        new Date(),
+      tipo_servicio:         diag.tipo_servicio || "",
+      diagnostico_general:   diag.tipo_servicio || "",
+      inspeccion_mecanica:   diag.inspeccion_mecanica || null,
+      inspeccion_electrica:  diag.inspeccion_electrica || null,
+      inspeccion_electronica: diag.inspeccion_electronica || null,
+      codigos_falla:         diag.scanner_resultado || null,
+      fallas_identificadas:  diag.fallas_identificadas || null,
+      observaciones:         diag.observaciones || null,
+      trabajos_realizados:   trabajos,
+      costo_mano_obra:       Number(cotizacion?.mano_obra || 0),
+      costo_repuestos:       Number(cotizacion?.repuestos || 0),
+      costo_total:           Number(cotizacion?.total || diag.costo_estimado || 0),
+      estado:                "ENTREGADO",
+      tecnico_nombre:        diag.tecnico_nombre || null,
+      ncf:                   factura?.ncf || null,
+    }]);
+
+    console.log(`✅ Historial guardado — Diagnóstico #${diagnosticoId} | Placa: ${vehiculo?.placa || "N/A"}`);
+  } catch (err) {
+    console.error("❌ crearHistorialDesdeDiagnostico:", err.message);
+  }
+}
+
+// GET /vehiculo-historial — lista completa (admin)
+app.get("/vehiculo-historial", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vehiculo_historial")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente
+app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
+  try {
+    const placaNorm = req.params.placa.toUpperCase().replace(/\s+/g, "").trim();
+    const { data, error } = await supabase
+      .from("vehiculo_historial")
+      .select(
+        "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
+        "diagnostico_general, inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
+        "codigos_falla, fallas_identificadas, observaciones, trabajos_realizados, " +
+        "costo_total, estado, tecnico_nombre, ncf, created_at"
+      )
+      .ilike("placa", placaNorm)
+      .order("created_at", { ascending: false });
+
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data || data.length === 0) return res.json({ found: false, historial: [] });
+
+    res.json({
+      found: true,
+      vehiculo: {
+        placa:  data[0].placa,
+        marca:  data[0].marca,
+        modelo: data[0].modelo,
+        ano:    data[0].ano,
+        color:  data[0].color,
+      },
+      ultimo_estado: data[0].estado,
+      historial: data,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /vehiculo-historial/vehiculo/:id — historial de un vehículo específico (admin)
+app.get("/vehiculo-historial/vehiculo/:vehiculoId", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vehiculo_historial")
+      .select("*")
+      .eq("vehiculo_id", req.params.vehiculoId)
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /vehiculo-historial — crear registro manualmente
+app.post("/vehiculo-historial", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vehiculo_historial")
+      .insert([{ ...req.body, created_at: new Date() }])
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /vehiculo-historial/:id — actualizar registro (agregar detalles, corregir info)
+app.patch("/vehiculo-historial/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vehiculo_historial")
+      .update(req.body)
+      .eq("id", req.params.id)
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
