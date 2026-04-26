@@ -34,6 +34,10 @@ export default function ClienteApp() {
   const [loadingCafe, setLoadingCafe]       = useState(false);
   const [cafeAbierto, setCafeAbierto]       = useState<number | null>(null);
 
+  // ── HISTORIAL PERMANENTE ──
+  const [historialPerm, setHistorialPerm]   = useState<any[]>([]);
+  const [histDetalle, setHistDetalle]       = useState<any>(null);
+
   useEffect(() => {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
     setEsIOS(ios);
@@ -93,34 +97,45 @@ export default function ClienteApp() {
 
   const buscar = async () => {
     if (!placa.trim()) return setError("Ingresa la placa de tu vehículo");
-    setLoading(true); setError(""); setResultado(null);
+    setLoading(true); setError(""); setResultado(null); setHistorialPerm([]); setHistDetalle(null);
     try {
-      const [vRes, oRes, dRes] = await Promise.all([
+      const placaNorm = placa.trim().toUpperCase();
+      const [vRes, oRes, dRes, hRes] = await Promise.all([
         fetch(`${API}/vehiculos`),
         fetch(`${API}/ordenes`),
         fetch(`${API}/diagnosticos`),
+        fetch(`${API}/vehiculo-historial/placa/${encodeURIComponent(placaNorm)}`),
       ]);
       const vehiculos    = await vRes.json();
       const ordenes      = await oRes.json();
       const diagnosticos = await dRes.json();
+      const histData     = await hRes.json();
 
       const vehiculo = vehiculos.find((v: any) =>
-        v.placa?.toUpperCase() === placa.trim().toUpperCase()
+        v.placa?.toUpperCase() === placaNorm
       );
-      if (!vehiculo) {
+      if (!vehiculo && (!histData.found)) {
         setError("No encontramos un vehículo con esa placa. Verifica e intenta de nuevo.");
         return;
       }
 
-      const ordenesVehiculo = ordenes
-        .filter((o: any) => o.vehiculo_id === vehiculo.id || o.vehiculo_info?.includes(vehiculo.placa))
-        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+      if (histData.found) setHistorialPerm(histData.historial || []);
 
-      const diagVehiculo = diagnosticos
-        .filter((d: any) => d.vehiculo_id === vehiculo.id)
-        .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-
-      setResultado({ vehiculo, ordenes: ordenesVehiculo, diagnosticos: diagVehiculo });
+      if (vehiculo) {
+        const ordenesVehiculo = ordenes
+          .filter((o: any) => o.vehiculo_id === vehiculo.id || o.vehiculo_info?.includes(vehiculo.placa))
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        const diagVehiculo = diagnosticos
+          .filter((d: any) => d.vehiculo_id === vehiculo.id)
+          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
+        setResultado({ vehiculo, ordenes: ordenesVehiculo, diagnosticos: diagVehiculo });
+      } else if (histData.found) {
+        // Vehículo eliminado del sistema activo pero existe historial
+        setResultado({
+          vehiculo: { ...histData.vehiculo, id: null },
+          ordenes: [], diagnosticos: []
+        });
+      }
     } catch {
       setError("Error de conexión. Intenta más tarde.");
     } finally {
@@ -341,6 +356,51 @@ export default function ClienteApp() {
         }
         .diag-tipo { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#e2e8f0; margin-bottom:6px; }
         .diag-obs  { font-size:13px; color:#64748b; line-height:1.6; }
+
+        /* ── HISTORIAL PERMANENTE ── */
+        .hist-timeline { position:relative; padding-left:20px; }
+        .hist-timeline::before {
+          content:''; position:absolute; left:7px; top:0; bottom:0;
+          width:2px; background:rgba(255,255,255,0.07); border-radius:2px;
+        }
+        .hist-item {
+          position:relative; margin-bottom:14px; cursor:pointer;
+          background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.07);
+          border-radius:18px; padding:16px 16px 14px;
+          transition: border-color .2s, transform .15s;
+        }
+        .hist-item:active { transform:scale(.98); }
+        .hist-item.open { border-color:rgba(52,211,153,0.3); }
+        .hist-item::before {
+          content:''; position:absolute; left:-16px; top:18px;
+          width:14px; height:14px; border-radius:50%;
+          background:linear-gradient(135deg,#1d4ed8,#3b82f6);
+          box-shadow:0 0 8px rgba(59,130,246,0.5); border:2px solid #080c14;
+        }
+        .hist-servicio { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#e2e8f0; margin-bottom:4px; }
+        .hist-meta { font-size:12px; color:#475569; margin-bottom:8px; }
+        .hist-cost { font-family:'Syne',sans-serif; font-weight:800; font-size:18px; color:#34d399; }
+        .hist-badge {
+          display:inline-block; padding:2px 10px; border-radius:100px;
+          font-size:11px; font-weight:700; background:rgba(52,211,153,0.12); color:#34d399; margin-left:8px;
+        }
+        .hist-body { margin-top:12px; border-top:1px solid rgba(255,255,255,0.06); padding-top:12px; }
+        .hist-section { margin-bottom:10px; }
+        .hist-section-title { font-size:10px; font-weight:700; letter-spacing:1px; text-transform:uppercase; color:#475569; margin-bottom:6px; }
+        .hist-section-text { font-size:13px; color:#94a3b8; line-height:1.7; white-space:pre-wrap; }
+        .hist-falla { background:rgba(251,191,36,0.08); border:1px solid rgba(251,191,36,0.2); border-radius:10px; padding:10px 12px; margin-bottom:8px; }
+        .hist-falla-title { font-size:10px; font-weight:700; color:#fbbf24; text-transform:uppercase; letter-spacing:1px; margin-bottom:4px; }
+        .hist-falla-text { font-size:13px; color:#fde68a; line-height:1.6; }
+        .hist-costos { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-top:10px; }
+        .hist-costo-box { background:rgba(255,255,255,0.04); border-radius:10px; padding:10px; text-align:center; }
+        .hist-costo-label { font-size:10px; color:#475569; text-transform:uppercase; letter-spacing:.8px; margin-bottom:4px; }
+        .hist-costo-val { font-family:'Syne',sans-serif; font-weight:700; font-size:14px; color:#e2e8f0; }
+        .hist-ncf { font-size:11px; color:#475569; margin-top:8px; }
+
+        .hist-empty { text-align:center; padding:28px 16px; color:#334155; }
+        .hist-empty-icon { font-size:36px; margin-bottom:10px; }
+        .hist-empty-txt { font-size:14px; font-weight:600; color:#475569; }
+        .hist-empty-sub { font-size:12px; color:#1e293b; margin-top:6px; }
 
         .wa-float {
           position:fixed; bottom:22px; right:22px;
@@ -583,14 +643,15 @@ export default function ClienteApp() {
                 )}
 
                 {/* TABS */}
-                <div className="tabs-grid fade-up delay-2">
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:8, marginBottom:12 }} className="fade-up delay-2">
                   {[
                     { key:"estado",    label:`📋 Servicios (${resultado.ordenes.length})` },
                     { key:"historial", label:`🔬 Diagnósticos (${resultado.diagnosticos.length})` },
+                    { key:"histperm",  label:`📚 Historial (${historialPerm.length})` },
                   ].map(t => (
                     <button
                       key={t.key}
-                      onClick={() => setTab(t.key)}
+                      onClick={() => { setTab(t.key); setHistDetalle(null); }}
                       className={`tab-btn ${tab === t.key ? "tab-active" : "tab-inactive"}`}
                     >
                       {t.label}
@@ -601,7 +662,12 @@ export default function ClienteApp() {
                 {/* ÓRDENES */}
                 {tab === "estado" && (
                   <div className="fade-up delay-3">
-                    {resultado.ordenes.map((o: any) => {
+                    {resultado.ordenes.length === 0 ? (
+                      <div className="card" style={{ textAlign:"center", color:"#475569", padding:28 }}>
+                        <div style={{ fontSize:32, marginBottom:8 }}>📋</div>
+                        Sin órdenes activas registradas.
+                      </div>
+                    ) : resultado.ordenes.map((o: any) => {
                       const info = (ESTADO_INFO as any)[o.estado] || ESTADO_INFO.RECIBIDO;
                       return (
                         <div key={o.id} className="orden-card" style={{ borderLeftColor: info.color }}>
@@ -630,12 +696,160 @@ export default function ClienteApp() {
                 {/* DIAGNÓSTICOS */}
                 {tab === "historial" && (
                   <div className="fade-up delay-3">
-                    {resultado.diagnosticos.map((d: any) => (
+                    {resultado.diagnosticos.length === 0 ? (
+                      <div className="card" style={{ textAlign:"center", color:"#475569", padding:28 }}>
+                        <div style={{ fontSize:32, marginBottom:8 }}>🔬</div>
+                        Sin diagnósticos registrados.
+                      </div>
+                    ) : resultado.diagnosticos.map((d: any) => (
                       <div key={d.id} className="diag-card">
                         <div className="diag-tipo">{d.tipo_servicio}</div>
                         <div className="diag-obs">{d.observaciones}</div>
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {/* ── HISTORIAL PERMANENTE ── */}
+                {tab === "histperm" && (
+                  <div className="fade-up delay-3">
+                    {histDetalle ? (
+                      /* ── DETALLE DE UN SERVICIO ── */
+                      <div>
+                        <button
+                          onClick={() => setHistDetalle(null)}
+                          className="btn-volver"
+                          style={{ marginBottom:14, width:"100%" }}
+                        >
+                          ← Volver al historial
+                        </button>
+
+                        <div className="card" style={{ background:"linear-gradient(135deg,#0f1729,#1e3a5f)", border:"1px solid rgba(59,130,246,0.2)", marginBottom:10 }}>
+                          <div style={{ fontSize:10, color:"#64748b", fontWeight:700, letterSpacing:1.5, textTransform:"uppercase", marginBottom:6 }}>
+                            {histDetalle.fecha_servicio ? new Date(histDetalle.fecha_servicio).toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"}) : "—"}
+                          </div>
+                          <div style={{ fontFamily:"Syne,sans-serif", fontSize:20, fontWeight:800, color:"#fff" }}>
+                            {histDetalle.tipo_servicio}
+                          </div>
+                          {histDetalle.tecnico_nombre && (
+                            <div style={{ fontSize:13, color:"#64748b", marginTop:4 }}>
+                              👨‍🔧 {histDetalle.tecnico_nombre}
+                            </div>
+                          )}
+                        </div>
+
+                        {(histDetalle.inspeccion_mecanica || histDetalle.inspeccion_electrica || histDetalle.inspeccion_electronica) && (
+                          <div className="card" style={{ marginBottom:10 }}>
+                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔍 Inspección Técnica</div>
+                            {histDetalle.inspeccion_mecanica && (
+                              <div className="hist-section">
+                                <div className="hist-section-title">🔧 Mecánica</div>
+                                <div className="hist-section-text">{histDetalle.inspeccion_mecanica}</div>
+                              </div>
+                            )}
+                            {histDetalle.inspeccion_electrica && (
+                              <div className="hist-section">
+                                <div className="hist-section-title">⚡ Eléctrica</div>
+                                <div className="hist-section-text">{histDetalle.inspeccion_electrica}</div>
+                              </div>
+                            )}
+                            {histDetalle.inspeccion_electronica && (
+                              <div className="hist-section">
+                                <div className="hist-section-title">💻 Scanner</div>
+                                <div className="hist-section-text">{histDetalle.inspeccion_electronica}</div>
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {(histDetalle.codigos_falla || histDetalle.fallas_identificadas) && (
+                          <div className="hist-falla" style={{ marginBottom:10 }}>
+                            <div className="hist-falla-title">⚠️ Fallas Identificadas</div>
+                            {histDetalle.codigos_falla && <div className="hist-falla-text" style={{ marginBottom:4 }}>Códigos: {histDetalle.codigos_falla}</div>}
+                            {histDetalle.fallas_identificadas && <div className="hist-falla-text">{histDetalle.fallas_identificadas}</div>}
+                          </div>
+                        )}
+
+                        {histDetalle.trabajos_realizados && (
+                          <div className="card" style={{ marginBottom:10 }}>
+                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
+                            <div className="hist-section-text">{histDetalle.trabajos_realizados}</div>
+                          </div>
+                        )}
+
+                        {histDetalle.observaciones && (
+                          <div className="card" style={{ marginBottom:10 }}>
+                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>📝 Observaciones</div>
+                            <div className="hist-section-text">{histDetalle.observaciones}</div>
+                          </div>
+                        )}
+
+                        {histDetalle.costo_total > 0 && (
+                          <div className="card">
+                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>💰 Costos del Servicio</div>
+                            <div className="hist-costos">
+                              <div className="hist-costo-box">
+                                <div className="hist-costo-label">Mano de Obra</div>
+                                <div className="hist-costo-val">RD$ {Number(histDetalle.costo_mano_obra||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</div>
+                              </div>
+                              <div className="hist-costo-box">
+                                <div className="hist-costo-label">Repuestos</div>
+                                <div className="hist-costo-val">RD$ {Number(histDetalle.costo_repuestos||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</div>
+                              </div>
+                            </div>
+                            <div style={{ textAlign:"center", marginTop:12, fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, color:"#34d399" }}>
+                              Total: RD$ {Number(histDetalle.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}
+                            </div>
+                            {histDetalle.ncf && <div className="hist-ncf">🧾 NCF: {histDetalle.ncf}</div>}
+                          </div>
+                        )}
+                      </div>
+                    ) : (
+                      /* ── LISTA TIMELINE ── */
+                      historialPerm.length === 0 ? (
+                        <div className="card">
+                          <div className="hist-empty">
+                            <div className="hist-empty-icon">📚</div>
+                            <div className="hist-empty-txt">Sin historial permanente</div>
+                            <div className="hist-empty-sub">El historial se genera automáticamente cuando se completa un servicio.</div>
+                          </div>
+                        </div>
+                      ) : (
+                        <div>
+                          <div style={{ fontSize:12, color:"#475569", marginBottom:14, paddingLeft:4, fontWeight:600 }}>
+                            {historialPerm.length} servicio{historialPerm.length !== 1 ? "s" : ""} registrado{historialPerm.length !== 1 ? "s" : ""}
+                          </div>
+                          <div className="hist-timeline">
+                            {historialPerm.map((h: any, idx: number) => {
+                              const abierto = histDetalle?.id === h.id;
+                              return (
+                                <div
+                                  key={h.id}
+                                  className={`hist-item ${abierto ? "open" : ""}`}
+                                  onClick={() => setHistDetalle(h)}
+                                >
+                                  <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
+                                  <div className="hist-meta">
+                                    {h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO",{year:"numeric",month:"short",day:"numeric"}) : "—"}
+                                    {h.tecnico_nombre && ` · ${h.tecnico_nombre}`}
+                                    {idx === 0 && <span className="hist-badge">Más reciente</span>}
+                                  </div>
+                                  {h.costo_total > 0 && (
+                                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                                      <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
+                                      <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>Ver detalle →</span>
+                                    </div>
+                                  )}
+                                  {!h.costo_total && (
+                                    <div style={{ fontSize:11, color:"#475569", fontWeight:600, textAlign:"right" }}>Ver detalle →</div>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    )}
                   </div>
                 )}
               </div>
