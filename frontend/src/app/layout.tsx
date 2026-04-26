@@ -6,7 +6,7 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo"],
+  gerente:    ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla"],
   secretaria: ["dashboard","clientes","vehiculos","contabilidad","diagnostico","ordenes","facturacion","historial-vehiculo"],
   tecnico:    ["ordenes","dashboard","diagnosticos","historial-vehiculo"],
   almacen:    ["inventario","suplidores","ventas"],
@@ -28,10 +28,11 @@ const MENU = [
   { href: "/historial-vehiculo", icon: "📚", label: "Historial Vehículos", key: "historial-vehiculo",  iconBg: "linear-gradient(145deg,#1e1b4b,#4f46e5)",    iconShadow: "0 4px 12px rgba(79,70,229,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
   { href: "/usuarios",           icon: "👥", label: "Usuarios",            key: "usuarios",            iconBg: "linear-gradient(145deg,#1f2937,#6b7280)",    iconShadow: "0 4px 12px rgba(107,114,128,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
   { href: "/configuracion",      icon: "⚙️", label: "Configuración",       key: "configuracion",       iconBg: "linear-gradient(145deg,#111827,#374151)",    iconShadow: "0 4px 12px rgba(55,65,81,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+  { href: "/pantalla",           icon: "📺", label: "Pantalla TV",          key: "pantalla",            iconBg: "linear-gradient(145deg,#0c4a6e,#0284c7)",    iconShadow: "0 4px 12px rgba(2,132,199,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
 ];
 
 // Rutas que NO usan el sidebar
-const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado"];
+const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado", "/pantalla"];
 
 export default function RootLayout({ children }) {
   const router = useRouter();

@@ -224,6 +224,16 @@ export default function VentasPage() {
 
   const hayFiltros = busqueda || fechaDesde || fechaHasta || metodoFiltro || ncfFiltro || estadoFiltro !== "ACTIVA";
 
+  // ── Ingresos de Hoy ──────────────────────────────────────────────────────
+  const hoyStr = new Date().toISOString().slice(0, 10);
+  const facturasHoy = activas.filter(f => f.created_at?.slice(0, 10) === hoyStr);
+  const ingresoHoy  = facturasHoy.reduce((a, f) => a + Number(f.total), 0);
+  const porMetodoHoy = facturasHoy.reduce((acc: Record<string, number>, f) => {
+    const m = f.metodo_pago || "OTROS";
+    acc[m] = (acc[m] || 0) + Number(f.total);
+    return acc;
+  }, {});
+
   // ── NCF color badge ───────────────────────────────────────────────────────
   const ncfColor: Record<string, { bg: string; color: string }> = {
     B01: { bg: "#dbeafe", color: "#1e40af" },
@@ -287,6 +297,44 @@ export default function VentasPage() {
           <div style={{ ...sc.kpiNum, color: "#d97706" }}>{facturas.filter(f => f.estado === "CANCELADA").length}</div>
           <div style={{ fontSize: 12, color: "#6b7280", marginTop: 12 }}>de {facturas.length} totales</div>
         </div>
+      </div>
+
+      {/* ── INGRESOS DE HOY ──────────────────────────────────────────────── */}
+      <div style={{
+        background: "linear-gradient(135deg,#0f172a 0%,#1e3a5f 100%)",
+        borderRadius: 16, padding: "20px 24px", marginBottom: 24,
+        display: "flex", alignItems: "center", gap: 24, flexWrap: "wrap",
+        boxShadow: "0 4px 20px rgba(0,0,0,0.25)"
+      }}>
+        <div style={{ flex: 1, minWidth: 180 }}>
+          <div style={{ fontSize: 12, color: "rgba(255,255,255,0.55)", fontWeight: 600, textTransform: "uppercase", letterSpacing: 1, marginBottom: 4 }}>
+            💵 Ingresos de Hoy
+          </div>
+          <div style={{ fontSize: 36, fontWeight: 900, color: "#10b981", lineHeight: 1 }}>
+            RD$ {ingresoHoy.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+          </div>
+          <div style={{ fontSize: 13, color: "rgba(255,255,255,0.5)", marginTop: 6 }}>
+            {facturasHoy.length} factura{facturasHoy.length !== 1 ? "s" : ""} · {hoyStr}
+          </div>
+        </div>
+        {Object.entries(porMetodoHoy).map(([metodo, total]) => {
+          const colors: Record<string, string> = { EFECTIVO: "#10b981", TARJETA: "#3b82f6", TRANSFERENCIA: "#8b5cf6", CHEQUE: "#f59e0b" };
+          const color = colors[metodo] || "#6b7280";
+          return (
+            <div key={metodo} style={{
+              background: "rgba(255,255,255,0.07)", borderRadius: 12,
+              padding: "12px 18px", border: `1px solid ${color}44`, minWidth: 130
+            }}>
+              <div style={{ fontSize: 11, color: "rgba(255,255,255,0.5)", marginBottom: 4, fontWeight: 600 }}>{metodo}</div>
+              <div style={{ fontSize: 20, fontWeight: 800, color }}>{(total as number).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</div>
+            </div>
+          );
+        })}
+        {facturasHoy.length === 0 && (
+          <div style={{ color: "rgba(255,255,255,0.3)", fontSize: 14, fontStyle: "italic" }}>
+            Sin facturas registradas hoy
+          </div>
+        )}
       </div>
 
       {/* ── FILTROS ───────────────────────────────────────────────────────── */}

@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 import { API_URL as API } from "@/config";
 
@@ -70,6 +70,23 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
   </body></html>`;
 }
 
+// ─── Imprimir via iframe (fiable) ────────────────────────────────────────────
+function imprimirHTMLCafe(html: string) {
+  const prev = document.getElementById("__cafe_admin_iframe__");
+  if (prev) prev.remove();
+  const iframe = document.createElement("iframe");
+  iframe.id = "__cafe_admin_iframe__";
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:820px;height:1000px;border:none;opacity:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
+  if (!doc) { const w = window.open("","_blank"); if (w){w.document.write(html);w.document.close();} return; }
+  doc.open(); doc.write(html); doc.close();
+  iframe.onload = () => {
+    try { (iframe.contentWindow as any)?.focus(); (iframe.contentWindow as any)?.print(); }
+    catch { const w = window.open("","_blank"); if (w){w.document.write(html);w.document.close();} }
+  };
+}
+
 export default function CafeteriaPage() {
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
@@ -82,6 +99,11 @@ export default function CafeteriaPage() {
   const [nuevoProducto, setNuevoProducto] = useState({
     nombre: "", precio: "", categoria: "General", stock: ""
   });
+  const [nuevoImagen, setNuevoImagen] = useState<string>("");
+  const [editImagenId, setEditImagenId] = useState<number|null>(null);
+  const [editImagenB64, setEditImagenB64] = useState<string>("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const fileEditRef  = useRef<HTMLInputElement>(null);
 
   const obtener = async () => {
     try {
@@ -133,10 +155,8 @@ export default function CafeteriaPage() {
 
       setUltimaVenta({ venta: data, items: snap });
 
-      // 🖨️ IMPRIMIR AUTOMÁTICO
-      const html = generarHTMLCafe(data, snap, metodoPago);
-      const w = window.open("", "_blank", "width=500,height=700");
-      if (w) { w.document.write(html); w.document.close(); }
+      // 🖨️ IMPRIMIR AUTOMÁTICO (iframe)
+      imprimirHTMLCafe(generarHTMLCafe(data, snap, metodoPago));
 
       setCarrito([]);
       setMontoRecibido("");
@@ -153,11 +173,36 @@ export default function CafeteriaPage() {
       await fetch(`${API}/cafeteria/productos`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(nuevoProducto)
+        body: JSON.stringify({ ...nuevoProducto, imagen: nuevoImagen || null })
       });
       setNuevoProducto({ nombre: "", precio: "", categoria: "General", stock: "" });
+      setNuevoImagen("");
+      if (fileInputRef.current) fileInputRef.current.value = "";
       obtener();
     } catch { alert("Error al crear"); }
+  };
+
+  // ── Leer imagen como base64 ───────────────────────────────────────────────
+  const leerImagen = (file: File, callback: (b64: string) => void) => {
+    const reader = new FileReader();
+    reader.onload = (e) => callback(e.target?.result as string);
+    reader.readAsDataURL(file);
+  };
+
+  // ── Guardar imagen de producto existente ──────────────────────────────────
+  const guardarImagenProducto = async () => {
+    if (!editImagenId || !editImagenB64) return;
+    try {
+      await fetch(`${API}/cafeteria/productos/${editImagenId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imagen: editImagenB64 }),
+      });
+      setEditImagenId(null);
+      setEditImagenB64("");
+      if (fileEditRef.current) fileEditRef.current.value = "";
+      obtener();
+    } catch { alert("Error al guardar imagen"); }
   };
 
   return (
@@ -269,11 +314,9 @@ export default function CafeteriaPage() {
             </button>
 
             {ultimaVenta && (
-              <button onClick={() => {
-                const html = generarHTMLCafe(ultimaVenta.venta, ultimaVenta.items, metodoPago);
-                const w = window.open("", "_blank", "width=500,height=700");
-                if (w) { w.document.write(html); w.document.close(); }
-              }} style={btnReimprimir}>
+              <button
+                onClick={() => imprimirHTMLCafe(generarHTMLCafe(ultimaVenta.venta, ultimaVenta.items, metodoPago))}
+                style={btnReimprimir}>
                 🔁 Reimprimir último recibo
               </button>
             )}
@@ -282,7 +325,7 @@ export default function CafeteriaPage() {
       )}
 
       {tab === "productos" && (
-        <div style={{ maxWidth: 560 }}>
+        <div style={{ maxWidth: 640 }}>
           <div style={card}>
             <h2 style={cardTitle}>➕ Nuevo Producto</h2>
             <label style={label}>Nombre *</label>
@@ -297,14 +340,60 @@ export default function CafeteriaPage() {
             <label style={label}>Stock inicial</label>
             <input type="number" placeholder="0" value={nuevoProducto.stock}
               onChange={e => setNuevoProducto({ ...nuevoProducto, stock: e.target.value })} style={input} />
+            {/* Imagen */}
+            <label style={label}>📸 Imagen (opcional)</label>
+            <input ref={fileInputRef} type="file" accept="image/*"
+              onChange={e => { const f = e.target.files?.[0]; if (f) leerImagen(f, b64 => setNuevoImagen(b64)); }}
+              style={{ ...input, padding:"8px", cursor:"pointer" }} />
+            {nuevoImagen && (
+              <div style={{ marginBottom:12, display:"flex", alignItems:"center", gap:10 }}>
+                <img src={nuevoImagen} alt="preview" style={{ width:60, height:60, borderRadius:8, objectFit:"cover", border:"2px solid #e5e7eb" }} />
+                <button onClick={() => { setNuevoImagen(""); if (fileInputRef.current) fileInputRef.current.value=""; }}
+                  style={{ fontSize:12, color:"#dc2626", background:"#fee2e2", border:"none", borderRadius:6, padding:"4px 10px", cursor:"pointer" }}>
+                  ✕ Quitar
+                </button>
+              </div>
+            )}
             <button onClick={crearProducto} style={btnPrimary}>Guardar Producto</button>
+          </div>
 
-            <hr style={{ margin: "20px 0", border: "none", borderTop: "1px solid #eee" }} />
-            <h3 style={{ marginBottom: 10 }}>📋 Productos existentes ({productos.length})</h3>
+          <div style={card}>
+            <h3 style={{ marginBottom:14, fontSize:16, fontWeight:700 }}>📋 Productos existentes ({productos.length})</h3>
             {productos.map(p => (
-              <div key={p.id} style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderBottom: "1px solid #f0f0f0", fontSize: 14 }}>
-                <span><b>{p.nombre}</b> <span style={{ color: "#888", fontSize: 12 }}>({p.categoria})</span></span>
-                <span style={{ fontWeight: 700 }}>RD$ {Number(p.precio).toFixed(2)} · Stock: {p.stock}</span>
+              <div key={p.id} style={{ display:"flex", alignItems:"center", gap:12, padding:"10px 0", borderBottom:"1px solid #f0f0f0" }}>
+                {/* Thumbnail */}
+                {p.imagen
+                  ? <img src={p.imagen} alt={p.nombre} style={{ width:48, height:48, borderRadius:8, objectFit:"cover", border:"1px solid #e5e7eb", flexShrink:0 }} />
+                  : <div style={{ width:48, height:48, borderRadius:8, background:"#f1f5f9", display:"flex", alignItems:"center", justifyContent:"center", fontSize:20, flexShrink:0 }}>☕</div>
+                }
+                <div style={{ flex:1 }}>
+                  <div style={{ fontWeight:700, fontSize:14 }}>{p.nombre}</div>
+                  <div style={{ fontSize:12, color:"#888" }}>{p.categoria} · Stock: {p.stock} · RD$ {Number(p.precio).toFixed(2)}</div>
+                </div>
+                {/* Cambiar imagen */}
+                {editImagenId === p.id ? (
+                  <div style={{ display:"flex", alignItems:"center", gap:8 }}>
+                    <input ref={fileEditRef} type="file" accept="image/*"
+                      onChange={e => { const f = e.target.files?.[0]; if (f) leerImagen(f, b64 => setEditImagenB64(b64)); }}
+                      style={{ fontSize:11, maxWidth:140 }} />
+                    {editImagenB64 && (
+                      <img src={editImagenB64} alt="preview" style={{ width:36, height:36, borderRadius:6, objectFit:"cover" }} />
+                    )}
+                    <button onClick={guardarImagenProducto} disabled={!editImagenB64}
+                      style={{ background:"#10b981", color:"#fff", border:"none", borderRadius:6, padding:"5px 12px", fontSize:12, fontWeight:700, cursor:"pointer" }}>
+                      ✓
+                    </button>
+                    <button onClick={() => { setEditImagenId(null); setEditImagenB64(""); }}
+                      style={{ background:"#fee2e2", color:"#dc2626", border:"none", borderRadius:6, padding:"5px 10px", fontSize:12, cursor:"pointer" }}>
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <button onClick={() => { setEditImagenId(p.id); setEditImagenB64(""); }}
+                    style={{ background:"#f1f5f9", color:"#555", border:"1px solid #e2e8f0", borderRadius:6, padding:"5px 12px", fontSize:12, cursor:"pointer", whiteSpace:"nowrap" }}>
+                    📸 {p.imagen ? "Cambiar img" : "+ Imagen"}
+                  </button>
+                )}
               </div>
             ))}
           </div>

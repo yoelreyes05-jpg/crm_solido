@@ -316,12 +316,37 @@ app.get("/cafeteria/productos", async (req, res) => {
 });
 
 app.post("/cafeteria/productos", async (req, res) => {
-  const { nombre, precio, categoria, stock } = req.body;
+  const { nombre, precio, categoria, stock, imagen } = req.body;
   const { data, error } = await supabase.from("cafeteria_productos")
-    .insert([{ nombre, precio: Number(precio), categoria: categoria || "General", stock: Number(stock || 0) }])
+    .insert([{ nombre, precio: Number(precio), categoria: categoria || "General", stock: Number(stock || 0), imagen: imagen || null }])
     .select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
+});
+
+app.put("/cafeteria/productos/:id", async (req, res) => {
+  const { id } = req.params;
+  const { nombre, precio, categoria, stock, imagen } = req.body;
+  const { data, error } = await supabase.from("cafeteria_productos")
+    .update({ nombre, precio: Number(precio), categoria: categoria || "General", stock: Number(stock || 0), imagen: imagen !== undefined ? imagen : undefined })
+    .eq("id", id).select();
+  if (error) return res.json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.patch("/cafeteria/productos/:id", async (req, res) => {
+  const { id } = req.params;
+  const { data, error } = await supabase.from("cafeteria_productos")
+    .update(req.body).eq("id", id).select();
+  if (error) return res.json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete("/cafeteria/productos/:id", async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from("cafeteria_productos").delete().eq("id", id);
+  if (error) return res.json({ error: error.message });
+  res.json({ ok: true });
 });
 
 app.get("/cafeteria/ordenes", async (req, res) => {

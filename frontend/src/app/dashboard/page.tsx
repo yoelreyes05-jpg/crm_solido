@@ -1,194 +1,278 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
-
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { API_URL as API } from "@/config";
 
-const ESTADO_COLORES = {
-  RECIBIDO: "#3b82f6", DIAGNOSTICO: "#f59e0b", REPARACION: "#ef4444",
-  CONTROL_CALIDAD: "#8b5cf6", LISTO: "#10b981", ENTREGADO: "#6b7280"
-};
+// ─── Fases del taller ────────────────────────────────────────────────────────
+const FASES = [
+  { key: "RECIBIDO",        label: "Recibido",      color: "#3b82f6", light: "#eff6ff", icon: "📋" },
+  { key: "DIAGNOSTICO",     label: "Diagnóstico",   color: "#f59e0b", light: "#fffbeb", icon: "🔍" },
+  { key: "REPARACION",      label: "Reparación",    color: "#ef4444", light: "#fef2f2", icon: "🔧" },
+  { key: "CONTROL_CALIDAD", label: "Ctrl. Calidad", color: "#8b5cf6", light: "#f5f3ff", icon: "✅" },
+  { key: "LISTO",           label: "Listo",         color: "#10b981", light: "#ecfdf5", icon: "🎉" },
+  { key: "ENTREGADO",       label: "Entregado",     color: "#6b7280", light: "#f9fafb", icon: "🏁" },
+];
+const MAX_VISIBLE = 3;
 
 export default function Dashboard() {
-  const [stats, setStats] = useState(null);
-  const [ordenes, setOrdenes] = useState([]);
+  const [stats, setStats]     = useState<any>(null);
+  const [ordenes, setOrdenes] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [sRes, oRes] = await Promise.all([
         fetch(`${API}/dashboard/stats`),
-        fetch(`${API}/ordenes`)
+        fetch(`${API}/ordenes`),
       ]);
-      const s = await sRes.json();
+      setStats(await sRes.json());
       const o = await oRes.json();
-      setStats(s);
       setOrdenes(Array.isArray(o) ? o : []);
-    } catch (err) { console.error(err); }
+    } catch {}
     setLoading(false);
-  };
+  }, []);
 
   useEffect(() => {
     loadData();
     const i = setInterval(loadData, 5000);
     return () => clearInterval(i);
-  }, []);
+  }, [loadData]);
+
+  // ─── Drag & Drop ────────────────────────────────────────────────────────
+  const onDragEnd = async (result: any) => {
+    const { source, destination, draggableId } = result;
+    if (!destination || source.droppableId === destination.droppableId) return;
+    const ordenId  = Number(draggableId);
+    const nuevoEst = destination.droppableId;
+    // Optimistic update
+    setOrdenes(prev => prev.map(o => o.id === ordenId ? { ...o, estado: nuevoEst } : o));
+    try {
+      await fetch(`${API}/ordenes/${ordenId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ estado: nuevoEst, status: nuevoEst }),
+      });
+    } catch { loadData(); }
+  };
+
+  // ─── Agrupar por fase ───────────────────────────────────────────────────
+  const byFase: Record<string, any[]> = {};
+  for (const f of FASES) byFase[f.key] = ordenes.filter(o => (o.estado || "RECIBIDO") === f.key);
+
+  const listos        = byFase["LISTO"]?.length || 0;
+  const enTaller      = ordenes.filter(o => o.estado !== "ENTREGADO").length;
 
   if (loading) return (
-    <div style={{ display: "flex", justifyContent: "center", alignItems: "center", height: "60vh", fontSize: 18, color: "#888" }}>
+    <div style={{ display:"flex", justifyContent:"center", alignItems:"center", height:"60vh", fontSize:18, color:"#888" }}>
       Cargando dashboard...
     </div>
   );
 
   return (
-    <div style={container}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 28 }}>
+    <div style={S.container}>
+      {/* HEADER */}
+      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:22 }}>
         <div>
-          <h1 style={title}>📊 Dashboard</h1>
-          <p style={{ color: "#888", fontSize: 15, margin: 0 }}>Sólido Auto Servicio — Vista general del taller</p>
+          <h1 style={S.title}>📊 Dashboard</h1>
+          <p style={{ color:"#888", fontSize:14, margin:0 }}>Sólido Auto Servicio — Vista general del taller</p>
         </div>
-        <span style={{ fontSize: 13, color: "#aaa", background: "#fff", padding: "6px 14px", borderRadius: 8, border: "1px solid #e5e7eb" }}>
-          🔄 Actualiza cada 5s
+        <span style={{ fontSize:12, color:"#aaa", background:"#fff", padding:"6px 14px", borderRadius:8, border:"1px solid #e5e7eb" }}>
+          🔄 Auto‑refresh 5s
         </span>
       </div>
 
+      {/* ALERTA LISTOS */}
+      {listos > 0 && (
+        <div style={{
+          background:"linear-gradient(135deg,#065f46,#10b981)", color:"#fff",
+          borderRadius:14, padding:"13px 20px", marginBottom:20,
+          display:"flex", alignItems:"center", gap:14,
+          boxShadow:"0 4px 16px rgba(16,185,129,0.4)",
+          animation:"pulse 2.5s ease-in-out infinite"
+        }}>
+          <span style={{ fontSize:28 }}>🎉</span>
+          <div style={{ flex:1 }}>
+            <div style={{ fontWeight:800, fontSize:16 }}>
+              {listos} vehículo{listos > 1 ? "s" : ""} listo{listos > 1 ? "s" : ""} para entregar
+            </div>
+            <div style={{ fontSize:12, opacity:0.82, marginTop:2 }}>Notifica al cliente para coordinar la entrega</div>
+          </div>
+          <Link href="/ordenes" style={{ background:"rgba(255,255,255,0.2)", color:"#fff", padding:"8px 18px", borderRadius:8, fontWeight:700, fontSize:13, textDecoration:"none" }}>
+            Ver órdenes →
+          </Link>
+        </div>
+      )}
+
       {/* KPIs */}
-      <div style={kpiGrid}>
+      <div style={S.kpiGrid}>
         {[
-          { label: "🚗 En Taller", valor: (stats?.ordenes?.total || 0) - (stats?.ordenes?.entregado || 0), color: "#3b82f6" },
-          { label: "✅ Listos", valor: stats?.ordenes?.listo || 0, color: "#10b981" },
-          { label: "🔍 Diagnóstico", valor: stats?.ordenes?.diagnostico || 0, color: "#f59e0b" },
-          { label: "🔧 En Reparación", valor: stats?.ordenes?.reparacion || 0, color: "#ef4444" },
-          { label: "👥 Clientes", valor: stats?.clientes || 0, color: "#8b5cf6" },
-          { label: "⚠️ Stock Bajo", valor: stats?.stockBajo || 0, color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
+          { label:"🚗 En Taller",   valor: enTaller,                        color:"#3b82f6" },
+          { label:"🎉 Listos",      valor: listos,                          color:"#10b981" },
+          { label:"🔍 Diagnóstico", valor: stats?.ordenes?.diagnostico||0,  color:"#f59e0b" },
+          { label:"🔧 Reparación",  valor: stats?.ordenes?.reparacion||0,   color:"#ef4444" },
+          { label:"👥 Clientes",    valor: stats?.clientes||0,              color:"#8b5cf6" },
+          { label:"⚠️ Stock Bajo",  valor: stats?.stockBajo||0,            color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
         ].map(k => (
-          <div key={k.label} style={{ background: "#fff", borderRadius: 14, padding: "20px 18px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)", borderLeft: `5px solid ${k.color}` }}>
-            <div style={{ fontSize: 14, color: "#888", marginBottom: 10, fontWeight: 600 }}>{k.label}</div>
-            <div style={{ fontSize: 36, fontWeight: 900, color: "#111" }}>{k.valor}</div>
+          <div key={k.label} style={{ background:"#fff", borderRadius:14, padding:"18px 16px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", borderLeft:`5px solid ${k.color}` }}>
+            <div style={{ fontSize:13, color:"#888", marginBottom:8, fontWeight:600 }}>{k.label}</div>
+            <div style={{ fontSize:34, fontWeight:900, color:"#111" }}>{k.valor}</div>
           </div>
         ))}
       </div>
 
-      {/* ESTADO TALLER */}
-      <div style={section}>
-        <h2 style={sectionTitle}>🏭 Estado del Taller por Fase</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 12 }}>
-          {[
-            { key: "recibido",       label: "Recibido",       color: "#3b82f6" },
-            { key: "diagnostico",    label: "Diagnóstico",    color: "#f59e0b" },
-            { key: "reparacion",     label: "Reparación",     color: "#ef4444" },
-            { key: "control_calidad",label: "Control Calidad",color: "#8b5cf6" },
-            { key: "listo",          label: "Listo",          color: "#10b981" },
-            { key: "entregado",      label: "Entregado",      color: "#6b7280" },
-          ].map(e => (
-            <div key={e.key} style={{
-              background: "#fff", borderRadius: 14, padding: "18px 12px",
-              textAlign: "center", boxShadow: "0 2px 12px rgba(0,0,0,0.06)",
-              borderTop: `5px solid ${e.color}`
-            }}>
-              <div style={{ fontSize: 34, fontWeight: 900, color: e.color }}>
-                {stats?.ordenes?.[e.key] || 0}
-              </div>
-              <div style={{ fontSize: 13, color: "#666", marginTop: 6, fontWeight: 600 }}>{e.label}</div>
-            </div>
-          ))}
+      {/* KANBAN */}
+      <div style={S.section}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <h2 style={S.sectionTitle}>🏭 Estado del Taller</h2>
+          <span style={{ fontSize:11, color:"#aaa", background:"#fff", padding:"4px 12px", borderRadius:6, border:"1px solid #e5e7eb" }}>
+            ☝️ Arrastra tarjetas para cambiar fase
+          </span>
         </div>
-      </div>
 
-      {/* INGRESOS HOY */}
-      <div style={section}>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-          <div style={{ background: "#111827", borderRadius: 16, padding: "24px", color: "#fff" }}>
-            <div style={{ fontSize: 14, color: "#9ca3af", marginBottom: 8 }}>💰 Ingresos de Hoy</div>
-            <div style={{ fontSize: 36, fontWeight: 900 }}>
-              RD$ {Number(stats?.ingresoHoy || 0).toLocaleString("es-DO")}
-            </div>
-            <div style={{ fontSize: 13, color: "#6b7280", marginTop: 8 }}>Facturación del día en curso</div>
+        <DragDropContext onDragEnd={onDragEnd}>
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:10, alignItems:"start" }}>
+            {FASES.map(fase => {
+              const cards   = byFase[fase.key] || [];
+              const expanded = expandidas[fase.key];
+              const visible  = expanded ? cards : cards.slice(0, MAX_VISIBLE);
+              const hayMas   = cards.length > MAX_VISIBLE;
+              return (
+                <div key={fase.key} style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 12px rgba(0,0,0,0.06)", overflow:"hidden", border:`1px solid ${fase.color}22` }}>
+                  {/* Header */}
+                  <div style={{ padding:"10px 12px", background:fase.light, borderBottom:`2px solid ${fase.color}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                    <span style={{ fontSize:12, fontWeight:800, color:"#111" }}>{fase.icon} {fase.label}</span>
+                    <span style={{ background:fase.color, color:"#fff", borderRadius:"50%", width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800 }}>
+                      {cards.length}
+                    </span>
+                  </div>
+                  {/* Drop zone */}
+                  <Droppable droppableId={fase.key}>
+                    {(prov, snap) => (
+                      <div ref={prov.innerRef} {...prov.droppableProps} style={{ padding:8, minHeight:60, background:snap.isDraggingOver ? `${fase.color}12` : "transparent", transition:"background 0.15s" }}>
+                        {visible.length === 0 && (
+                          <div style={{ textAlign:"center", color:"#ddd", fontSize:11, padding:"14px 4px", fontWeight:600 }}>Sin órdenes</div>
+                        )}
+                        {visible.map((orden, idx) => (
+                          <Draggable key={String(orden.id)} draggableId={String(orden.id)} index={idx}>
+                            {(p, s) => (
+                              <div
+                                ref={p.innerRef} {...p.draggableProps} {...p.dragHandleProps}
+                                style={{
+                                  background:"#fff",
+                                  border:`1.5px solid ${s.isDragging ? fase.color : "#f0f0f0"}`,
+                                  borderRadius:10, padding:"9px 10px", marginBottom:6,
+                                  cursor:"grab", userSelect:"none",
+                                  boxShadow: s.isDragging ? `0 8px 24px rgba(0,0,0,0.18),0 0 0 2px ${fase.color}40` : "0 1px 4px rgba(0,0,0,0.04)",
+                                  transform: s.isDragging ? "rotate(1.5deg)" : "none",
+                                  ...p.draggableProps.style,
+                                }}
+                              >
+                                <div style={{ fontSize:12, fontWeight:700, color:"#111", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap", marginBottom:2 }}>
+                                  {orden.cliente_nombre || "Sin cliente"}
+                                </div>
+                                <div style={{ fontSize:11, color:"#888", overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>
+                                  🚗 {orden.vehiculo_info || "—"}
+                                </div>
+                                {orden.created_at && (
+                                  <div style={{ fontSize:10, color:"#ccc", marginTop:4 }}>
+                                    {new Date(orden.created_at).toLocaleDateString("es-DO")}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                          </Draggable>
+                        ))}
+                        {prov.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                  {hayMas && (
+                    <button onClick={() => setExpandidas(prev => ({ ...prev, [fase.key]: !prev[fase.key] }))}
+                      style={{ width:"100%", padding:"7px", border:"none", background:`${fase.color}10`, color:fase.color, fontSize:11, fontWeight:700, cursor:"pointer", borderTop:`1px solid ${fase.color}20` }}>
+                      {expanded ? "▲ Ver menos" : `▼ +${cards.length - MAX_VISIBLE} más`}
+                    </button>
+                  )}
+                </div>
+              );
+            })}
           </div>
-          <div style={{ background: "#fff", borderRadius: 16, padding: "24px", boxShadow: "0 2px 12px rgba(0,0,0,0.06)" }}>
-            <div style={{ fontSize: 14, color: "#888", marginBottom: 8 }}>🔬 Diagnósticos Activos</div>
-            <div style={{ fontSize: 36, fontWeight: 900, color: "#8b5cf6" }}>
-              {stats?.diagnosticos?.en_reparacion || 0}
-            </div>
-            <div style={{ fontSize: 13, color: "#888", marginTop: 8 }}>Vehículos en reparación activa</div>
-          </div>
-        </div>
+        </DragDropContext>
       </div>
 
       {/* ÚLTIMAS ÓRDENES */}
-      <div style={section}>
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
-          <h2 style={{ ...sectionTitle, marginBottom: 0 }}>🧾 Últimas Órdenes de Trabajo</h2>
-          <Link href="/ordenes" style={{ fontSize: 14, color: "#3b82f6", fontWeight: 600, textDecoration: "none" }}>
-            Ver todas →
-          </Link>
+      <div style={S.section}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <h2 style={{ ...S.sectionTitle, marginBottom:0 }}>🧾 Últimas Órdenes de Trabajo</h2>
+          <Link href="/ordenes" style={{ fontSize:14, color:"#3b82f6", fontWeight:600, textDecoration:"none" }}>Ver todas →</Link>
         </div>
-        <div style={{ background: "#fff", borderRadius: 14, boxShadow: "0 2px 12px rgba(0,0,0,0.06)", overflow: "hidden" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse" }}>
+        <div style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 12px rgba(0,0,0,0.06)", overflow:"hidden" }}>
+          <table style={{ width:"100%", borderCollapse:"collapse" }}>
             <thead>
-              <tr style={{ background: "#f8fafc" }}>
-                {["#", "Cliente", "Vehículo", "Descripción", "Estado", "Fecha"].map(h => (
-                  <th key={h} style={{ padding: "13px 16px", textAlign: "left", fontSize: 13, color: "#888", fontWeight: 700 }}>{h}</th>
+              <tr style={{ background:"#f8fafc" }}>
+                {["#","Cliente","Vehículo","Descripción","Estado","Fecha"].map(h => (
+                  <th key={h} style={{ padding:"12px 16px", textAlign:"left", fontSize:12, color:"#888", fontWeight:700 }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {ordenes.length === 0 ? (
-                <tr><td colSpan={6} style={{ padding: "30px", textAlign: "center", color: "#aaa", fontSize: 15 }}>Sin órdenes registradas</td></tr>
-              ) : ordenes.slice(0, 8).map(o => (
-                <tr key={o.id} style={{ borderTop: "1px solid #f0f0f0" }}>
-                  <td style={tdStyle}>#{o.id}</td>
-                  <td style={{ ...tdStyle, fontWeight: 700 }}>{o.cliente_nombre}</td>
-                  <td style={tdStyle}>{o.vehiculo_info}</td>
-                  <td style={{ ...tdStyle, maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {o.descripcion || "—"}
-                  </td>
-                  <td style={tdStyle}>
-                    <span style={{
-                      background: ESTADO_COLORES[o.estado] || "#888",
-                      color: "#fff", padding: "4px 12px", borderRadius: 8,
-                      fontSize: 12, fontWeight: 700
-                    }}>
-                      {o.estado}
-                    </span>
-                  </td>
-                  <td style={{ ...tdStyle, fontSize: 13, color: "#888" }}>
-                    {o.created_at ? new Date(o.created_at).toLocaleDateString("es-DO") : "—"}
-                  </td>
-                </tr>
-              ))}
+                <tr><td colSpan={6} style={{ padding:30, textAlign:"center", color:"#aaa" }}>Sin órdenes</td></tr>
+              ) : ordenes.slice(0,8).map(o => {
+                const fase = FASES.find(f => f.key === o.estado) || FASES[0];
+                return (
+                  <tr key={o.id} style={{ borderTop:"1px solid #f0f0f0" }}>
+                    <td style={S.td}>#{o.id}</td>
+                    <td style={{ ...S.td, fontWeight:700 }}>{o.cliente_nombre}</td>
+                    <td style={S.td}>{o.vehiculo_info}</td>
+                    <td style={{ ...S.td, maxWidth:180, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap" }}>{o.descripcion||"—"}</td>
+                    <td style={S.td}>
+                      <span style={{ background:fase.color, color:"#fff", padding:"3px 10px", borderRadius:6, fontSize:11, fontWeight:700 }}>{o.estado}</span>
+                    </td>
+                    <td style={{ ...S.td, fontSize:12, color:"#888" }}>{o.created_at ? new Date(o.created_at).toLocaleDateString("es-DO") : "—"}</td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         </div>
       </div>
 
       {/* ACCESOS RÁPIDOS */}
-      <div style={section}>
-        <h2 style={sectionTitle}>⚡ Accesos Rápidos</h2>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 12 }}>
+      <div style={S.section}>
+        <h2 style={S.sectionTitle}>⚡ Accesos Rápidos</h2>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
           {[
-            { href: "/ordenes",     label: "➕ Nueva Orden",       color: "#3b82f6" },
-            { href: "/diagnosticos",label: "🔬 Nuevo Diagnóstico", color: "#8b5cf6" },
-            { href: "/facturacion", label: "🧾 Facturar",          color: "#10b981" },
-            { href: "/clientes",    label: "👤 Nuevo Cliente",     color: "#f59e0b" },
+            { href:"/ordenes",      label:"➕ Nueva Orden",       color:"#3b82f6" },
+            { href:"/diagnosticos", label:"🔬 Nuevo Diagnóstico", color:"#8b5cf6" },
+            { href:"/facturacion",  label:"🧾 Facturar",          color:"#10b981" },
+            { href:"/clientes",     label:"👤 Nuevo Cliente",     color:"#f59e0b" },
           ].map(a => (
             <Link key={a.href} href={a.href} style={{
-              background: a.color, color: "#fff", padding: "18px 16px",
-              borderRadius: 14, textAlign: "center", fontWeight: 700,
-              fontSize: 15, textDecoration: "none", display: "block"
+              background:a.color, color:"#fff", padding:"18px 16px",
+              borderRadius:14, textAlign:"center", fontWeight:700,
+              fontSize:15, textDecoration:"none", display:"block",
+              boxShadow:`0 4px 14px ${a.color}44`,
             }}>
               {a.label}
             </Link>
           ))}
         </div>
       </div>
+
+      <style>{`
+        @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.88} }
+      `}</style>
     </div>
   );
 }
 
-const container = { padding: "28px", background: "#f5f7fb", minHeight: "100vh" };
-const title = { fontSize: 28, fontWeight: 900, margin: 0 };
-const kpiGrid = { display: "grid", gridTemplateColumns: "repeat(6,1fr)", gap: 14, marginBottom: 28 };
-const section = { marginBottom: 28 };
-const sectionTitle = { fontSize: 18, fontWeight: 700, marginBottom: 16, color: "#111" };
-const tdStyle = { padding: "13px 16px", fontSize: 14 };
+const S: any = {
+  container:    { padding:"24px 28px", background:"#f5f7fb", minHeight:"100vh" },
+  title:        { fontSize:26, fontWeight:900, margin:0 },
+  kpiGrid:      { display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:14, marginBottom:24 },
+  section:      { marginBottom:28 },
+  sectionTitle: { fontSize:17, fontWeight:700, marginBottom:14, color:"#111" },
+  td:           { padding:"12px 16px", fontSize:13 },
+};
