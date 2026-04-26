@@ -343,10 +343,14 @@ app.patch("/cafeteria/productos/:id", async (req, res) => {
 });
 
 app.delete("/cafeteria/productos/:id", async (req, res) => {
-  const { id } = req.params;
-  const { error } = await supabase.from("cafeteria_productos").delete().eq("id", id);
-  if (error) return res.json({ error: error.message });
-  res.json({ ok: true });
+  const id = Number(req.params.id);
+  if (!id || isNaN(id)) return res.status(400).json({ error: "ID inválido" });
+  const { error, count } = await supabase
+    .from("cafeteria_productos")
+    .delete({ count: "exact" })
+    .eq("id", id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true, deleted: count });
 });
 
 app.get("/cafeteria/ordenes", async (req, res) => {

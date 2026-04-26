@@ -117,7 +117,7 @@ export default function CafeteriaPage() {
   const [editForm, setEditForm]       = useState<any>({});
   const [guardandoEdit, setGuardandoEdit] = useState(false);
 
-  const obtener = async () => {
+  const obtener = async (): Promise<void> => {
     try {
       const res = await fetch(`${API}/cafeteria/productos`);
       const data = await res.json();
@@ -225,11 +225,25 @@ export default function CafeteriaPage() {
     finally { setGuardandoEdit(false); }
   };
   const eliminarProducto = async (id: number, nombre: string) => {
-    if (!confirm(`¿Eliminar "${nombre}"? Esta acción no se puede deshacer.`)) return;
+    if (!confirm(`¿Eliminar "${nombre}"?\nEsta acción no se puede deshacer.`)) return;
+    // Optimistic: quitar de UI inmediatamente
+    setProductos((prev: any[]) => prev.filter((p: any) => p.id !== id));
     try {
-      await fetch(`${API}/cafeteria/productos/${id}`, { method: "DELETE" });
-      obtener();
-    } catch { alert("Error al eliminar"); }
+      const res = await fetch(`${API}/cafeteria/productos/${id}`, { method: "DELETE" });
+      let data: any = {};
+      try { data = await res.json(); } catch {}
+      if (!res.ok || data?.error) {
+        // Revertir si falló
+        alert("Error al eliminar: " + (data?.error || `HTTP ${res.status}`));
+        await obtener();
+        return;
+      }
+      // Confirmar con recarga limpia
+      await obtener();
+    } catch (e: any) {
+      alert("Error de conexión: " + e.message);
+      await obtener();
+    }
   };
 
   // ── Guardar imagen de producto existente ──────────────────────────────────

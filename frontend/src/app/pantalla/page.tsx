@@ -103,25 +103,26 @@ export default function PantallaTV() {
       }}>
         {/* Logo / Brand */}
         <div style={{
-          background: "linear-gradient(135deg,#ea580c,#f97316)",
+          background: esSliderTaller ? "#fff" : "linear-gradient(135deg,#ea580c,#f97316)",
           padding: "16px 28px",
           display: "flex", alignItems: "center", gap: 14,
           minWidth: 260,
+          borderRight: esSliderTaller ? "2px solid #f3f4f6" : "none",
         }}>
           <div style={{
             width: 52, height: 52, borderRadius: 14, overflow: "hidden",
-            background: "rgba(255,255,255,0.2)",
+            background: esSliderTaller ? "#f3f4f6" : "rgba(255,255,255,0.2)",
             display: "flex", alignItems: "center", justifyContent: "center",
-            boxShadow: "0 2px 8px rgba(0,0,0,0.2)", flexShrink: 0,
+            boxShadow: "0 2px 8px rgba(0,0,0,0.1)", flexShrink: 0,
           }}>
             <img src="/logo.png" alt="Logo" style={{ width: "100%", height: "100%", objectFit: "contain" }}
               onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
           </div>
           <div>
-            <div style={{ fontWeight: 900, fontSize: 18, color: "#fff", letterSpacing: 0.5 }}>
+            <div style={{ fontWeight: 900, fontSize: 18, color: esSliderTaller ? "#111" : "#fff", letterSpacing: 0.5 }}>
               SÓLIDO AUTO SERVICIO
             </div>
-            <div style={{ fontSize: 12, color: "rgba(255,255,255,0.82)", fontWeight: 600, marginTop: 2 }}>
+            <div style={{ fontSize: 12, color: esSliderTaller ? "#6b7280" : "rgba(255,255,255,0.82)", fontWeight: 600, marginTop: 2 }}>
               ☕ Sólido Cafe Garage
             </div>
           </div>
@@ -131,7 +132,8 @@ export default function PantallaTV() {
         <div style={{ flex: 1, display: "flex", alignItems: "center", paddingLeft: 28 }}>
           <div>
             <div style={{
-              fontSize: 13, fontWeight: 700, color: "#f97316",
+              fontSize: 13, fontWeight: 700,
+              color: esSliderTaller ? "#3b82f6" : "#f97316",
               textTransform: "uppercase", letterSpacing: 1.5, marginBottom: 2,
             }}>
               {esSliderTaller ? "🔧 Estado del Taller" : "☕ Menú Cafetería"}
@@ -264,79 +266,90 @@ export default function PantallaTV() {
 
         {/* ─ SLIDE CAFETERÍA ──────────────────────────────────────────── */}
         {!esSliderTaller && (
-          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "18px 24px" }}>
+          <div style={{ height: "100%", display: "flex", gap: 0, overflow: "hidden" }}>
 
-            {/* Categoría / título slide */}
-            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16, flexShrink: 0 }}>
+            {/* Sidebar izquierdo */}
+            <div style={{
+              width: 180, background: "#fff7ed",
+              borderRight: "2px solid #fed7aa",
+              display: "flex", flexDirection: "column", flexShrink: 0,
+            }}>
               <div style={{
-                background: "linear-gradient(135deg,#ea580c,#f97316)",
-                borderRadius: 12, padding: "8px 20px",
-                color: "#fff", fontWeight: 900, fontSize: 16,
+                background: "#ea580c", color: "#fff",
+                padding: "14px 16px", fontWeight: 900, fontSize: 16,
               }}>
                 ☕ Menú del Día
               </div>
-              {cafSlides.length > 1 && (
-                <span style={{ fontSize: 13, color: "#9ca3af", fontWeight: 600 }}>
-                  Página {slideIdx} de {cafSlides.length}
-                </span>
-              )}
+              <div style={{ padding: "12px 14px", flex: 1 }}>
+                <div style={{ fontSize: 11, color: "#9a3412", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1, marginBottom: 10 }}>
+                  Disponibles hoy
+                </div>
+                <div style={{ fontSize: 38, fontWeight: 900, color: "#ea580c", lineHeight: 1 }}>
+                  {cafSlide.length}
+                </div>
+                <div style={{ fontSize: 11, color: "#c2410c", marginTop: 4 }}>productos en pantalla</div>
+                {cafSlides.length > 1 && (
+                  <div style={{ marginTop: 16, fontSize: 11, color: "#9a3412", background: "#fed7aa", borderRadius: 8, padding: "6px 10px" }}>
+                    Página {slideIdx} de {cafSlides.length}
+                  </div>
+                )}
+              </div>
+              <div style={{ padding: "12px 14px", borderTop: "1px solid #fed7aa", fontSize: 11, color: "#9a3412" }}>
+                Sólido Cafe Garage<br />809-712-2027
+              </div>
             </div>
 
             {/* Grid productos */}
-            <div style={{
-              flex: 1,
-              display: "grid",
-              gridTemplateColumns: cafSlide.length <= 4
-                ? "repeat(4,1fr)"
-                : cafSlide.length <= 6
-                  ? "repeat(3,1fr)"
-                  : "repeat(4,1fr)",
-              gap: 14,
-              alignContent: "start",
-              overflow: "hidden",
-            }}>
-              {cafSlide.map(prod => (
-                <div key={prod.id} style={{
-                  background: "#fff", borderRadius: 18,
-                  boxShadow: "0 4px 18px rgba(0,0,0,0.09)",
-                  border: "1.5px solid #f3f4f6",
-                  overflow: "hidden",
-                  display: "flex", flexDirection: "column",
-                  transition: "transform 0.3s",
-                }}>
-                  {/* Imagen */}
-                  {prod.imagen
-                    ? <img src={prod.imagen} alt={prod.nombre}
-                        style={{ width: "100%", height: 150, objectFit: "cover" }} />
-                    : <div style={{
-                        width: "100%", height: 150,
-                        background: "linear-gradient(135deg,#fff7ed,#fed7aa)",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        fontSize: 52,
-                      }}>☕</div>
-                  }
-                  {/* Info */}
-                  <div style={{ padding: "12px 16px", flex: 1 }}>
-                    <div style={{
-                      fontWeight: 900, fontSize: 17, color: "#111",
-                      marginBottom: 3, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis",
-                    }}>{prod.nombre}</div>
-                    {prod.categoria && (
-                      <div style={{
-                        display: "inline-block", fontSize: 10, fontWeight: 700,
-                        background: "#fff7ed", color: "#ea580c",
-                        borderRadius: 6, padding: "2px 8px", marginBottom: 8,
-                        textTransform: "uppercase", letterSpacing: 0.5,
-                      }}>{prod.categoria}</div>
-                    )}
-                    <div style={{ fontSize: 24, fontWeight: 900, color: "#10b981" }}>
-                      RD$ {Number(prod.precio).toFixed(2)}
+            <div style={{ flex: 1, padding: "16px 20px", overflow: "hidden" }}>
+              <div style={{
+                display: "grid",
+                gridTemplateColumns: cafSlide.length <= 4 ? "repeat(4,1fr)"
+                  : cafSlide.length <= 6 ? "repeat(3,1fr)" : "repeat(4,1fr)",
+                gap: 12, height: "100%", alignContent: "start",
+              }}>
+                {cafSlide.map(prod => (
+                  <div key={prod.id} style={{
+                    background: "#fff", borderRadius: 14,
+                    boxShadow: "0 2px 10px rgba(0,0,0,0.07)",
+                    border: "1px solid #f3f4f6",
+                    overflow: "hidden",
+                    display: "flex", flexDirection: "column",
+                  }}>
+                    {/* Imagen compacta */}
+                    {prod.imagen
+                      ? <img src={prod.imagen} alt={prod.nombre}
+                          style={{ width: "100%", height: 90, objectFit: "cover", flexShrink: 0 }} />
+                      : <div style={{
+                          width: "100%", height: 90, flexShrink: 0,
+                          background: "#fff7ed",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          fontSize: 34,
+                        }}>☕</div>
+                    }
+                    {/* Info compacta */}
+                    <div style={{ padding: "9px 12px", flex: 1, display: "flex", flexDirection: "column", justifyContent: "space-between" }}>
+                      <div>
+                        <div style={{
+                          fontWeight: 900, fontSize: 15, color: "#111",
+                          whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", marginBottom: 2,
+                        }}>{prod.nombre}</div>
+                        {prod.categoria && (
+                          <div style={{
+                            display: "inline-block", fontSize: 9, fontWeight: 700,
+                            background: "#fff7ed", color: "#ea580c",
+                            borderRadius: 5, padding: "1px 6px",
+                            textTransform: "uppercase", letterSpacing: 0.5,
+                          }}>{prod.categoria}</div>
+                        )}
+                      </div>
+                      <div style={{ fontSize: 20, fontWeight: 900, color: "#16a34a", marginTop: 4 }}>
+                        RD$ {Number(prod.precio).toFixed(2)}
+                      </div>
                     </div>
+                    <div style={{ height: 3, background: "#ea580c", flexShrink: 0 }} />
                   </div>
-                  {/* Barra naranja inferior */}
-                  <div style={{ height: 4, background: "linear-gradient(90deg,#ea580c,#f97316,#fbbf24)" }} />
-                </div>
-              ))}
+                ))}
+              </div>
             </div>
           </div>
         )}
