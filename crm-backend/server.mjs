@@ -1135,11 +1135,14 @@ app.get("/vehiculo-historial", async (req, res) => {
   }
 });
 
-// GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente
+// GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente y web
+// Busca en AMBAS fuentes: órdenes activas + historial cerrado
 app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
   try {
     const placaNorm = req.params.placa.toUpperCase().replace(/\s+/g, "").trim();
-    const { data, error } = await supabase
+
+    // ── 1. Historial cerrado (vehiculo_historial) ──────────────────
+    const { data: histData } = await supabase
       .from("vehiculo_historial")
       .select(
         "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
@@ -1150,20 +1153,85 @@ app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
       .ilike("placa", placaNorm)
       .order("created_at", { ascending: false });
 
-    if (error) return res.status(500).json({ error: error.message });
-    if (!data || data.length === 0) return res.json({ found: false, historial: [] });
+    // ── 2. Órdenes activas (ordenes_trabajo + vehiculos) ──────────
+    const { data: vehiculoActivo } = await supabase
+      .from("vehiculos")
+      .select("id, marca, modelo, placa, ano, color, cliente_id")
+      .ilike("placa", placaNorm)
+      .maybeSingle();
 
+    let ordenesActivas = [];
+    if (vehiculoActivo) {
+      const { data: ordenes } = await supabase
+        .from("ordenes_trabajo")
+        .select("id, descripcion, estado, status, created_at, updated_at, total")
+        .eq("vehiculo_id", vehiculoActivo.id)
+        .not("estado", "in", '("COMPLETADO","FACTURADO","ENTREGADO")')
+        .order("created_at", { ascending: false });
+
+      if (ordenes && ordenes.length > 0) {
+        // Obtener diagnóstico activo si existe
+        const { data: diag } = await supabase
+          .from("diagnosticos")
+          .select("tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, tecnico_id, estado")
+          .eq("orden_id", ordenes[0].id)
+          .maybeSingle();
+
+        ordenesActivas = ordenes.map(o => ({
+          id: `orden_${o.id}`,
+          placa:              vehiculoActivo.placa,
+          marca:              vehiculoActivo.marca,
+          modelo:             vehiculoActivo.modelo,
+          ano:                vehiculoActivo.ano,
+          color:              vehiculoActivo.color,
+          estado:             o.estado || o.status || "RECIBIDO",
+          tipo_servicio:      diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+          observaciones:      diag?.observaciones || "",
+          fallas_identificadas: diag?.fallas_identificadas || "",
+          trabajos_realizados:  diag?.trabajos_realizados || "",
+          costo_total:        o.total || 0,
+          fecha_servicio:     o.created_at,
+          created_at:         o.created_at,
+          _activa:            true,   // marca para el frontend
+        }));
+      }
+    }
+
+    // ── 3. Combinar: órdenes activas primero, luego historial ─────
+    const historial = [...ordenesActivas, ...(histData || [])];
+
+    if (historial.length === 0) {
+      // Último recurso: buscar en vehiculos aunque no tenga orden activa
+      const vehSolo = vehiculoActivo || null;
+      if (vehSolo) {
+        return res.json({
+          found: true,
+          vehiculo: { placa: vehSolo.placa, marca: vehSolo.marca, modelo: vehSolo.modelo, ano: vehSolo.ano, color: vehSolo.color },
+          ultimo_estado: "RECIBIDO",
+          historial: [{
+            id: `veh_${vehSolo.id}`,
+            placa: vehSolo.placa, marca: vehSolo.marca, modelo: vehSolo.modelo,
+            ano: vehSolo.ano, color: vehSolo.color,
+            estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
+            created_at: new Date().toISOString(), _activa: true,
+          }],
+        });
+      }
+      return res.json({ found: false, historial: [] });
+    }
+
+    const ref = historial[0];
     res.json({
       found: true,
       vehiculo: {
-        placa:  data[0].placa,
-        marca:  data[0].marca,
-        modelo: data[0].modelo,
-        ano:    data[0].ano,
-        color:  data[0].color,
+        placa:  ref.placa,
+        marca:  ref.marca,
+        modelo: ref.modelo,
+        ano:    ref.ano,
+        color:  ref.color,
       },
-      ultimo_estado: data[0].estado,
-      historial: data,
+      ultimo_estado: ref.estado,
+      historial,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

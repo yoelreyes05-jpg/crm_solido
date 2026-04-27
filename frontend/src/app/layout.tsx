@@ -32,7 +32,7 @@ const MENU = [
 ];
 
 // Rutas que NO usan el sidebar
-const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado", "/pantalla"];
+const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado", "/pantalla", "/menu", "/"];
 
 export default function RootLayout({ children }) {
   const router = useRouter();
