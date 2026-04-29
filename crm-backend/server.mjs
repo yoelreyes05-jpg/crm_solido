@@ -1376,10 +1376,16 @@ async function tgTyping(chatId) {
   } catch {}
 }
 
-// Detectar si el texto parece una placa dominicana
-function esPlaca(txt) {
-  const t = txt.replace(/[\s\-]/g, "").toUpperCase();
-  return /^[A-Z]\d{6}$/.test(t) || /^[A-Z]{2}\d{5}$/.test(t) || /^\d{6,7}$/.test(t);
+// Extrae una placa dominicana del texto (mensaje exacto O embebido en una oración)
+// Formatos soportados: A123456 | AB12345 | 1234567 | A-12-3456 | "mi placa es A123456"
+function extraerPlaca(txt) {
+  const limpio = txt.toUpperCase().replace(/[\s\-_]/g, "");
+  // Coincidencia exacta primero (el usuario solo escribió la placa)
+  if (/^[A-Z]{1,2}\d{4,7}$/.test(limpio) || /^\d{6,7}$/.test(limpio)) return limpio;
+  // Buscar dentro del texto (ej: "mi placa es A123456 gracias")
+  const m = txt.toUpperCase().match(/\b([A-Z]{1,2}[\s\-]?\d{4,7}|\d{6,7})\b/);
+  if (m) return m[1].replace(/[\s\-]/g, "");
+  return null;
 }
 
 // Llamar a OpenAI GPT-4o-mini
@@ -1438,14 +1444,12 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Detección de placa ─────────────────────────────────────────────────
-    if (esPlaca(textoUp)) {
-      const { data: histResult } = await supabase
-        .rpc ? null : null; // placeholder, usamos la query directa
-
+    const placaDetectada = extraerPlaca(texto);
+    if (placaDetectada) {
       // Buscar en vehiculos activos
       const { data: vehiculos } = await supabase
         .from("vehiculos").select("id, marca, modelo, ano, placa, color")
-        .ilike("placa", textoUp).limit(1);
+        .ilike("placa", placaDetectada).limit(1);
 
       const vehiculo = vehiculos?.[0];
 
@@ -1488,7 +1492,7 @@ app.post("/telegram/webhook", async (req, res) => {
         // Buscar en historial permanente
         const { data: hist } = await supabase
           .from("vehiculo_historial").select("placa, marca, modelo, tipo_servicio, fecha_servicio, costo_total")
-          .ilike("placa", textoUp)
+          .ilike("placa", placaDetectada)
           .order("fecha_servicio", { ascending: false }).limit(1);
         const h = hist?.[0];
 
@@ -1507,7 +1511,7 @@ app.post("/telegram/webhook", async (req, res) => {
           );
         } else {
           await tgSend(chatId,
-            `❓ No encontré registros para la placa <b>${textoUp}</b> en nuestro sistema.\n\n` +
+            `❓ No encontré registros para la placa <b>${placaDetectada}</b> en nuestro sistema.\n\n` +
             `Si acabas de dejar tu vehículo, puede que aún estemos procesando la información.\n` +
             `Para verificar, llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`
           );
