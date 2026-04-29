@@ -361,6 +361,30 @@ app.delete("/cafeteria/productos/:id", async (req, res) => {
   res.json({ ok: true, archived: true });
 });
 
+// =====================================================
+// 🔩 REPUESTOS (alias público sobre tabla inventario)
+// Lee de la tabla "inventario" existente y mapea campos
+// para el portal web. La gestión se hace desde /inventario.
+// =====================================================
+app.get("/repuestos", async (req, res) => {
+  const { data } = await supabase
+    .from("inventario")
+    .select("id, name, code, price, stock")
+    .order("name", { ascending: true });
+  // Mapear campos de inventario al formato que espera la web
+  const mapped = (data || []).map(item => ({
+    id:          item.id,
+    nombre:      item.name,
+    descripcion: item.code ? `Ref: ${item.code}` : null,
+    precio:      item.price,
+    stock:       item.stock,
+    categoria:   "Repuestos",
+    imagen:      null,
+    activo:      true,
+  }));
+  res.json(mapped);
+});
+
 app.get("/cafeteria/ordenes", async (req, res) => {
   const { data } = await supabase.from("cafeteria_ventas").select("*").order("id", { ascending: false });
   res.json(data || []);
@@ -1280,6 +1304,341 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// =====================================================
+// 🤖 TELEGRAM BOT — ASISTENTE VIRTUAL SÓLIDO AUTO SERVICIO
+// Usa: TELEGRAM_TOKEN y OPENAI_API_KEY como variables de entorno
+// =====================================================
+
+const TG_TOKEN  = process.env.TELEGRAM_TOKEN;
+const OAI_KEY   = process.env.OPENAI_API_KEY;
+const TG_API    = `https://api.telegram.org/bot${TG_TOKEN}`;
+
+// ── Contexto del taller para la IA ───────────────────────────────────────────
+const CONTEXTO_TALLER = `
+Eres el asistente virtual de Sólido Auto Servicio, un taller automotriz profesional en Santo Domingo, República Dominicana. Tu nombre es SólidoBot.
+
+INFORMACIÓN DEL TALLER:
+- Nombre: Sólido Auto Servicio
+- Teléfono / WhatsApp: 809-712-2027
+- Dirección: Santo Domingo, República Dominicana
+- Horario: Lunes–Viernes 8:00 AM–6:00 PM | Sábados 8:00 AM–4:00 PM | Domingos 9:00 AM–2:00 PM
+
+SERVICIOS:
+1. Diagnóstico Computarizado — scanner digital completo
+2. Mantenimiento Preventivo — aceite, filtros, bujías, correas
+3. Sistema de Frenos — pastillas, discos, tambores, líquido de frenos
+4. Suspensión y Dirección — amortiguadores, rótulas, terminales, dirección asistida
+5. Sistema Eléctrico — diagnóstico y reparación eléctrica y electrónica
+6. Sistema de Enfriamiento — radiador, bomba de agua, termostato
+7. Motor y Transmisión — reparaciones mayores y menores
+8. Aire Acondicionado — recarga, diagnóstico y reparación de A/C
+9. Alineación y Balanceo — alineación computarizada de 4 ruedas
+
+VALORES (acrónimo SÓLIDO): Servicio · Organización · Limpieza · Institucionalidad · Dinamismo · Orden
+
+MISIÓN: Estandarizar los protocolos para la intervención automotriz con los más altos estándares.
+VISIÓN: Ser el taller automotriz de referencia en Santo Domingo, reconocido por calidad y transparencia.
+
+CAFETERÍA: Contamos con Sólido Café Garage, donde los clientes pueden disfrutar de bebidas y comida mientras esperan su vehículo.
+
+REGLAS PARA RESPONDER:
+- Responde siempre en español, de forma amable, breve y profesional.
+- Si el cliente pregunta por el estado de su vehículo, pídele que escriba su placa (ej: A123456).
+- Si preguntan por presupuestos específicos o reparaciones complejas, diles que un técnico los contactará pronto.
+- No inventes precios exactos. Puedes decir que los precios varían según el vehículo y el diagnóstico.
+- Si no sabes algo con certeza, sugiere llamar al 809-712-2027.
+- Respuestas máximo 3 párrafos cortos.
+`.trim();
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+// Enviar mensaje a Telegram
+async function tgSend(chatId, text, extra = {}) {
+  try {
+    await fetch(`${TG_API}/sendMessage`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ chat_id: chatId, text, parse_mode: "HTML", ...extra }),
+    });
+  } catch (e) { console.error("tgSend error:", e.message); }
+}
+
+// Indicador "escribiendo..."
+async function tgTyping(chatId) {
+  try {
+    await fetch(`${TG_API}/sendChatAction`, {
+      method:  "POST",
+      headers: { "Content-Type": "application/json" },
+      body:    JSON.stringify({ chat_id: chatId, action: "typing" }),
+    });
+  } catch {}
+}
+
+// Detectar si el texto parece una placa dominicana
+function esPlaca(txt) {
+  const t = txt.replace(/[\s\-]/g, "").toUpperCase();
+  return /^[A-Z]\d{6}$/.test(t) || /^[A-Z]{2}\d{5}$/.test(t) || /^\d{6,7}$/.test(t);
+}
+
+// Llamar a OpenAI GPT-4o-mini
+async function preguntarIA(userMsg) {
+  try {
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
+      body:    JSON.stringify({
+        model:       "gpt-4o-mini",
+        max_tokens:  400,
+        temperature: 0.6,
+        messages: [
+          { role: "system", content: CONTEXTO_TALLER },
+          { role: "user",   content: userMsg },
+        ],
+      }),
+    });
+    const data = await resp.json();
+    return data.choices?.[0]?.message?.content?.trim()
+      || "Lo siento, no pude procesar tu consulta. Por favor llámanos al 809-712-2027.";
+  } catch (e) {
+    console.error("OpenAI error:", e.message);
+    return "Lo siento, hubo un problema. Por favor llámanos al 809-712-2027.";
+  }
+}
+
+// ── Webhook principal ─────────────────────────────────────────────────────────
+app.post("/telegram/webhook", async (req, res) => {
+  res.sendStatus(200); // Responder a Telegram de inmediato (requerido)
+
+  try {
+    const update = req.body;
+    if (!update?.message?.text) return;
+
+    const chatId  = update.message.chat.id;
+    const nombre  = update.message.from?.first_name || "Cliente";
+    const texto   = update.message.text.trim();
+    const textoUp = texto.toUpperCase().replace(/[\s\-]/g, "");
+
+    await tgTyping(chatId);
+
+    // ── /start o saludo ────────────────────────────────────────────────────
+    if (texto === "/start" || /^(hola|buenas|hey|buenos|buen dia|buen día)$/i.test(texto)) {
+      await tgSend(chatId,
+        `👋 ¡Hola, <b>${nombre}</b>! Soy <b>SólidoBot</b>, el asistente de Sólido Auto Servicio.\n\n` +
+        `Puedo ayudarte con:\n\n` +
+        `🔍 <b>Estado de tu vehículo</b>\n   → Escríbeme tu placa (ej: <code>A123456</code>)\n\n` +
+        `🔩 <b>Repuestos disponibles</b>\n   → Escribe <b>repuestos</b>\n\n` +
+        `☕ <b>Menú cafetería</b>\n   → Escribe <b>menú</b>\n\n` +
+        `🛠️ <b>Nuestros servicios</b>\n   → Escribe <b>servicios</b>\n\n` +
+        `📞 <b>Contacto y horarios</b>\n   → Escribe <b>contacto</b>\n\n` +
+        `O simplemente escríbeme tu consulta y te respondo. 😊`
+      );
+      return;
+    }
+
+    // ── Detección de placa ─────────────────────────────────────────────────
+    if (esPlaca(textoUp)) {
+      const { data: histResult } = await supabase
+        .rpc ? null : null; // placeholder, usamos la query directa
+
+      // Buscar en vehiculos activos
+      const { data: vehiculos } = await supabase
+        .from("vehiculos").select("id, marca, modelo, ano, placa, color")
+        .ilike("placa", textoUp).limit(1);
+
+      const vehiculo = vehiculos?.[0];
+
+      if (vehiculo) {
+        // Orden activa más reciente
+        const { data: ordenes } = await supabase
+          .from("ordenes").select("id, estado, descripcion, created_at")
+          .eq("vehiculo_id", vehiculo.id)
+          .order("created_at", { ascending: false }).limit(1);
+        const orden = ordenes?.[0];
+
+        const estadoEmoji = {
+          RECIBIDO: "📋", DIAGNOSTICO: "🔍", REPARACION: "🔧",
+          CONTROL_CALIDAD: "✅", LISTO: "🎉", ENTREGADO: "🚗",
+        };
+        const emoji = estadoEmoji[orden?.estado] || "🔧";
+
+        if (orden) {
+          const estaListo = orden.estado === "LISTO";
+          await tgSend(chatId,
+            `${emoji} <b>Estado de tu vehículo</b>\n\n` +
+            `🚗 <b>${vehiculo.marca} ${vehiculo.modelo}</b> ${vehiculo.ano ? `(${vehiculo.ano})` : ""}\n` +
+            `🏷️ Placa: <code>${vehiculo.placa}</code>\n\n` +
+            `📌 Estado actual: <b>${orden.estado.replace(/_/g, " ")}</b>\n` +
+            (orden.descripcion ? `📝 ${orden.descripcion}\n` : "") +
+            `\n` +
+            (estaListo
+              ? `🎉 <b>¡Tu vehículo está listo! Puedes pasar a buscarlo.</b>\n\n`
+              : `⏳ Seguimos trabajando en tu vehículo.\n\n`) +
+            `¿Alguna otra consulta? También puedes llamarnos al <b>809-712-2027</b>.`
+          );
+        } else {
+          await tgSend(chatId,
+            `🚗 Encontramos el vehículo <b>${vehiculo.marca} ${vehiculo.modelo}</b> ` +
+            `(<code>${vehiculo.placa}</code>) en nuestro sistema, pero no tiene órdenes activas en este momento.\n\n` +
+            `Para más información llámanos al <b>809-712-2027</b>.`
+          );
+        }
+      } else {
+        // Buscar en historial permanente
+        const { data: hist } = await supabase
+          .from("vehiculo_historial").select("placa, marca, modelo, tipo_servicio, fecha_servicio, costo_total")
+          .ilike("placa", textoUp)
+          .order("fecha_servicio", { ascending: false }).limit(1);
+        const h = hist?.[0];
+
+        if (h) {
+          await tgSend(chatId,
+            `📚 <b>Historial — ${h.placa}</b>\n\n` +
+            `🚗 ${h.marca} ${h.modelo}\n` +
+            `🔧 Último servicio: <b>${h.tipo_servicio}</b>\n` +
+            (h.fecha_servicio
+              ? `📅 Fecha: ${new Date(h.fecha_servicio).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric" })}\n`
+              : "") +
+            (h.costo_total > 0
+              ? `💰 Total: RD$ ${Number(h.costo_total).toLocaleString("es-DO")}\n`
+              : "") +
+            `\nPara más detalles llámanos al <b>809-712-2027</b>.`
+          );
+        } else {
+          await tgSend(chatId,
+            `❓ No encontré registros para la placa <b>${textoUp}</b> en nuestro sistema.\n\n` +
+            `Si acabas de dejar tu vehículo, puede que aún estemos procesando la información.\n` +
+            `Para verificar, llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`
+          );
+        }
+      }
+      return;
+    }
+
+    // ── Repuestos ──────────────────────────────────────────────────────────
+    if (/repuest|pieza|piezas|invent/i.test(texto)) {
+      const { data: rep } = await supabase
+        .from("inventario").select("name, price, stock, code")
+        .gt("stock", 0).order("name").limit(20);
+
+      if (rep?.length) {
+        const lista = rep.map(r =>
+          `• ${r.name}${r.code ? ` <i>(${r.code})</i>` : ""} — <b>RD$ ${Number(r.price).toLocaleString("es-DO")}</b> ` +
+          (r.stock <= 3 ? "⚠️" : "✅")
+        ).join("\n");
+        await tgSend(chatId,
+          `🔩 <b>Repuestos disponibles</b>\n\n${lista}\n\n` +
+          `Para apartar o consultar disponibilidad escríbenos al WhatsApp <b>809-712-2027</b>.`
+        );
+      } else {
+        await tgSend(chatId,
+          `🔩 En este momento no hay repuestos con stock registrado.\n` +
+          `Para consultas de disponibilidad llámanos al <b>809-712-2027</b>.`
+        );
+      }
+      return;
+    }
+
+    // ── Menú cafetería ─────────────────────────────────────────────────────
+    if (/menú|menu|café|cafe|cafeter|comer|bebid|comid/i.test(texto)) {
+      const { data: prods } = await supabase
+        .from("cafeteria_productos").select("nombre, precio, categoria, stock")
+        .or("activo.is.null,activo.eq.true")
+        .gt("stock", 0).order("categoria").limit(25);
+
+      if (prods?.length) {
+        const cats = [...new Set(prods.map(p => p.categoria || "General"))];
+        let msg = `☕ <b>Menú — Sólido Café Garage</b>\n\n`;
+        cats.forEach(cat => {
+          msg += `<b>— ${cat} —</b>\n`;
+          prods.filter(p => (p.categoria || "General") === cat)
+               .forEach(p => { msg += `  • ${p.nombre} — RD$ ${Number(p.precio).toLocaleString("es-DO")}\n`; });
+          msg += "\n";
+        });
+        msg += `Disfruta mientras esperas tu vehículo. 😊`;
+        await tgSend(chatId, msg);
+      } else {
+        await tgSend(chatId, `☕ El menú no está disponible en este momento. Visítanos directamente o llámanos al <b>809-712-2027</b>.`);
+      }
+      return;
+    }
+
+    // ── Servicios ──────────────────────────────────────────────────────────
+    if (/servicio|hacen|ofrecen|trabajo|reparaci|manten|diagnos/i.test(texto)) {
+      await tgSend(chatId,
+        `🛠️ <b>Nuestros Servicios</b>\n\n` +
+        `• Diagnóstico Computarizado (Scanner)\n` +
+        `• Mantenimiento Preventivo (aceite, filtros, bujías)\n` +
+        `• Sistema de Frenos\n` +
+        `• Suspensión y Dirección\n` +
+        `• Sistema Eléctrico y Electrónico\n` +
+        `• Sistema de Enfriamiento\n` +
+        `• Motor y Transmisión\n` +
+        `• Aire Acondicionado\n` +
+        `• Alineación y Balanceo computarizado\n\n` +
+        `Para cotizaciones escríbenos al WhatsApp <b>809-712-2027</b>.`
+      );
+      return;
+    }
+
+    // ── Contacto y horarios ────────────────────────────────────────────────
+    if (/contacto|horario|hora|abierto|abren|cierran|direcci|dónde|donde|ubicaci/i.test(texto)) {
+      await tgSend(chatId,
+        `📍 <b>Sólido Auto Servicio</b>\n\n` +
+        `📞 Teléfono: <b>809-712-2027</b>\n` +
+        `💬 WhatsApp: <a href="https://wa.me/18097122027">+1 809-712-2027</a>\n` +
+        `📍 Santo Domingo, República Dominicana\n\n` +
+        `⏰ <b>Horario de Atención</b>\n` +
+        `Lunes – Viernes: 8:00 AM – 6:00 PM\n` +
+        `Sábados:          8:00 AM – 4:00 PM\n` +
+        `Domingos:         9:00 AM – 2:00 PM`
+      );
+      return;
+    }
+
+    // ── Escalación a humano ────────────────────────────────────────────────
+    if (/hablar|persona|humano|agente|técnico|tecnico|presupuest|cotizaci|precio de|cuánto cuesta|cuanto cuesta/i.test(texto)) {
+      await tgSend(chatId,
+        `👨‍🔧 Entendido, <b>${nombre}</b>. Te conectaré con nuestro equipo.\n\n` +
+        `📞 Llámanos: <b>809-712-2027</b>\n` +
+        `💬 WhatsApp: <a href="https://wa.me/18097122027?text=Hola, necesito hablar con un técnico">Escríbenos aquí</a>\n\n` +
+        `Horario: Lunes–Viernes 8AM–6PM | Sábados 8AM–4PM.`
+      );
+      return;
+    }
+
+    // ── Todo lo demás → OpenAI ─────────────────────────────────────────────
+    const respuestaIA = await preguntarIA(
+      `Cliente llamado ${nombre} dice: "${texto}"`
+    );
+    await tgSend(chatId, respuestaIA);
+
+  } catch (err) {
+    console.error("🤖 Telegram bot error:", err.message);
+  }
+});
+
+// ── Registro del webhook (llamar UNA VEZ después de hacer deploy) ─────────────
+// Visitar: https://crm-automotriz-3wde-production.up.railway.app/telegram/setup
+app.get("/telegram/setup", async (req, res) => {
+  if (!TG_TOKEN) return res.json({ error: "TELEGRAM_TOKEN no configurado" });
+  const webhookUrl = "https://crm-automotriz-3wde-production.up.railway.app/telegram/webhook";
+  const r    = await fetch(`${TG_API}/setWebhook`, {
+    method:  "POST",
+    headers: { "Content-Type": "application/json" },
+    body:    JSON.stringify({ url: webhookUrl, allowed_updates: ["message"] }),
+  });
+  const data = await r.json();
+  res.json({ webhookUrl, telegram: data });
+});
+
+// ── Info del bot ──────────────────────────────────────────────────────────────
+app.get("/telegram/info", async (req, res) => {
+  if (!TG_TOKEN) return res.json({ error: "TELEGRAM_TOKEN no configurado" });
+  const r    = await fetch(`${TG_API}/getWebhookInfo`);
+  const data = await r.json();
+  res.json(data);
 });
 
 // =====================================================
