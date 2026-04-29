@@ -1163,100 +1163,9 @@ app.get("/vehiculo-historial", async (req, res) => {
 // Busca en AMBAS fuentes: órdenes activas + historial cerrado
 app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
   try {
-    const placaNorm = req.params.placa.toUpperCase().replace(/\s+/g, "").trim();
-
-    // ── 1. Historial cerrado (vehiculo_historial) ──────────────────
-    const { data: histData } = await supabase
-      .from("vehiculo_historial")
-      .select(
-        "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
-        "diagnostico_general, inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
-        "codigos_falla, fallas_identificadas, observaciones, trabajos_realizados, " +
-        "costo_total, estado, tecnico_nombre, ncf, created_at"
-      )
-      .ilike("placa", placaNorm)
-      .order("created_at", { ascending: false });
-
-    // ── 2. Órdenes activas (ordenes_trabajo + vehiculos) ──────────
-    const { data: vehiculoActivo } = await supabase
-      .from("vehiculos")
-      .select("id, marca, modelo, placa, ano, color, cliente_id")
-      .ilike("placa", placaNorm)
-      .maybeSingle();
-
-    let ordenesActivas = [];
-    if (vehiculoActivo) {
-      const { data: ordenes } = await supabase
-        .from("ordenes_trabajo")
-        .select("id, descripcion, estado, status, created_at, updated_at, total")
-        .eq("vehiculo_id", vehiculoActivo.id)
-        .not("estado", "in", '("COMPLETADO","FACTURADO","ENTREGADO")')
-        .order("created_at", { ascending: false });
-
-      if (ordenes && ordenes.length > 0) {
-        // Obtener diagnóstico activo si existe
-        const { data: diag } = await supabase
-          .from("diagnosticos")
-          .select("tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, tecnico_id, estado")
-          .eq("orden_id", ordenes[0].id)
-          .maybeSingle();
-
-        ordenesActivas = ordenes.map(o => ({
-          id: `orden_${o.id}`,
-          placa:              vehiculoActivo.placa,
-          marca:              vehiculoActivo.marca,
-          modelo:             vehiculoActivo.modelo,
-          ano:                vehiculoActivo.ano,
-          color:              vehiculoActivo.color,
-          estado:             o.estado || o.status || "RECIBIDO",
-          tipo_servicio:      diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
-          observaciones:      diag?.observaciones || "",
-          fallas_identificadas: diag?.fallas_identificadas || "",
-          trabajos_realizados:  diag?.trabajos_realizados || "",
-          costo_total:        o.total || 0,
-          fecha_servicio:     o.created_at,
-          created_at:         o.created_at,
-          _activa:            true,   // marca para el frontend
-        }));
-      }
-    }
-
-    // ── 3. Combinar: órdenes activas primero, luego historial ─────
-    const historial = [...ordenesActivas, ...(histData || [])];
-
-    if (historial.length === 0) {
-      // Último recurso: buscar en vehiculos aunque no tenga orden activa
-      const vehSolo = vehiculoActivo || null;
-      if (vehSolo) {
-        return res.json({
-          found: true,
-          vehiculo: { placa: vehSolo.placa, marca: vehSolo.marca, modelo: vehSolo.modelo, ano: vehSolo.ano, color: vehSolo.color },
-          ultimo_estado: "RECIBIDO",
-          historial: [{
-            id: `veh_${vehSolo.id}`,
-            placa: vehSolo.placa, marca: vehSolo.marca, modelo: vehSolo.modelo,
-            ano: vehSolo.ano, color: vehSolo.color,
-            estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
-            created_at: new Date().toISOString(), _activa: true,
-          }],
-        });
-      }
-      return res.json({ found: false, historial: [] });
-    }
-
-    const ref = historial[0];
-    res.json({
-      found: true,
-      vehiculo: {
-        placa:  ref.placa,
-        marca:  ref.marca,
-        modelo: ref.modelo,
-        ano:    ref.ano,
-        color:  ref.color,
-      },
-      ultimo_estado: ref.estado,
-      historial,
-    });
+    const resultado = await consultarHistorialPorPlaca(req.params.placa);
+    if (!resultado.found) return res.json({ found: false, historial: [] });
+    res.json(resultado);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -1305,6 +1214,102 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
     res.status(500).json({ error: err.message });
   }
 });
+
+// =====================================================
+// 🔍 HELPER COMPARTIDO — Consulta historial por placa
+// Misma lógica que GET /vehiculo-historial/placa/:placa
+// Usada por el endpoint HTTP y el bot de Telegram
+// =====================================================
+async function consultarHistorialPorPlaca(placa) {
+  const placaNorm = placa.toUpperCase().replace(/\s+/g, "").trim();
+
+  // 1. Historial cerrado (vehiculo_historial)
+  const { data: histData } = await supabase
+    .from("vehiculo_historial")
+    .select(
+      "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
+      "diagnostico_general, inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
+      "codigos_falla, fallas_identificadas, observaciones, trabajos_realizados, " +
+      "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, created_at"
+    )
+    .ilike("placa", placaNorm)
+    .order("created_at", { ascending: false });
+
+  // 2. Vehículo activo + órdenes activas
+  const { data: vehiculoActivo } = await supabase
+    .from("vehiculos")
+    .select("id, marca, modelo, placa, ano, color, cliente_id")
+    .ilike("placa", placaNorm)
+    .maybeSingle();
+
+  let ordenesActivas = [];
+  if (vehiculoActivo) {
+    const { data: ordenes } = await supabase
+      .from("ordenes_trabajo")
+      .select("id, descripcion, estado, status, created_at, updated_at, total")
+      .eq("vehiculo_id", vehiculoActivo.id)
+      .not("estado", "in", "(COMPLETADO,FACTURADO,ENTREGADO)")
+      .order("created_at", { ascending: false });
+
+    if (ordenes && ordenes.length > 0) {
+      const { data: diag } = await supabase
+        .from("diagnosticos")
+        .select("tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, tecnico_nombre, estado")
+        .eq("orden_id", ordenes[0].id)
+        .maybeSingle();
+
+      ordenesActivas = ordenes.map(o => ({
+        id:                   `orden_${o.id}`,
+        placa:                vehiculoActivo.placa,
+        marca:                vehiculoActivo.marca,
+        modelo:               vehiculoActivo.modelo,
+        ano:                  vehiculoActivo.ano,
+        color:                vehiculoActivo.color,
+        estado:               o.estado || o.status || "RECIBIDO",
+        tipo_servicio:        diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+        observaciones:        diag?.observaciones || "",
+        fallas_identificadas: diag?.fallas_identificadas || "",
+        trabajos_realizados:  diag?.trabajos_realizados || "",
+        costo_total:          o.total || 0,
+        costo_mano_obra:      0,
+        costo_repuestos:      0,
+        tecnico_nombre:       diag?.tecnico_nombre || null,
+        fecha_servicio:       o.created_at,
+        created_at:           o.created_at,
+        _activa:              true,
+      }));
+    }
+  }
+
+  // 3. Combinar: órdenes activas primero, luego historial cerrado
+  const historial = [...ordenesActivas, ...(histData || [])];
+
+  if (historial.length === 0) {
+    if (vehiculoActivo) {
+      return {
+        found: true,
+        vehiculo: { placa: vehiculoActivo.placa, marca: vehiculoActivo.marca, modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color },
+        ultimo_estado: "RECIBIDO",
+        historial: [{
+          id: `veh_${vehiculoActivo.id}`,
+          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca, modelo: vehiculoActivo.modelo,
+          ano: vehiculoActivo.ano, color: vehiculoActivo.color,
+          estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
+          created_at: new Date().toISOString(), _activa: true,
+        }],
+      };
+    }
+    return { found: false, historial: [] };
+  }
+
+  const ref = historial[0];
+  return {
+    found: true,
+    vehiculo: { placa: ref.placa, marca: ref.marca, modelo: ref.modelo, ano: ref.ano, color: ref.color },
+    ultimo_estado: ref.estado,
+    historial,
+  };
+}
 
 // =====================================================
 // 🤖 TELEGRAM BOT — ASISTENTE VIRTUAL SÓLIDO AUTO SERVICIO
@@ -1446,77 +1451,92 @@ app.post("/telegram/webhook", async (req, res) => {
     // ── Detección de placa ─────────────────────────────────────────────────
     const placaDetectada = extraerPlaca(texto);
     if (placaDetectada) {
-      // Buscar en vehiculos activos
-      const { data: vehiculos } = await supabase
-        .from("vehiculos").select("id, marca, modelo, ano, placa, color")
-        .ilike("placa", placaDetectada).limit(1);
 
-      const vehiculo = vehiculos?.[0];
+      // Usa exactamente la misma lógica que la PWA del cliente
+      const resultado = await consultarHistorialPorPlaca(placaDetectada);
 
-      if (vehiculo) {
-        // Orden activa más reciente
-        const { data: ordenes } = await supabase
-          .from("ordenes").select("id, estado, descripcion, created_at")
-          .eq("vehiculo_id", vehiculo.id)
-          .order("created_at", { ascending: false }).limit(1);
-        const orden = ordenes?.[0];
+      if (!resultado.found) {
+        await tgSend(chatId,
+          `❓ No encontré registros para la placa <b>${placaDetectada}</b> en nuestro sistema.\n\n` +
+          `Si acabas de dejar tu vehículo, puede que aún estemos procesando la información.\n` +
+          `Para verificar, llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`
+        );
+        return;
+      }
 
-        const estadoEmoji = {
-          RECIBIDO: "📋", DIAGNOSTICO: "🔍", REPARACION: "🔧",
-          CONTROL_CALIDAD: "✅", LISTO: "🎉", ENTREGADO: "🚗",
-        };
-        const emoji = estadoEmoji[orden?.estado] || "🔧";
+      const { vehiculo, historial } = resultado;
+      const ultimo = historial[0];
 
-        if (orden) {
-          const estaListo = orden.estado === "LISTO";
-          await tgSend(chatId,
-            `${emoji} <b>Estado de tu vehículo</b>\n\n` +
-            `🚗 <b>${vehiculo.marca} ${vehiculo.modelo}</b> ${vehiculo.ano ? `(${vehiculo.ano})` : ""}\n` +
-            `🏷️ Placa: <code>${vehiculo.placa}</code>\n\n` +
-            `📌 Estado actual: <b>${orden.estado.replace(/_/g, " ")}</b>\n` +
-            (orden.descripcion ? `📝 ${orden.descripcion}\n` : "") +
-            `\n` +
-            (estaListo
-              ? `🎉 <b>¡Tu vehículo está listo! Puedes pasar a buscarlo.</b>\n\n`
-              : `⏳ Seguimos trabajando en tu vehículo.\n\n`) +
-            `¿Alguna otra consulta? También puedes llamarnos al <b>809-712-2027</b>.`
-          );
-        } else {
-          await tgSend(chatId,
-            `🚗 Encontramos el vehículo <b>${vehiculo.marca} ${vehiculo.modelo}</b> ` +
-            `(<code>${vehiculo.placa}</code>) en nuestro sistema, pero no tiene órdenes activas en este momento.\n\n` +
-            `Para más información llámanos al <b>809-712-2027</b>.`
-          );
+      const ESTADO_INFO = {
+        RECIBIDO:        { icon: "📋", label: "Recibido" },
+        DIAGNOSTICO:     { icon: "🔍", label: "En Diagnóstico" },
+        COTIZADO:        { icon: "📄", label: "Cotizado" },
+        APROBADO:        { icon: "✅", label: "Aprobado" },
+        EN_REPARACION:   { icon: "🔧", label: "En Reparación" },
+        CONTROL_CALIDAD: { icon: "🔎", label: "Control de Calidad" },
+        LISTO:           { icon: "🎉", label: "Listo para entrega" },
+        COMPLETADO:      { icon: "✅", label: "Completado" },
+        FACTURADO:       { icon: "🧾", label: "Facturado" },
+        ENTREGADO:       { icon: "🏁", label: "Entregado" },
+      };
+
+      const estadoInfo = ESTADO_INFO[ultimo?.estado] || { icon: "🔧", label: (ultimo?.estado || "En proceso").replace(/_/g, " ") };
+
+      // ── Mensaje 1: encabezado + último servicio (igual que la PWA) ────
+      let msg1 = `🚗 <b>${vehiculo.marca} ${vehiculo.modelo}</b>`;
+      if (vehiculo.ano)   msg1 += ` (${vehiculo.ano})`;
+      if (vehiculo.color) msg1 += ` · ${vehiculo.color}`;
+      msg1 += `\n🏷️ Placa: <code>${vehiculo.placa}</code>\n`;
+      msg1 += `\n${estadoInfo.icon} <b>Estado: ${estadoInfo.label}</b>\n`;
+
+      if (ultimo) {
+        if (ultimo.tipo_servicio && ultimo.tipo_servicio !== "Vehículo registrado") {
+          msg1 += `🔧 Servicio: ${ultimo.tipo_servicio}\n`;
         }
-      } else {
-        // Buscar en historial permanente
-        const { data: hist } = await supabase
-          .from("vehiculo_historial").select("placa, marca, modelo, tipo_servicio, fecha_servicio, costo_total")
-          .ilike("placa", placaDetectada)
-          .order("fecha_servicio", { ascending: false }).limit(1);
-        const h = hist?.[0];
-
-        if (h) {
-          await tgSend(chatId,
-            `📚 <b>Historial — ${h.placa}</b>\n\n` +
-            `🚗 ${h.marca} ${h.modelo}\n` +
-            `🔧 Último servicio: <b>${h.tipo_servicio}</b>\n` +
-            (h.fecha_servicio
-              ? `📅 Fecha: ${new Date(h.fecha_servicio).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric" })}\n`
-              : "") +
-            (h.costo_total > 0
-              ? `💰 Total: RD$ ${Number(h.costo_total).toLocaleString("es-DO")}\n`
-              : "") +
-            `\nPara más detalles llámanos al <b>809-712-2027</b>.`
-          );
-        } else {
-          await tgSend(chatId,
-            `❓ No encontré registros para la placa <b>${placaDetectada}</b> en nuestro sistema.\n\n` +
-            `Si acabas de dejar tu vehículo, puede que aún estemos procesando la información.\n` +
-            `Para verificar, llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`
-          );
+        const fechaUlt = ultimo.fecha_servicio
+          ? new Date(ultimo.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" })
+          : null;
+        if (fechaUlt)                 msg1 += `📅 Fecha: ${fechaUlt}\n`;
+        if (ultimo.tecnico_nombre)    msg1 += `👨‍🔧 Técnico: ${ultimo.tecnico_nombre}\n`;
+        if (ultimo.costo_total > 0)   msg1 += `💰 Total: RD$ ${Number(ultimo.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}\n`;
+        if (ultimo.trabajos_realizados)
+          msg1 += `\n🛠️ <b>Trabajos Realizados</b>\n${ultimo.trabajos_realizados.substring(0, 400)}\n`;
+        if (ultimo.fallas_identificadas)
+          msg1 += `\n⚠️ <b>Fallas Identificadas</b>\n${ultimo.fallas_identificadas.substring(0, 250)}\n`;
+        if (ultimo.observaciones)
+          msg1 += `\n📝 <b>Observaciones</b>\n${ultimo.observaciones.substring(0, 250)}\n`;
+        if (ultimo.ncf)
+          msg1 += `\n🧾 NCF: ${ultimo.ncf}\n`;
+        if (ultimo._activa) {
+          msg1 += ultimo.estado === "LISTO"
+            ? `\n🎉 <b>¡Tu vehículo está listo para entrega!</b>`
+            : `\n⏳ Seguimos trabajando en tu vehículo.`;
         }
       }
+
+      await tgSend(chatId, msg1);
+
+      // ── Mensaje 2: timeline de historial (igual que la PWA, si hay >1 visita) ──
+      if (historial.length > 1) {
+        let msg2 = `📚 <b>Historial de Servicios (${historial.length} visitas)</b>\n`;
+        historial.forEach((h, i) => {
+          const ei = ESTADO_INFO[h.estado] || { icon: "🔧", label: (h.estado || "Completado").replace(/_/g, " ") };
+          const fecha = h.fecha_servicio
+            ? new Date(h.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "short", day: "numeric" })
+            : "—";
+          msg2 += `\n<b>${i + 1}. ${h.tipo_servicio || "Servicio"}</b>  ${ei.icon} ${ei.label}\n`;
+          msg2 += `   📅 ${fecha}`;
+          if (h.tecnico_nombre) msg2 += ` · 👨‍🔧 ${h.tecnico_nombre}`;
+          if (h.costo_total > 0)
+            msg2 += `\n   💰 RD$ ${Number(h.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`;
+          msg2 += "\n";
+        });
+        msg2 += `\n📞 ¿Alguna pregunta? Llámanos al <b>809-712-2027</b>.`;
+        await tgSend(chatId, msg2);
+      } else {
+        await tgSend(chatId, `📞 ¿Alguna consulta adicional? Llámanos al <b>809-712-2027</b>.`);
+      }
+
       return;
     }
 
