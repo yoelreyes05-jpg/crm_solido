@@ -150,9 +150,20 @@ app.get("/inventario", async (req, res) => {
 });
 
 app.post("/inventario", async (req, res) => {
-  const { name, code, price, stock, min_stock, supplier_id } = req.body;
+  const { name, code, price, stock, min_stock, supplier_id,
+          categoria, descripcion, marcas_compatibles, observaciones } = req.body;
   const { data, error } = await supabase.from("inventario")
-    .insert([{ name, code, price: Number(price), stock: Number(stock), min_stock: Number(min_stock || 5), supplier_id: supplier_id || null }])
+    .insert([{
+      name, code,
+      price:       Number(price),
+      stock:       Number(stock),
+      min_stock:   Number(min_stock || 5),
+      supplier_id: supplier_id || null,
+      categoria:            categoria            || "General",
+      descripcion:          descripcion          || null,
+      marcas_compatibles:   marcas_compatibles   || null,
+      observaciones:        observaciones        || null,
+    }])
     .select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
@@ -160,9 +171,20 @@ app.post("/inventario", async (req, res) => {
 
 app.put("/inventario/:id", async (req, res) => {
   const { id } = req.params;
-  const { name, code, price, stock, min_stock, supplier_id } = req.body;
+  const { name, code, price, stock, min_stock, supplier_id,
+          categoria, descripcion, marcas_compatibles, observaciones } = req.body;
   const { data, error } = await supabase.from("inventario")
-    .update({ name, code, price: Number(price), stock: Number(stock), min_stock: Number(min_stock || 5), supplier_id: supplier_id || null })
+    .update({
+      name, code,
+      price:       Number(price),
+      stock:       Number(stock),
+      min_stock:   Number(min_stock || 5),
+      supplier_id: supplier_id || null,
+      categoria:            categoria            || "General",
+      descripcion:          descripcion          || null,
+      marcas_compatibles:   marcas_compatibles   || null,
+      observaciones:        observaciones        || null,
+    })
     .eq("id", id).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
@@ -369,18 +391,22 @@ app.delete("/cafeteria/productos/:id", async (req, res) => {
 app.get("/repuestos", async (req, res) => {
   const { data } = await supabase
     .from("inventario")
-    .select("id, name, code, price, stock")
-    .order("name", { ascending: true });
+    .select("id, name, code, price, stock, categoria, descripcion, marcas_compatibles, observaciones")
+    .order("categoria", { ascending: true })
+    .order("name",      { ascending: true });
   // Mapear campos de inventario al formato que espera la web
   const mapped = (data || []).map(item => ({
-    id:          item.id,
-    nombre:      item.name,
-    descripcion: item.code ? `Ref: ${item.code}` : null,
-    precio:      item.price,
-    stock:       item.stock,
-    categoria:   "Repuestos",
-    imagen:      null,
-    activo:      true,
+    id:                 item.id,
+    nombre:             item.name,
+    codigo:             item.code || null,
+    descripcion:        item.descripcion || (item.code ? `Ref: ${item.code}` : null),
+    precio:             item.price,
+    stock:              item.stock,
+    categoria:          item.categoria || "General",
+    marcas_compatibles: item.marcas_compatibles || null,
+    observaciones:      item.observaciones || null,
+    imagen:             null,
+    activo:             true,
   }));
   res.json(mapped);
 });
