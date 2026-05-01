@@ -1692,6 +1692,128 @@ app.get("/telegram/info", async (req, res) => {
 });
 
 // =====================================================
+// 🤖 AI — CONSULTA DE CLIENTE (para Telegram bot en Vercel)
+// POST /ai/consulta-cliente
+// Body: { "pregunta": "...", "cliente_id": <optional> }
+// Devuelve: { "respuesta": "..." }
+// =====================================================
+app.post("/ai/consulta-cliente", async (req, res) => {
+  try {
+    const { pregunta, cliente_id } = req.body;
+
+    if (!pregunta || typeof pregunta !== "string" || !pregunta.trim()) {
+      return res.status(400).json({ error: "El campo 'pregunta' es requerido." });
+    }
+
+    if (!OAI_KEY) {
+      return res.status(500).json({ error: "OPENAI_API_KEY no configurada en el servidor." });
+    }
+
+    // ── Recopilar contexto del cliente desde Supabase ─────────────────────
+    let contextoCliente = "";
+
+    if (cliente_id) {
+      const id = Number(cliente_id);
+
+      const [
+        { data: cliente },
+        { data: vehiculos },
+        { data: ordenes },
+        { data: diagnosticos },
+        { data: ventas },
+      ] = await Promise.all([
+        supabase.from("clientes").select("*").eq("id", id).single(),
+        supabase.from("vehiculos").select("*").eq("cliente_id", id),
+        supabase.from("ordenes_trabajo").select("*").eq("cliente_id", id).order("created_at", { ascending: false }).limit(10),
+        supabase.from("diagnosticos").select("*").eq("cliente_id", id).order("created_at", { ascending: false }).limit(10),
+        supabase.from("ventas").select("*").eq("customer_name", cliente?.nombre ?? "").order("created_at", { ascending: false }).limit(10),
+      ]);
+
+      if (cliente) {
+        contextoCliente += `\n\n--- DATOS DEL CLIENTE ---`;
+        contextoCliente += `\nNombre: ${cliente.nombre}`;
+        if (cliente.telefono) contextoCliente += ` | Teléfono: ${cliente.telefono}`;
+        if (cliente.email)    contextoCliente += ` | Email: ${cliente.email}`;
+      }
+
+      if (vehiculos?.length) {
+        contextoCliente += `\n\n--- VEHÍCULOS (${vehiculos.length}) ---`;
+        vehiculos.forEach(v => {
+          contextoCliente += `\n• ${v.marca} ${v.modelo} ${v.ano ?? ""} — Placa: ${v.placa ?? "N/A"} — Color: ${v.color ?? "N/A"}`;
+        });
+      }
+
+      if (ordenes?.length) {
+        contextoCliente += `\n\n--- ÓRDENES DE TRABAJO (últimas ${ordenes.length}) ---`;
+        ordenes.forEach(o => {
+          const fecha = o.created_at ? new Date(o.created_at).toLocaleDateString("es-DO") : "N/A";
+          contextoCliente += `\n• [${fecha}] Estado: ${o.estado ?? o.status ?? "N/A"} — ${o.descripcion ?? "Sin descripción"} — Total: RD$ ${Number(o.total ?? 0).toLocaleString("es-DO")}`;
+        });
+      }
+
+      if (diagnosticos?.length) {
+        contextoCliente += `\n\n--- DIAGNÓSTICOS (últimos ${diagnosticos.length}) ---`;
+        diagnosticos.forEach(d => {
+          const fecha = d.created_at ? new Date(d.created_at).toLocaleDateString("es-DO") : "N/A";
+          contextoCliente += `\n• [${fecha}] Estado: ${d.estado ?? "N/A"} — ${d.descripcion ?? d.problema ?? "Sin descripción"}`;
+        });
+      }
+
+      if (ventas?.length) {
+        contextoCliente += `\n\n--- VENTAS / COMPRAS (últimas ${ventas.length}) ---`;
+        ventas.forEach(v => {
+          const fecha = v.created_at ? new Date(v.created_at).toLocaleDateString("es-DO") : "N/A";
+          contextoCliente += `\n• [${fecha}] NCF: ${v.ncf ?? "N/A"} — Total: RD$ ${Number(v.total ?? 0).toLocaleString("es-DO")} — Método: ${v.method ?? "N/A"}`;
+        });
+      }
+
+      if (!contextoCliente) {
+        contextoCliente = "\n\nNo se encontraron datos para este cliente en el sistema.";
+      }
+    } else {
+      contextoCliente = "\n\nNo se proporcionó un cliente_id; responde de forma general sobre el taller.";
+    }
+
+    // ── Construir prompt y llamar a OpenAI ────────────────────────────────
+    const systemPrompt =
+      `${CONTEXTO_TALLER}\n\n` +
+      `Además de la información general del taller, tienes acceso a los datos reales del cliente en el CRM:` +
+      contextoCliente +
+      `\n\nResponde la pregunta del usuario basándote en estos datos. Sé preciso, amable y conciso.`;
+
+    const resp = await fetch("https://api.openai.com/v1/chat/completions", {
+      method:  "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
+      body:    JSON.stringify({
+        model:       "gpt-4o-mini",
+        max_tokens:  600,
+        temperature: 0.5,
+        messages: [
+          { role: "system", content: systemPrompt },
+          { role: "user",   content: pregunta.trim() },
+        ],
+      }),
+    });
+
+    if (!resp.ok) {
+      const errBody = await resp.text();
+      console.error("OpenAI API error:", resp.status, errBody);
+      return res.status(502).json({ error: "Error al contactar OpenAI.", detalle: errBody });
+    }
+
+    const data = await resp.json();
+    const respuesta = data.choices?.[0]?.message?.content?.trim()
+      ?? "No pude generar una respuesta. Por favor intenta de nuevo.";
+
+    res.json({ respuesta });
+
+  } catch (err) {
+    console.error("🤖 /ai/consulta-cliente error:", err.message);
+    res.status(500).json({ error: "Error interno del servidor.", detalle: err.message });
+  }
+});
+
+// =====================================================
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`🔥 SÓLIDO AUTO SERVICIO corriendo en puerto ${PORT}`);
