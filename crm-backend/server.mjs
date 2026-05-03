@@ -2791,7 +2791,7 @@ app.patch("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
     const campos = ["estado", "notas", "fecha_vencimiento"].reduce((o, k) => {
       if (req.body[k] !== undefined) o[k] = req.body[k];
       return o;
-    }, {} as Record<string, any>);
+    }, {});
     campos.updated_at = new Date().toISOString();
     const { data, error } = await supabase.from("cuentas_pagar").update(campos).eq("id", id).select();
     if (error) return res.status(400).json({ error: error.message });
