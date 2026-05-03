@@ -1714,7 +1714,6 @@ app.get("/telegram/info", async (req, res) => {
 });
 
 // =====================================================
-//<<<<<<< HEAD
 // 🤖 AI — CONSULTA DE CLIENTE (para Telegram bot en Vercel)
 // POST /ai/consulta-cliente
 // Body: { "pregunta": "...", "cliente_id": <optional> }
@@ -1833,7 +1832,10 @@ app.post("/ai/consulta-cliente", async (req, res) => {
   } catch (err) {
     console.error("🤖 /ai/consulta-cliente error:", err.message);
     res.status(500).json({ error: "Error interno del servidor.", detalle: err.message });
-=======
+  }
+});
+
+// =====================================================
 // 🔄 CUADRE DE CAJA AUTOMÁTICO
 // =====================================================
 
@@ -2692,7 +2694,6 @@ app.patch("/diagnosticos/:id/completar-con-mantenimiento", async (req, res) => {
     res.json(data[0]);
   } catch (err) {
     res.status(500).json({ error: err.message });
-//>>>>>>> bd22cf1 (Actualizar cuenta por cobrar)
   }
 });
 
