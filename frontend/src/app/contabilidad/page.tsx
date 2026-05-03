@@ -29,6 +29,21 @@ type Cuadre = {
   creado_en: string;
 };
 
+type CuentaPagar = {
+  id: number;
+  suplidor_id?: number;
+  suplidor_nombre?: string;
+  suplidor_display?: string;
+  descripcion: string;
+  monto_original: number;
+  monto_pagado: number;
+  saldo?: number;
+  fecha_emision: string;
+  fecha_vencimiento: string;
+  estado: string;
+  notas?: string;
+};
+
 type ReporteCostos = {
   ingresos_totales: number;
   costo_repuestos: number;
@@ -71,6 +86,7 @@ export default function ContabilidadPage() {
     { key: "chica",   label: "💵 Caja Chica",            roles: ["gerente", "secretaria"] },
     { key: "costos",  label: "📊 Costos y Utilidades",   roles: ["gerente"] },
     { key: "cobrar",  label: "💳 Cuentas x Cobrar",      roles: ["gerente", "secretaria"] },
+    { key: "pagar",   label: "📤 Cuentas x Pagar",       roles: ["gerente", "secretaria"] },
   ];
 
   const tabsVisibles = tabs.filter(t => !usuario || t.roles.includes(usuario.rol));
@@ -107,6 +123,7 @@ export default function ContabilidadPage() {
         {tab === "chica"  && <CajaChica usuario={usuario} />}
         {tab === "costos" && <CostosUtilidades />}
         {tab === "cobrar" && <CuentasCobrar usuario={usuario} />}
+        {tab === "pagar"  && <CuentasPagar  usuario={usuario} />}
       </div>
     </div>
   );
@@ -1001,6 +1018,345 @@ function CuentasCobrar({ usuario }: { usuario: Usuario }) {
                     <tr key={p.id}>
                       <td style={s.td}>{fmtDate(p.fecha)}</td>
                       <td style={{ ...s.td, fontWeight: 700, color: "#10b981" }}>{fmt(p.monto)}</td>
+                      <td style={s.td}>{p.metodo}</td>
+                      <td style={s.td}>{p.referencia || "—"}</td>
+                      <td style={s.td}>{p.usuario || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <button onClick={() => setModalDetalle(null)}
+              style={{ ...s.btnPrimary, width: "100%", marginTop: 16 }}>Cerrar</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CUENTAS POR PAGAR
+// ═══════════════════════════════════════════════════════════════════════════
+function CuentasPagar({ usuario }: { usuario: Usuario }) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [cuentas, setCuentas]       = useState<CuentaPagar[]>([]);
+  const [resumen, setResumen]       = useState<any>(null);
+  const [loading, setLoading]       = useState(false);
+  const [filtro, setFiltro]         = useState("TODOS");
+  const [showForm, setShowForm]     = useState(false);
+  const [modalPago, setModalPago]   = useState<CuentaPagar | null>(null);
+  const [modalDetalle, setModalDetalle] = useState<{ cuenta: CuentaPagar; pagos: any[] } | null>(null);
+  const [suplidores, setSuplidores] = useState<any[]>([]);
+  const [savingPago, setSavingPago] = useState(false);
+
+  const [form, setForm] = useState({
+    suplidor_id: "", suplidor_nombre: "", descripcion: "",
+    monto_original: "", fecha_emision: hoy, fecha_vencimiento: "", notas: "",
+  });
+  const [pagoForm, setPagoForm] = useState({
+    monto: "", fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "",
+  });
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [rC, rR] = await Promise.all([
+        fetch(`${API}/api/contabilidad/cuentas-pagar${filtro !== "TODOS" ? `?estado=${filtro}` : ""}`),
+        fetch(`${API}/api/contabilidad/cuentas-pagar/resumen`),
+      ]);
+      const dC = await rC.json();
+      const dR = await rR.json();
+      setCuentas(Array.isArray(dC) ? dC : []);
+      setResumen(dR);
+    } catch { setCuentas([]); }
+    setLoading(false);
+  }, [filtro]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+  useEffect(() => {
+    fetch(`${API}/suplidores`).then(r => r.json()).then(d => setSuplidores(Array.isArray(d) ? d : []));
+  }, []);
+
+  const guardarCuenta = async () => {
+    if (!form.descripcion || !form.monto_original || !form.fecha_vencimiento)
+      return alert("Descripción, monto y fecha de vencimiento son requeridos");
+    try {
+      const r = await fetch(`${API}/api/contabilidad/cuentas-pagar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          suplidor_id: form.suplidor_id ? Number(form.suplidor_id) : null,
+          monto_original: Number(form.monto_original),
+          created_by: usuario?.nombre || "Sistema",
+        }),
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setShowForm(false);
+      setForm({ suplidor_id: "", suplidor_nombre: "", descripcion: "",
+        monto_original: "", fecha_emision: hoy, fecha_vencimiento: "", notas: "" });
+      cargar();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const registrarPago = async () => {
+    if (!modalPago || !pagoForm.monto) return;
+    setSavingPago(true);
+    try {
+      const r = await fetch(`${API}/api/contabilidad/cuentas-pagar/${modalPago.id}/pago`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...pagoForm, monto: Number(pagoForm.monto), usuario: usuario?.nombre || "Sistema" }),
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setModalPago(null);
+      setPagoForm({ monto: "", fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "" });
+      cargar();
+    } catch (e: any) { alert(e.message); }
+    setSavingPago(false);
+  };
+
+  const verDetalle = async (c: CuentaPagar) => {
+    const r = await fetch(`${API}/api/contabilidad/cuentas-pagar/${c.id}`);
+    const d = await r.json();
+    setModalDetalle({ cuenta: d.cuenta, pagos: d.pagos });
+  };
+
+  const semColor = (c: CuentaPagar) => {
+    if (c.estado === "PAGADO") return "#10b981";
+    if (c.estado === "VENCIDO") return "#ef4444";
+    const dias = Math.ceil((new Date(c.fecha_vencimiento).getTime() - Date.now()) / 86400000);
+    return dias <= 7 ? "#f59e0b" : "#6366f1";
+  };
+
+  const semEmoji = (c: CuentaPagar) => {
+    if (c.estado === "PAGADO") return "✅";
+    if (c.estado === "VENCIDO") return "🔴";
+    const d = Math.ceil((new Date(c.fecha_vencimiento).getTime() - Date.now()) / 86400000);
+    return d <= 7 ? "🟡" : "🟢";
+  };
+
+  return (
+    <div>
+      {/* KPIs */}
+      {resumen && (
+        <div style={s.kpiRow}>
+          <KpiCard label="Total por pagar"         value={fmt(resumen.total_por_pagar)}    icon="📤" color="#6366f1" big />
+          <KpiCard label="Vencidas"                value={fmt(resumen.vencidas)}           icon="🔴" color="#ef4444" />
+          <KpiCard label="Por vencer esta semana"  value={fmt(resumen.por_vencer_semana)}  icon="🟡" color="#f59e0b" />
+          <KpiCard label="Cuentas activas"         value={String(resumen.count)}           icon="📋" color="#8b5cf6" />
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {["TODOS", "PENDIENTE", "PARCIAL", "VENCIDO", "PAGADO"].map(f => (
+            <button key={f} onClick={() => setFiltro(f)} style={filtro === f ? s.tabActive : s.tabInactive}>
+              {f === "TODOS" ? "📋 Todas" : f === "PENDIENTE" ? "🟡 Pendientes"
+                : f === "PARCIAL" ? "🔵 Parciales" : f === "VENCIDO" ? "🔴 Vencidas" : "✅ Pagadas"}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setShowForm(f => !f)} style={{ ...s.btnPrimary, background: "#6366f1" }}>
+          {showForm ? "✕ Cancelar" : "➕ Nueva Cuenta"}
+        </button>
+      </div>
+
+      {/* FORM NUEVA CUENTA */}
+      {showForm && (
+        <div style={{ ...s.card, marginBottom: 20, border: "2px solid #6366f1" }}>
+          <h3 style={{ ...s.cardTitle, color: "#4338ca" }}>📤 Registrar Cuenta por Pagar</h3>
+          <div style={s.formGrid}>
+            <FormField label="Suplidor (del catálogo)">
+              <select value={form.suplidor_id}
+                onChange={e => {
+                  const sup = suplidores.find((s: any) => String(s.id) === e.target.value);
+                  setForm(f => ({ ...f, suplidor_id: e.target.value, suplidor_nombre: sup?.nombre || "" }));
+                }} style={s.input}>
+                <option value="">— Seleccionar suplidor —</option>
+                {suplidores.map((s: any) => <option key={s.id} value={s.id}>{s.nombre}</option>)}
+              </select>
+            </FormField>
+            <FormField label="Suplidor (nombre libre si no está en lista)">
+              <input value={form.suplidor_nombre}
+                onChange={e => setForm(f => ({ ...f, suplidor_nombre: e.target.value }))}
+                placeholder="Ej: Ferretería El Clavo" style={s.input} />
+            </FormField>
+            <FormField label="Descripción / Concepto">
+              <input value={form.descripcion}
+                onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}
+                placeholder="Ej: Factura #001 — Compra de filtros" style={s.input} />
+            </FormField>
+            <FormField label="Monto (RD$)">
+              <input type="number" value={form.monto_original}
+                onChange={e => setForm(f => ({ ...f, monto_original: e.target.value }))}
+                placeholder="0.00" style={s.input} />
+            </FormField>
+            <FormField label="Fecha de emisión">
+              <input type="date" value={form.fecha_emision}
+                onChange={e => setForm(f => ({ ...f, fecha_emision: e.target.value }))} style={s.input} />
+            </FormField>
+            <FormField label="Fecha de vencimiento">
+              <input type="date" value={form.fecha_vencimiento}
+                onChange={e => setForm(f => ({ ...f, fecha_vencimiento: e.target.value }))} style={s.input} />
+            </FormField>
+            <FormField label="Notas (opcional)">
+              <input value={form.notas}
+                onChange={e => setForm(f => ({ ...f, notas: e.target.value }))}
+                placeholder="Observaciones..." style={s.input} />
+            </FormField>
+          </div>
+          <button onClick={guardarCuenta} style={{ ...s.btnPrimary, width: "100%", marginTop: 4, background: "#6366f1" }}>
+            💾 Guardar Cuenta
+          </button>
+        </div>
+      )}
+
+      {/* TABLA */}
+      <div style={s.card}>
+        <h3 style={s.cardTitle}>📤 Cuentas por Pagar ({cuentas.length})</h3>
+        {loading ? <p style={s.empty}>Cargando...</p> : cuentas.length === 0 ? (
+          <p style={s.empty}>No hay cuentas en este filtro.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  {["", "Suplidor / Descripción", "Emitida", "Vence", "Original", "Pagado", "Saldo", "Estado", "Acciones"].map(h => (
+                    <th key={h} style={s.th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cuentas.map((c: CuentaPagar) => (
+                  <tr key={c.id} style={{ background: c.estado === "VENCIDO" ? "#fdf2f2" : "transparent" }}>
+                    <td style={s.td}>{semEmoji(c)}</td>
+                    <td style={{ ...s.td, maxWidth: 240 }}>
+                      {c.suplidor_display && c.suplidor_display !== "—" && (
+                        <div style={{ fontSize: 11, fontWeight: 700, color: "#6366f1", marginBottom: 2 }}>
+                          🏭 {c.suplidor_display}
+                        </div>
+                      )}
+                      <div style={{ fontWeight: 600 }}>{c.descripcion}</div>
+                      {c.notas && <div style={{ fontSize: 11, color: "#888" }}>{c.notas}</div>}
+                    </td>
+                    <td style={s.td}>{fmtDate(c.fecha_emision)}</td>
+                    <td style={{ ...s.td, fontWeight: 700, color: semColor(c) }}>{fmtDate(c.fecha_vencimiento)}</td>
+                    <td style={s.td}>{fmt(c.monto_original)}</td>
+                    <td style={{ ...s.td, color: "#10b981" }}>{fmt(c.monto_pagado)}</td>
+                    <td style={{ ...s.td, fontWeight: 700, color: semColor(c) }}>{fmt(c.saldo ?? (c.monto_original - c.monto_pagado))}</td>
+                    <td style={s.td}>
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                        background: c.estado === "PAGADO" ? "#dcfce7" : c.estado === "VENCIDO" ? "#fee2e2"
+                          : c.estado === "PARCIAL" ? "#ede9fe" : "#fef3c7",
+                        color: c.estado === "PAGADO" ? "#166534" : c.estado === "VENCIDO" ? "#dc2626"
+                          : c.estado === "PARCIAL" ? "#4338ca" : "#d97706",
+                      }}>{c.estado}</span>
+                    </td>
+                    <td style={s.td}>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {c.estado !== "PAGADO" && c.estado !== "ANULADO" && (
+                          <button
+                            onClick={() => { setModalPago(c); setPagoForm({ monto: String(c.saldo ?? (c.monto_original - c.monto_pagado)), fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "" }); }}
+                            style={{ padding: "5px 10px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                            💸 Pagar
+                          </button>
+                        )}
+                        <button onClick={() => verDetalle(c)}
+                          style={{ padding: "5px 10px", background: "#f1f5f9", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                          👁️ Ver
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL REGISTRAR PAGO */}
+      {modalPago && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 440, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+            <h3 style={{ ...s.cardTitle, marginBottom: 6 }}>💸 Registrar Pago</h3>
+            <p style={{ color: "#555", fontSize: 14, marginBottom: 16 }}>
+              {modalPago.suplidor_display && modalPago.suplidor_display !== "—" && (
+                <><strong style={{ color: "#6366f1" }}>🏭 {modalPago.suplidor_display}</strong><br /></>
+              )}
+              {modalPago.descripcion}<br />
+              <strong>Saldo: {fmt(modalPago.saldo ?? (modalPago.monto_original - modalPago.monto_pagado))}</strong>
+            </p>
+            <div style={s.formGrid}>
+              <FormField label="Monto a pagar (RD$)">
+                <input type="number" value={pagoForm.monto}
+                  onChange={e => setPagoForm(p => ({ ...p, monto: e.target.value }))} style={s.input} />
+              </FormField>
+              <FormField label="Fecha">
+                <input type="date" value={pagoForm.fecha}
+                  onChange={e => setPagoForm(p => ({ ...p, fecha: e.target.value }))} style={s.input} />
+              </FormField>
+              <FormField label="Método">
+                <select value={pagoForm.metodo} onChange={e => setPagoForm(p => ({ ...p, metodo: e.target.value }))} style={s.input}>
+                  <option value="EFECTIVO">💵 Efectivo</option>
+                  <option value="TARJETA">💳 Tarjeta</option>
+                  <option value="TRANSFERENCIA">🏦 Transferencia</option>
+                  <option value="CHEQUE">📄 Cheque</option>
+                </select>
+              </FormField>
+              <FormField label="Referencia (opcional)">
+                <input value={pagoForm.referencia}
+                  onChange={e => setPagoForm(p => ({ ...p, referencia: e.target.value }))}
+                  placeholder="No. cheque / transferencia" style={s.input} />
+              </FormField>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={registrarPago} disabled={savingPago}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6366f1" }}>
+                {savingPago ? "Guardando..." : "✅ Confirmar Pago"}
+              </button>
+              <button onClick={() => setModalPago(null)}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6b7280" }}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALLE */}
+      {modalDetalle && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 520, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)", maxHeight: "85vh", overflowY: "auto" }}>
+            <h3 style={{ ...s.cardTitle, marginBottom: 6 }}>📋 Detalle de Cuenta</h3>
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 14 }}>
+              {modalDetalle.cuenta.suplidor_display && modalDetalle.cuenta.suplidor_display !== "—" && (
+                <div style={s.resumenRow}><span>Suplidor</span><span style={{ fontWeight: 700, color: "#6366f1" }}>{modalDetalle.cuenta.suplidor_display}</span></div>
+              )}
+              <div style={s.resumenRow}><span>Descripción</span><span style={{ fontWeight: 600 }}>{modalDetalle.cuenta.descripcion}</span></div>
+              <div style={s.resumenRow}><span>Monto original</span><span style={{ fontWeight: 700 }}>{fmt(modalDetalle.cuenta.monto_original)}</span></div>
+              <div style={s.resumenRow}><span>Total pagado</span><span style={{ color: "#10b981", fontWeight: 700 }}>{fmt(modalDetalle.cuenta.monto_pagado)}</span></div>
+              <div style={{ ...s.resumenRow, borderTop: "2px solid #e2e8f0", paddingTop: 8, fontWeight: 800 }}>
+                <span>Saldo pendiente</span>
+                <span style={{ color: "#6366f1" }}>{fmt(modalDetalle.cuenta.monto_original - modalDetalle.cuenta.monto_pagado)}</span>
+              </div>
+            </div>
+            <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Historial de Pagos</h4>
+            {modalDetalle.pagos.length === 0 ? (
+              <p style={{ ...s.empty, padding: "12px 0" }}>Sin pagos registrados aún.</p>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>{["Fecha", "Monto", "Método", "Referencia", "Usuario"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {modalDetalle.pagos.map((p: any) => (
+                    <tr key={p.id}>
+                      <td style={s.td}>{fmtDate(p.fecha)}</td>
+                      <td style={{ ...s.td, fontWeight: 700, color: "#6366f1" }}>{fmt(p.monto)}</td>
                       <td style={s.td}>{p.metodo}</td>
                       <td style={s.td}>{p.referencia || "—"}</td>
                       <td style={s.td}>{p.usuario || "—"}</td>

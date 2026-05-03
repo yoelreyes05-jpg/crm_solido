@@ -2698,6 +2698,108 @@ app.patch("/diagnosticos/:id/completar-con-mantenimiento", async (req, res) => {
 });
 
 // =====================================================
+// 📤 CUENTAS POR PAGAR
+// =====================================================
+
+// Resumen KPI
+app.get("/api/contabilidad/cuentas-pagar/resumen", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("cuentas_pagar")
+      .select("monto_original, monto_pagado, estado, fecha_vencimiento");
+    const activas  = (data || []).filter(c => c.estado !== "PAGADO" && c.estado !== "ANULADO");
+    const hoy      = new Date().toISOString().slice(0, 10);
+    const enSemana = new Date(); enSemana.setDate(enSemana.getDate() + 7);
+    const enSemStr = enSemana.toISOString().slice(0, 10);
+    const totalPorPagar   = activas.reduce((s, c) => s + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+    const vencidas        = activas.filter(c => c.fecha_vencimiento < hoy).reduce((s, c) => s + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+    const porVencerSemana = activas.filter(c => c.fecha_vencimiento >= hoy && c.fecha_vencimiento <= enSemStr).reduce((s, c) => s + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+    res.json({ total_por_pagar: totalPorPagar, vencidas, por_vencer_semana: porVencerSemana, count: activas.length });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Listar con suplidor
+app.get("/api/contabilidad/cuentas-pagar", async (req, res) => {
+  try {
+    const { estado } = req.query;
+    let query = supabase
+      .from("cuentas_pagar")
+      .select("*, suplidores(nombre)")
+      .order("fecha_vencimiento", { ascending: true });
+    if (estado && estado !== "TODOS") query = query.eq("estado", estado);
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+    // Actualizar VENCIDO automáticamente
+    const hoy  = new Date().toISOString().slice(0, 10);
+    const rows = (data || []).map(c => {
+      const saldo = Number(c.monto_original) - Number(c.monto_pagado);
+      let est = c.estado;
+      if (est === "PENDIENTE" && c.fecha_vencimiento < hoy) est = "VENCIDO";
+      return { ...c, saldo, estado: est, suplidor_display: c.suplidores?.nombre || c.suplidor_nombre || "—" };
+    });
+    res.json(rows);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Detalle + pagos
+app.get("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: cuenta } = await supabase.from("cuentas_pagar").select("*, suplidores(nombre)").eq("id", id).single();
+    const { data: pagos  } = await supabase.from("pagos_pagar").select("*").eq("cuenta_id", id).order("fecha");
+    res.json({ cuenta: { ...cuenta, suplidor_display: cuenta?.suplidores?.nombre || cuenta?.suplidor_nombre || "—" }, pagos: pagos || [] });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Crear cuenta por pagar
+app.post("/api/contabilidad/cuentas-pagar", async (req, res) => {
+  try {
+    const { suplidor_id, suplidor_nombre, descripcion, monto_original, fecha_emision, fecha_vencimiento, notas, created_by } = req.body;
+    const { data, error } = await supabase.from("cuentas_pagar").insert([{
+      suplidor_id: suplidor_id || null,
+      suplidor_nombre: suplidor_nombre || null,
+      descripcion, monto_original, fecha_emision, fecha_vencimiento, notas, created_by,
+      estado: "PENDIENTE",
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Registrar pago
+app.post("/api/contabilidad/cuentas-pagar/:id/pago", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { monto, fecha, metodo, referencia, notas, usuario } = req.body;
+    // Insertar pago
+    await supabase.from("pagos_pagar").insert([{ cuenta_id: Number(id), monto: Number(monto), fecha, metodo, referencia, notas, usuario }]);
+    // Actualizar monto_pagado
+    const { data: cuenta } = await supabase.from("cuentas_pagar").select("monto_original, monto_pagado").eq("id", id).single();
+    const nuevoTotal = Number(cuenta.monto_pagado) + Number(monto);
+    const nuevoEstado = nuevoTotal >= Number(cuenta.monto_original) ? "PAGADO" : "PARCIAL";
+    const { data: updated } = await supabase.from("cuentas_pagar")
+      .update({ monto_pagado: nuevoTotal, estado: nuevoEstado, updated_at: new Date().toISOString() })
+      .eq("id", id).select();
+    res.json(updated?.[0] || { ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Actualizar estado / notas
+app.patch("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const campos = ["estado", "notas", "fecha_vencimiento"].reduce((o, k) => {
+      if (req.body[k] !== undefined) o[k] = req.body[k];
+      return o;
+    }, {} as Record<string, any>);
+    campos.updated_at = new Date().toISOString();
+    const { data, error } = await supabase.from("cuentas_pagar").update(campos).eq("id", id).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// =====================================================
 const PORT = process.env.PORT || 8080;
 app.listen(PORT, () => {
   console.log(`🔥 SÓLIDO AUTO SERVICIO corriendo en puerto ${PORT}`);

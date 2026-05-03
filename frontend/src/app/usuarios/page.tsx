@@ -12,8 +12,8 @@ const ROLES = [
 ];
 
 const PERMISOS = {
-  gerente:    ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Diagnósticos", "Inventario", "Suplidores", "Ventas", "Facturación", "Contabilidad", "Cafetería", "Usuarios"],
-  secretaria: ["Dashboard", "Clientes", "Vehículos", "Diagnostico", "Órdenes", "Contabilidad", "Facturación"],
+  gerente:    ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Diagnósticos", "Inventario", "Suplidores", "Ventas", "Facturación", "Contabilidad", "Cafetería", "inteligencia", "Usuarios"],
+  secretaria: ["Dashboard", "Clientes", "Vehículos", "Diagnostico", "Órdenes", "Contabilidad", "inteligencia", "Facturación"],
   tecnico:    ["Órdenes", "Diagnósticos"],
   almacen:    ["Inventario", "Suplidores", "Ventas"],
   cafeteria:  ["Cafetería"],

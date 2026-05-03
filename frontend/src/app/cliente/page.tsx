@@ -28,11 +28,18 @@ export default function ClienteApp() {
   const [repuestoAbierto, setRepuestoAbierto]   = useState<number | null>(null);
   const [esIOS, setEsIOS]                   = useState(false);
 
+  // ── REPUESTOS — búsqueda + paginación ──
+  const [repuestoSearch, setRepuestoSearch] = useState("");
+  const [repuestosPage, setRepuestosPage]   = useState(1);
+  const PAGE_SIZE = 15;
+
   // ── CAFETERÍA ──
   const [showCafe, setShowCafe]             = useState(false);
   const [cafe, setCafe]                     = useState<any[]>([]);
   const [loadingCafe, setLoadingCafe]       = useState(false);
   const [cafeAbierto, setCafeAbierto]       = useState<number | null>(null);
+  const [cafeSearch, setCafeSearch]         = useState("");
+  const [cafePage, setCafePage]             = useState(1);
 
   // ── HISTORIAL PERMANENTE ──
   const [historialPerm, setHistorialPerm]   = useState<any[]>([]);
@@ -247,6 +254,27 @@ export default function ClienteApp() {
         .stock-ok { background:rgba(52,211,153,0.15); color:#34d399; }
         .stock-no { background:rgba(248,113,113,0.15); color:#f87171; }
         .loading-dots { font-size:13px; color:#475569; text-align:center; padding:12px; }
+
+        /* SEARCH ACORDEÓN */
+        .search-acord {
+          display:flex; align-items:center; gap:8px;
+          background:rgba(255,255,255,0.05); border:1px solid rgba(255,255,255,0.1);
+          border-radius:12px; padding:10px 14px; margin-bottom:12px;
+        }
+        .search-acord input {
+          flex:1; background:transparent; border:none; outline:none;
+          color:#e2e8f0; font-family:'DM Sans',sans-serif; font-size:14px;
+        }
+        .search-acord input::placeholder { color:#475569; }
+        .search-acord span { font-size:16px; flex-shrink:0; }
+        .btn-ver-mas {
+          width:100%; margin-top:10px; padding:12px;
+          background:rgba(59,130,246,0.12); border:1px solid rgba(59,130,246,0.25);
+          border-radius:12px; color:#93c5fd; font-family:'DM Sans',sans-serif;
+          font-weight:700; font-size:13px; cursor:pointer; transition:background .15s;
+        }
+        .btn-ver-mas:active { background:rgba(59,130,246,0.2); }
+        .result-count { font-size:11px; color:#475569; margin-bottom:8px; text-align:right; }
 
         /* BUSCADOR */
         .search-intro { font-size:14px; color:#334155; line-height:1.7; margin-bottom:20px; }
@@ -479,36 +507,65 @@ export default function ClienteApp() {
                   <div className="loading-dots">Cargando repuestos...</div>
                 ) : repuestos.length === 0 ? (
                   <div className="loading-dots">Sin repuestos disponibles.</div>
-                ) : (
-                  <div className="prod-accordion">
-                    {repuestos.slice(0,15).map((p: any) => {
-                      const abierto  = repuestoAbierto === p.id;
-                      const hayStock = Number(p.stock) > 0;
-                      return (
-                        <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
-                          <div
-                            className="prod-item-header"
-                            onClick={() => setRepuestoAbierto(abierto ? null : p.id)}
-                          >
-                            <span className="prod-item-name">
-                              <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
-                              {p.name}
-                            </span>
-                            <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
-                          </div>
-                          <div className={`prod-item-body ${abierto ? "open" : ""}`}>
-                            <div className="prod-price-big">
-                              RD$ {Number(p.price).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                ) : (() => {
+                  const filtrados = repuestos.filter((p: any) =>
+                    !repuestoSearch || p.name?.toLowerCase().includes(repuestoSearch.toLowerCase())
+                  );
+                  const visibles = filtrados.slice(0, repuestosPage * PAGE_SIZE);
+                  const hayMas   = visibles.length < filtrados.length;
+                  return (
+                    <>
+                      <div className="search-acord">
+                        <span>🔍</span>
+                        <input
+                          value={repuestoSearch}
+                          onChange={e => { setRepuestoSearch(e.target.value); setRepuestosPage(1); }}
+                          placeholder="Buscar repuesto por nombre..."
+                        />
+                        {repuestoSearch && (
+                          <span style={{ cursor:"pointer", fontSize:13, color:"#64748b" }}
+                            onClick={() => { setRepuestoSearch(""); setRepuestosPage(1); }}>✕</span>
+                        )}
+                      </div>
+                      <div className="result-count">
+                        {repuestoSearch ? `${filtrados.length} resultado${filtrados.length !== 1 ? "s" : ""}` : `${repuestos.length} artículos`}
+                        {" · "}mostrando {Math.min(visibles.length, filtrados.length)}
+                      </div>
+                      <div className="prod-accordion">
+                        {visibles.map((p: any) => {
+                          const abierto  = repuestoAbierto === p.id;
+                          const hayStock = Number(p.stock) > 0;
+                          return (
+                            <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
+                              <div className="prod-item-header"
+                                onClick={() => setRepuestoAbierto(abierto ? null : p.id)}>
+                                <span className="prod-item-name">
+                                  <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
+                                  {p.name}
+                                </span>
+                                <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
+                              </div>
+                              <div className={`prod-item-body ${abierto ? "open" : ""}`}>
+                                <div className="prod-price-big">
+                                  RD$ {Number(p.price).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                                </div>
+                                <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
+                                  {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
+                                </span>
+                              </div>
                             </div>
-                            <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
-                              {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                          );
+                        })}
+                      </div>
+                      {hayMas && (
+                        <button className="btn-ver-mas"
+                          onClick={() => setRepuestosPage(pg => pg + 1)}>
+                          ⬇️ Ver más ({filtrados.length - visibles.length} restantes)
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -520,41 +577,71 @@ export default function ClienteApp() {
                   <div className="loading-dots">Cargando menú...</div>
                 ) : cafe.length === 0 ? (
                   <div className="loading-dots">Sin productos en el menú.</div>
-                ) : (
-                  <div className="prod-accordion">
-                    {cafe.slice(0,20).map((p: any) => {
-                      const abierto  = cafeAbierto === p.id;
-                      const hayStock = Number(p.stock) > 0;
-                      return (
-                        <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
-                          <div
-                            className="prod-item-header"
-                            onClick={() => setCafeAbierto(abierto ? null : p.id)}
-                          >
-                            <span className="prod-item-name">
-                              <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
-                              {p.nombre}
-                              {p.categoria && (
-                                <span style={{ fontSize:11, color:"#475569", fontWeight:400 }}>
-                                  · {p.categoria}
+                ) : (() => {
+                  const filtrados = cafe.filter((p: any) =>
+                    !cafeSearch || p.nombre?.toLowerCase().includes(cafeSearch.toLowerCase()) ||
+                    p.categoria?.toLowerCase().includes(cafeSearch.toLowerCase())
+                  );
+                  const visibles = filtrados.slice(0, cafePage * PAGE_SIZE);
+                  const hayMas   = visibles.length < filtrados.length;
+                  return (
+                    <>
+                      <div className="search-acord">
+                        <span>🔍</span>
+                        <input
+                          value={cafeSearch}
+                          onChange={e => { setCafeSearch(e.target.value); setCafePage(1); }}
+                          placeholder="Buscar producto o categoría..."
+                        />
+                        {cafeSearch && (
+                          <span style={{ cursor:"pointer", fontSize:13, color:"#64748b" }}
+                            onClick={() => { setCafeSearch(""); setCafePage(1); }}>✕</span>
+                        )}
+                      </div>
+                      <div className="result-count">
+                        {cafeSearch ? `${filtrados.length} resultado${filtrados.length !== 1 ? "s" : ""}` : `${cafe.length} productos`}
+                        {" · "}mostrando {Math.min(visibles.length, filtrados.length)}
+                      </div>
+                      <div className="prod-accordion">
+                        {visibles.map((p: any) => {
+                          const abierto  = cafeAbierto === p.id;
+                          const hayStock = Number(p.stock) > 0;
+                          return (
+                            <div key={p.id} className={`prod-item ${abierto ? "open" : ""}`}>
+                              <div className="prod-item-header"
+                                onClick={() => setCafeAbierto(abierto ? null : p.id)}>
+                                <span className="prod-item-name">
+                                  <span style={{ fontSize:16 }}>{hayStock ? "🟢" : "🔴"}</span>
+                                  {p.nombre}
+                                  {p.categoria && (
+                                    <span style={{ fontSize:11, color:"#475569", fontWeight:400 }}>
+                                      · {p.categoria}
+                                    </span>
+                                  )}
                                 </span>
-                              )}
-                            </span>
-                            <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
-                          </div>
-                          <div className={`prod-item-body ${abierto ? "open" : ""}`}>
-                            <div className="prod-price-big">
-                              RD$ {Number(p.precio).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                                <span className={`prod-item-arrow ${abierto ? "open" : ""}`}>▼</span>
+                              </div>
+                              <div className={`prod-item-body ${abierto ? "open" : ""}`}>
+                                <div className="prod-price-big">
+                                  RD$ {Number(p.precio).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                                </div>
+                                <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
+                                  {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
+                                </span>
+                              </div>
                             </div>
-                            <span className={`prod-stock-badge ${hayStock ? "stock-ok" : "stock-no"}`}>
-                              {hayStock ? `✓ Disponible (${p.stock})` : "Sin stock"}
-                            </span>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                          );
+                        })}
+                      </div>
+                      {hayMas && (
+                        <button className="btn-ver-mas"
+                          onClick={() => setCafePage(pg => pg + 1)}>
+                          ⬇️ Ver más ({filtrados.length - visibles.length} restantes)
+                        </button>
+                      )}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
