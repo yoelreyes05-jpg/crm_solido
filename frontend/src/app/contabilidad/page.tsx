@@ -67,9 +67,10 @@ export default function ContabilidadPage() {
   }, []);
 
   const tabs = [
-    { key: "cuadre",  label: "🏦 Cuadre de Caja",      roles: ["gerente", "secretaria"] },
-    { key: "chica",   label: "💵 Caja Chica",           roles: ["gerente", "secretaria"] },
-    { key: "costos",  label: "📊 Costos y Utilidades",  roles: ["gerente"] },
+    { key: "cuadre",  label: "🏦 Cuadre de Caja",       roles: ["gerente", "secretaria"] },
+    { key: "chica",   label: "💵 Caja Chica",            roles: ["gerente", "secretaria"] },
+    { key: "costos",  label: "📊 Costos y Utilidades",   roles: ["gerente"] },
+    { key: "cobrar",  label: "💳 Cuentas x Cobrar",      roles: ["gerente", "secretaria"] },
   ];
 
   const tabsVisibles = tabs.filter(t => !usuario || t.roles.includes(usuario.rol));
@@ -105,6 +106,7 @@ export default function ContabilidadPage() {
         {tab === "cuadre" && <CuadreDeCaja usuario={usuario} />}
         {tab === "chica"  && <CajaChica usuario={usuario} />}
         {tab === "costos" && <CostosUtilidades />}
+        {tab === "cobrar" && <CuentasCobrar usuario={usuario} />}
       </div>
     </div>
   );
@@ -145,24 +147,23 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
   // Cargar totales del día desde facturas reales
   const cargarTotalesDia = useCallback(async (fecha: string) => {
     try {
-      const r = await fetch(`${API}/facturas`);
-      const facturas = await r.json();
-      const delDia = facturas.filter((f: any) => {
-        const ff = new Date(f.created_at).toISOString().slice(0, 10);
-        return ff === fecha && f.estado !== "CANCELADA";
+      // Usar el nuevo endpoint de cuadre automático
+      const r = await fetch(`${API}/api/contabilidad/cuadre/auto?fecha=${fecha}`);
+      const d = await r.json();
+      setFacturasDia({
+        efectivo: d.ventas_efectivo || 0,
+        tarjeta:  d.ventas_tarjeta  || 0,
+        transf:   d.ventas_transferencia || 0,
+        count:    d.facturas_count || 0,
+        cafe:     d.cafe_total || 0,
+        gastos:   d.gastos || 0,
       });
-      const totales = {
-        efectivo: delDia.filter((f: any) => f.metodo_pago === "EFECTIVO").reduce((a: number, f: any) => a + Number(f.total), 0),
-        tarjeta:  delDia.filter((f: any) => f.metodo_pago === "TARJETA").reduce((a: number, f: any) => a + Number(f.total), 0),
-        transf:   delDia.filter((f: any) => f.metodo_pago === "TRANSFERENCIA").reduce((a: number, f: any) => a + Number(f.total), 0),
-        count:    delDia.length,
-      };
-      setFacturasDia(totales);
       setForm(prev => ({
         ...prev,
-        ventas_efectivo:     String(totales.efectivo),
-        ventas_tarjeta:      String(totales.tarjeta),
-        ventas_transferencia: String(totales.transf),
+        ventas_efectivo:      String(d.ventas_efectivo      || 0),
+        ventas_tarjeta:       String(d.ventas_tarjeta       || 0),
+        ventas_transferencia: String(d.ventas_transferencia || 0),
+        gastos:               String(d.gastos               || 0),
       }));
     } catch {}
   }, []);
@@ -214,9 +215,18 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
         );
       })()}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16, gap: 8 }}>
+        <button
+          onClick={async () => {
+            setShowForm(true);
+            await cargarTotalesDia(hoy);
+          }}
+          style={{ ...s.btnPrimary, background: "#10b981" }}
+        >
+          ⚡ Auto-cuadre de hoy
+        </button>
         <button onClick={() => setShowForm(!showForm)} style={s.btnPrimary}>
-          {showForm ? "✕ Cancelar" : "➕ Nuevo Cuadre"}
+          {showForm ? "✕ Cancelar" : "➕ Cuadre manual"}
         </button>
       </div>
 
@@ -226,7 +236,11 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
 
           {facturasDia && (
             <div style={s.infoBanner}>
-              <span>📊 Facturas del día: <b>{facturasDia.count}</b> — Totales cargados automáticamente desde el sistema</span>
+              <span>
+                ✅ <b>Auto-calculado:</b> {facturasDia.count} factura{facturasDia.count !== 1 ? "s" : ""},
+                cafetería: RD$ {Number(facturasDia.cafe || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })},
+                egresos caja chica: RD$ {Number(facturasDia.gastos || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+              </span>
             </div>
           )}
 
@@ -665,6 +679,340 @@ function CostosUtilidades() {
         </>
       ) : (
         <p style={s.empty}>No se pudo cargar el reporte.</p>
+      )}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// CUENTAS POR COBRAR
+// ═══════════════════════════════════════════════════════════════════════════
+type Cuenta = {
+  id: number; cliente_id: number | null; factura_id: number | null;
+  descripcion: string; monto_original: number; monto_pagado: number;
+  saldo: number; fecha_emision: string; fecha_vencimiento: string;
+  estado: string; notas: string; created_by: string;
+};
+
+function CuentasCobrar({ usuario }: { usuario: Usuario }) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [cuentas, setCuentas]       = useState<Cuenta[]>([]);
+  const [resumen, setResumen]       = useState<any>(null);
+  const [loading, setLoading]       = useState(false);
+  const [filtro, setFiltro]         = useState("TODOS");
+  const [showForm, setShowForm]     = useState(false);
+  const [modalPago, setModalPago]   = useState<Cuenta | null>(null);
+  const [modalDetalle, setModalDetalle] = useState<{ cuenta: Cuenta; pagos: any[] } | null>(null);
+  const [clientes, setClientes]     = useState<any[]>([]);
+  const [savingPago, setSavingPago] = useState(false);
+
+  const [form, setForm] = useState({
+    cliente_id: "", descripcion: "", monto_original: "",
+    fecha_emision: hoy, fecha_vencimiento: "", notas: "",
+  });
+
+  const [pagoForm, setPagoForm] = useState({
+    monto: "", fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "",
+  });
+
+  const cargar = useCallback(async () => {
+    setLoading(true);
+    try {
+      const [rC, rR] = await Promise.all([
+        fetch(`${API}/api/contabilidad/cuentas-cobrar${filtro !== "TODOS" ? `?estado=${filtro}` : ""}`),
+        fetch(`${API}/api/contabilidad/cuentas-cobrar/resumen`),
+      ]);
+      const dC = await rC.json();
+      const dR = await rR.json();
+      setCuentas(Array.isArray(dC) ? dC : []);
+      setResumen(dR);
+    } catch { setCuentas([]); }
+    setLoading(false);
+  }, [filtro]);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  useEffect(() => {
+    fetch(`${API}/clientes`).then(r => r.json()).then(d => setClientes(Array.isArray(d) ? d : []));
+  }, []);
+
+  const guardarCuenta = async () => {
+    if (!form.descripcion || !form.monto_original || !form.fecha_vencimiento)
+      return alert("Descripción, monto y fecha de vencimiento son requeridos");
+    try {
+      const r = await fetch(`${API}/api/contabilidad/cuentas-cobrar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...form,
+          cliente_id: form.cliente_id ? Number(form.cliente_id) : null,
+          monto_original: Number(form.monto_original),
+          created_by: usuario?.nombre || "Sistema",
+        }),
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setShowForm(false);
+      setForm({ cliente_id: "", descripcion: "", monto_original: "",
+        fecha_emision: hoy, fecha_vencimiento: "", notas: "" });
+      cargar();
+    } catch (e: any) { alert(e.message); }
+  };
+
+  const registrarPago = async () => {
+    if (!modalPago || !pagoForm.monto) return;
+    setSavingPago(true);
+    try {
+      const r = await fetch(`${API}/api/contabilidad/cuentas-cobrar/${modalPago.id}/pago`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...pagoForm,
+          monto: Number(pagoForm.monto),
+          usuario: usuario?.nombre || "Sistema",
+        }),
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setModalPago(null);
+      setPagoForm({ monto: "", fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "" });
+      cargar();
+    } catch (e: any) { alert(e.message); }
+    setSavingPago(false);
+  };
+
+  const verDetalle = async (c: Cuenta) => {
+    const r = await fetch(`${API}/api/contabilidad/cuentas-cobrar/${c.id}`);
+    const d = await r.json();
+    setModalDetalle({ cuenta: d.cuenta, pagos: d.pagos });
+  };
+
+  const semColor = (c: Cuenta) => {
+    if (c.estado === "PAGADO") return "#10b981";
+    if (c.estado === "VENCIDO") return "#ef4444";
+    const diasVence = Math.ceil((new Date(c.fecha_vencimiento).getTime() - Date.now()) / 86400000);
+    if (diasVence <= 7) return "#f59e0b";
+    return "#3b82f6";
+  };
+
+  const semEmoji = (c: Cuenta) => {
+    if (c.estado === "PAGADO") return "✅";
+    if (c.estado === "VENCIDO") return "🔴";
+    const d = Math.ceil((new Date(c.fecha_vencimiento).getTime() - Date.now()) / 86400000);
+    return d <= 7 ? "🟡" : "🟢";
+  };
+
+  return (
+    <div>
+      {/* KPIs */}
+      {resumen && (
+        <div style={s.kpiRow}>
+          <KpiCard label="Total por cobrar" value={fmt(resumen.total_por_cobrar)} icon="💳" color="#3b82f6" big />
+          <KpiCard label="Vencidas" value={fmt(resumen.vencidas)} icon="🔴" color="#ef4444" />
+          <KpiCard label="Por vencer esta semana" value={fmt(resumen.por_vencer_semana)} icon="🟡" color="#f59e0b" />
+          <KpiCard label="Cuentas activas" value={String(resumen.count)} icon="📋" color="#6366f1" />
+        </div>
+      )}
+
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 8 }}>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+          {["TODOS", "PENDIENTE", "PARCIAL", "VENCIDO", "PAGADO"].map(f => (
+            <button key={f} onClick={() => setFiltro(f)} style={filtro === f ? s.tabActive : s.tabInactive}>
+              {f === "TODOS" ? "📋 Todas" : f === "PENDIENTE" ? "🟡 Pendientes"
+                : f === "PARCIAL" ? "🔵 Parciales" : f === "VENCIDO" ? "🔴 Vencidas" : "✅ Pagadas"}
+            </button>
+          ))}
+        </div>
+        <button onClick={() => setShowForm(f => !f)} style={s.btnPrimary}>
+          {showForm ? "✕ Cancelar" : "➕ Nueva Cuenta"}
+        </button>
+      </div>
+
+      {/* FORM NUEVA CUENTA */}
+      {showForm && (
+        <div style={{ ...s.card, marginBottom: 20, border: "2px solid #3b82f6" }}>
+          <h3 style={{ ...s.cardTitle, color: "#1e40af" }}>💳 Registrar Cuenta por Cobrar</h3>
+          <div style={s.formGrid}>
+            <FormField label="Cliente">
+              <select value={form.cliente_id} onChange={e => setForm(f => ({ ...f, cliente_id: e.target.value }))} style={s.input}>
+                <option value="">— Consumidor final / sin cliente —</option>
+                {clientes.map((c: any) => (
+                  <option key={c.id} value={c.id}>{c.nombre}</option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="Descripción / Concepto">
+              <input value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))}
+                placeholder="Ej: Factura B0100000012 — Servicio de frenos" style={s.input} />
+            </FormField>
+            <FormField label="Monto (RD$)">
+              <input type="number" value={form.monto_original}
+                onChange={e => setForm(f => ({ ...f, monto_original: e.target.value }))}
+                placeholder="0.00" style={s.input} />
+            </FormField>
+            <FormField label="Fecha de emisión">
+              <input type="date" value={form.fecha_emision}
+                onChange={e => setForm(f => ({ ...f, fecha_emision: e.target.value }))} style={s.input} />
+            </FormField>
+            <FormField label="Fecha de vencimiento">
+              <input type="date" value={form.fecha_vencimiento}
+                onChange={e => setForm(f => ({ ...f, fecha_vencimiento: e.target.value }))} style={s.input} />
+            </FormField>
+            <FormField label="Notas (opcional)">
+              <input value={form.notas} onChange={e => setForm(f => ({ ...f, notas: e.target.value }))}
+                placeholder="Observaciones..." style={s.input} />
+            </FormField>
+          </div>
+          <button onClick={guardarCuenta} style={{ ...s.btnPrimary, width: "100%", marginTop: 4 }}>
+            💾 Guardar Cuenta
+          </button>
+        </div>
+      )}
+
+      {/* TABLA */}
+      <div style={s.card}>
+        <h3 style={s.cardTitle}>💳 Cuentas por Cobrar ({cuentas.length})</h3>
+        {loading ? <p style={s.empty}>Cargando...</p> : cuentas.length === 0 ? (
+          <p style={s.empty}>No hay cuentas en este filtro.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.table}>
+              <thead>
+                <tr>
+                  {["", "Descripción", "Emitida", "Vence", "Original", "Pagado", "Saldo", "Estado", "Acciones"].map(h => (
+                    <th key={h} style={s.th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cuentas.map((c: Cuenta) => (
+                  <tr key={c.id} style={{ background: c.estado === "VENCIDO" ? "#fff5f5" : "transparent" }}>
+                    <td style={s.td}>{semEmoji(c)}</td>
+                    <td style={{ ...s.td, maxWidth: 220 }}>
+                      <div style={{ fontWeight: 600 }}>{c.descripcion}</div>
+                      {c.notas && <div style={{ fontSize: 11, color: "#888" }}>{c.notas}</div>}
+                    </td>
+                    <td style={s.td}>{fmtDate(c.fecha_emision)}</td>
+                    <td style={{ ...s.td, fontWeight: 700, color: semColor(c) }}>{fmtDate(c.fecha_vencimiento)}</td>
+                    <td style={s.td}>{fmt(c.monto_original)}</td>
+                    <td style={{ ...s.td, color: "#10b981" }}>{fmt(c.monto_pagado)}</td>
+                    <td style={{ ...s.td, fontWeight: 700, color: semColor(c) }}>{fmt(c.saldo ?? (c.monto_original - c.monto_pagado))}</td>
+                    <td style={s.td}>
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                        background: c.estado === "PAGADO" ? "#dcfce7" : c.estado === "VENCIDO" ? "#fee2e2"
+                          : c.estado === "PARCIAL" ? "#dbeafe" : "#fef3c7",
+                        color: c.estado === "PAGADO" ? "#166534" : c.estado === "VENCIDO" ? "#dc2626"
+                          : c.estado === "PARCIAL" ? "#1e40af" : "#d97706",
+                      }}>{c.estado}</span>
+                    </td>
+                    <td style={s.td}>
+                      <div style={{ display: "flex", gap: 5 }}>
+                        {c.estado !== "PAGADO" && (
+                          <button onClick={() => { setModalPago(c); setPagoForm({ monto: String(c.saldo ?? (c.monto_original - c.monto_pagado)), fecha: hoy, metodo: "EFECTIVO", referencia: "", notas: "" }); }}
+                            style={{ ...s.btnSmall || { padding: "5px 10px", background: "#10b981", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600 } }}>
+                            💰 Cobrar
+                          </button>
+                        )}
+                        <button onClick={() => verDetalle(c)}
+                          style={{ padding: "5px 10px", background: "#f1f5f9", color: "#374151", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 11, fontWeight: 600 }}>
+                          👁️ Ver
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* MODAL REGISTRAR PAGO */}
+      {modalPago && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 440, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+            <h3 style={{ ...s.cardTitle, marginBottom: 6 }}>💰 Registrar Pago</h3>
+            <p style={{ color: "#555", fontSize: 14, marginBottom: 16 }}>
+              {modalPago.descripcion}<br />
+              <strong>Saldo: {fmt(modalPago.saldo ?? (modalPago.monto_original - modalPago.monto_pagado))}</strong>
+            </p>
+            <div style={s.formGrid}>
+              <FormField label="Monto a cobrar (RD$)">
+                <input type="number" value={pagoForm.monto}
+                  onChange={e => setPagoForm(p => ({ ...p, monto: e.target.value }))}
+                  style={s.input} />
+              </FormField>
+              <FormField label="Fecha">
+                <input type="date" value={pagoForm.fecha}
+                  onChange={e => setPagoForm(p => ({ ...p, fecha: e.target.value }))}
+                  style={s.input} />
+              </FormField>
+              <FormField label="Método">
+                <select value={pagoForm.metodo} onChange={e => setPagoForm(p => ({ ...p, metodo: e.target.value }))} style={s.input}>
+                  <option value="EFECTIVO">💵 Efectivo</option>
+                  <option value="TARJETA">💳 Tarjeta</option>
+                  <option value="TRANSFERENCIA">🏦 Transferencia</option>
+                  <option value="CHEQUE">📄 Cheque</option>
+                </select>
+              </FormField>
+              <FormField label="Referencia (opcional)">
+                <input value={pagoForm.referencia}
+                  onChange={e => setPagoForm(p => ({ ...p, referencia: e.target.value }))}
+                  placeholder="No. transferencia / cheque" style={s.input} />
+              </FormField>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={registrarPago} disabled={savingPago}
+                style={{ ...s.btnPrimary, flex: 1, background: "#10b981" }}>
+                {savingPago ? "Guardando..." : "✅ Confirmar Pago"}
+              </button>
+              <button onClick={() => setModalPago(null)}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6b7280" }}>Cancelar</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL DETALLE */}
+      {modalDetalle && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 520, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)", maxHeight: "85vh", overflowY: "auto" }}>
+            <h3 style={{ ...s.cardTitle, marginBottom: 6 }}>📋 Detalle de Cuenta</h3>
+            <div style={{ background: "#f8fafc", borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 14 }}>
+              <div style={s.resumenRow}><span>Descripción</span><span style={{ fontWeight: 600 }}>{modalDetalle.cuenta.descripcion}</span></div>
+              <div style={s.resumenRow}><span>Monto original</span><span style={{ fontWeight: 700 }}>{fmt(modalDetalle.cuenta.monto_original)}</span></div>
+              <div style={s.resumenRow}><span>Total pagado</span><span style={{ color: "#10b981", fontWeight: 700 }}>{fmt(modalDetalle.cuenta.monto_pagado)}</span></div>
+              <div style={{ ...s.resumenRow, borderTop: "2px solid #e2e8f0", paddingTop: 8, fontWeight: 800 }}>
+                <span>Saldo pendiente</span>
+                <span style={{ color: "#3b82f6" }}>{fmt(modalDetalle.cuenta.monto_original - modalDetalle.cuenta.monto_pagado)}</span>
+              </div>
+            </div>
+            <h4 style={{ fontSize: 14, fontWeight: 700, marginBottom: 10 }}>Historial de Pagos</h4>
+            {modalDetalle.pagos.length === 0 ? (
+              <p style={{ ...s.empty, padding: "12px 0" }}>Sin pagos registrados aún.</p>
+            ) : (
+              <table style={s.table}>
+                <thead>
+                  <tr>{["Fecha", "Monto", "Método", "Referencia", "Usuario"].map(h => <th key={h} style={s.th}>{h}</th>)}</tr>
+                </thead>
+                <tbody>
+                  {modalDetalle.pagos.map((p: any) => (
+                    <tr key={p.id}>
+                      <td style={s.td}>{fmtDate(p.fecha)}</td>
+                      <td style={{ ...s.td, fontWeight: 700, color: "#10b981" }}>{fmt(p.monto)}</td>
+                      <td style={s.td}>{p.metodo}</td>
+                      <td style={s.td}>{p.referencia || "—"}</td>
+                      <td style={s.td}>{p.usuario || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+            <button onClick={() => setModalDetalle(null)}
+              style={{ ...s.btnPrimary, width: "100%", marginTop: 16 }}>Cerrar</button>
+          </div>
+        </div>
       )}
     </div>
   );

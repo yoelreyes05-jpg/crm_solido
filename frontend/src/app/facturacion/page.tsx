@@ -252,6 +252,7 @@ export default function FacturaPage() {
   const [clienteSeleccionado, setClienteSel]  = useState<any>(null);
   const [vehiculoId, setVehiculoId]           = useState("");
   const [method, setMethod]                   = useState("EFECTIVO");
+  const [diasCredito, setDiasCredito]         = useState(30);
   const [ncfTipo, setNcfTipo]                 = useState("B02");
   // ✅ NUEVO: RNC manual para cuando no hay cliente seleccionado pero se emite B01/B14/B15
   const [rncManual, setRncManual]         = useState("");
@@ -499,6 +500,7 @@ export default function FacturaPage() {
           inventario_id:   p.inventario_id || null
         })),
         metodo_pago:    method,
+        dias_credito:   method === "CREDITO" ? diasCredito : undefined,
         ncf_tipo:       ncfTipo,
         subtotal,
         itbis,
@@ -751,7 +753,23 @@ export default function FacturaPage() {
                     <option value="TARJETA">💳 Tarjeta</option>
                     <option value="TRANSFERENCIA">🏦 Transferencia</option>
                     <option value="CHEQUE">📄 Cheque</option>
+                    <option value="CREDITO">🗓️ Crédito</option>
                   </select>
+                  {method === "CREDITO" && (
+                    <div style={{ marginTop: 8, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px" }}>
+                      <label style={{ ...labelS, color: "#92400e", marginBottom: 4 }}>📅 Días de crédito</label>
+                      <select value={diasCredito} onChange={e => setDiasCredito(Number(e.target.value))} style={{ ...input, marginBottom: 0 }}>
+                        <option value={15}>15 días</option>
+                        <option value={30}>30 días</option>
+                        <option value={45}>45 días</option>
+                        <option value={60}>60 días</option>
+                        <option value={90}>90 días</option>
+                      </select>
+                      <div style={{ fontSize: 11, color: "#b45309", marginTop: 4 }}>
+                        ⚠️ Esta factura generará una cuenta por cobrar automáticamente.
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 

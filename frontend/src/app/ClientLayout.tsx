@@ -6,18 +6,21 @@ import Link from "next/link";
 import Image from "next/image";
 
 const PERMISOS = {
-  gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion"],
-  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion"],
-  tecnico: ["ordenes","diagnosticos"],
+  gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
+  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion","mantenimiento","contabilidad"],
+  tecnico: ["ordenes","diagnosticos","mantenimiento"],
   almacen: ["inventario","suplidores","ventas"],
   cafeteria: ["cafeteria"],
 };
 
 const MENU = [
-  { href: "/dashboard", icon: "📊", label: "Dashboard", key: "dashboard" },
-  { href: "/clientes", icon: "👤", label: "Clientes", key: "clientes" },
-  { href: "/vehiculos", icon: "🚗", label: "Vehículos", key: "vehiculos" },
-  { href: "/ordenes", icon: "🔧", label: "Órdenes", key: "ordenes" },
+  { href: "/dashboard",     icon: "📊", label: "Dashboard",     key: "dashboard" },
+  { href: "/clientes",      icon: "👤", label: "Clientes",      key: "clientes" },
+  { href: "/vehiculos",     icon: "🚗", label: "Vehículos",     key: "vehiculos" },
+  { href: "/ordenes",       icon: "🔧", label: "Órdenes",       key: "ordenes" },
+  { href: "/mantenimiento", icon: "🛠️", label: "Mantenimiento", key: "mantenimiento" },
+  { href: "/inteligencia",  icon: "🔮", label: "Inteligencia",  key: "inteligencia" },
+  { href: "/contabilidad",  icon: "💰", label: "Contabilidad",  key: "contabilidad" },
 ];
 
 const RUTAS_PUBLICAS = ["/login", "/cliente"];
@@ -55,11 +58,33 @@ export default function ClientLayout({ children }) {
         </div>
 
         {/* MENU */}
-        {MENU.map(item => (
-          <Link key={item.href} href={item.href}>
-            <div style={{ padding: 10 }}>{item.icon} {item.label}</div>
-          </Link>
-        ))}
+        {MENU.filter(item => {
+          if (!usuario) return false;
+          const perms = PERMISOS[usuario.rol] || [];
+          return perms.includes(item.key);
+        }).map(item => {
+          const activo = pathname.startsWith(item.href);
+          return (
+            <Link key={item.href} href={item.href}>
+              <div style={{
+                padding: "10px 16px",
+                background: activo ? "#1d4ed8" : "transparent",
+                borderLeft: activo ? "3px solid #60a5fa" : "3px solid transparent",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 8,
+                color: activo ? "#fff" : "#d1d5db",
+                fontWeight: activo ? 700 : 400,
+                fontSize: 14,
+                transition: "background 0.15s"
+              }}>
+                <span>{item.icon}</span>
+                {sidebarOpen && <span>{item.label}</span>}
+              </div>
+            </Link>
+          );
+        })}
       </aside>
 
       {/* CONTENIDO */}

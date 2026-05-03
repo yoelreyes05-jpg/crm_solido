@@ -501,10 +501,13 @@ app.patch("/diagnosticos/:id", async (req, res) => {
   const { data, error } = await supabase.from("diagnosticos").update(req.body).eq("id", id).select();
   if (error) return res.json({ error: error.message });
 
-  // 📚 Auto-crear historial cuando el diagnóstico pasa a FACTURADO o COMPLETADO
+  // 📚 Auto-crear historial + mantenimiento cuando el diagnóstico pasa a FACTURADO o COMPLETADO
   if (req.body.estado === "FACTURADO" || req.body.estado === "COMPLETADO") {
     crearHistorialDesdeDiagnostico(Number(id)).catch(err =>
       console.error("❌ Error creando historial automático:", err)
+    );
+    crearMantenimientoDesdeDiagnostico(Number(id)).catch(err =>
+      console.error("❌ Error creando mantenimiento automático:", err)
     );
   }
 
@@ -806,14 +809,33 @@ app.post("/facturas", async (req, res) => {
       await supabase.from("diagnosticos").update({ estado: "FACTURADO" }).eq("id", diagnostico_id);
     }
 
-    await supabase.from("caja_movimientos").insert([{
-      tipo: "INGRESO",
-      concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
-      monto: total,
-      metodo_pago: metodo_pago || "EFECTIVO",
-      factura_id: facturaId,
-      created_at: new Date()
-    }]);
+    // Si el método de pago es CRÉDITO, crear cuenta por cobrar (no registrar en caja todavía)
+    if ((metodo_pago || "EFECTIVO").toUpperCase() === "CREDITO") {
+      const diasCredito = req.body.dias_credito || 30;
+      const fechaVence  = new Date();
+      fechaVence.setDate(fechaVence.getDate() + Number(diasCredito));
+      await supabase.from("cuentas_cobrar").insert([{
+        cliente_id:        cliente_id || null,
+        factura_id:        facturaId,
+        descripcion:       `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+        monto_original:    total,
+        monto_pagado:      0,
+        fecha_emision:     new Date().toISOString().slice(0, 10),
+        fecha_vencimiento: fechaVence.toISOString().slice(0, 10),
+        estado:            "PENDIENTE",
+        created_by:        "Sistema (Factura)",
+      }]);
+    } else {
+      // Solo registrar en caja si el pago es inmediato
+      await supabase.from("caja_movimientos").insert([{
+        tipo: "INGRESO",
+        concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+        monto: total,
+        metodo_pago: metodo_pago || "EFECTIVO",
+        factura_id: facturaId,
+        created_at: new Date()
+      }]);
+    }
 
     res.json(factura[0]);
   } catch (err) {
@@ -1692,6 +1714,7 @@ app.get("/telegram/info", async (req, res) => {
 });
 
 // =====================================================
+//<<<<<<< HEAD
 // 🤖 AI — CONSULTA DE CLIENTE (para Telegram bot en Vercel)
 // POST /ai/consulta-cliente
 // Body: { "pregunta": "...", "cliente_id": <optional> }
@@ -1810,6 +1833,866 @@ app.post("/ai/consulta-cliente", async (req, res) => {
   } catch (err) {
     console.error("🤖 /ai/consulta-cliente error:", err.message);
     res.status(500).json({ error: "Error interno del servidor.", detalle: err.message });
+=======
+// 🔄 CUADRE DE CAJA AUTOMÁTICO
+// =====================================================
+
+// GET /api/contabilidad/cuadre/auto?fecha=YYYY-MM-DD
+// Calcula el cuadre del día automáticamente desde facturas + caja_chica
+app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
+  try {
+    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
+    const desde = `${fecha}T00:00:00`;
+    const hasta  = `${fecha}T23:59:59`;
+
+    // Facturas activas del día
+    const { data: facturas } = await supabase
+      .from("facturas")
+      .select("total, itbis, metodo_pago, estado")
+      .neq("estado", "CANCELADA")
+      .gte("created_at", desde)
+      .lte("created_at", hasta);
+
+    const facs = facturas || [];
+    const ventas_efectivo      = facs.filter(f => f.metodo_pago === "EFECTIVO")
+      .reduce((a, f) => a + Number(f.total), 0);
+    const ventas_tarjeta       = facs.filter(f => f.metodo_pago === "TARJETA")
+      .reduce((a, f) => a + Number(f.total), 0);
+    const ventas_transferencia = facs.filter(f => f.metodo_pago === "TRANSFERENCIA")
+      .reduce((a, f) => a + Number(f.total), 0);
+    const ventas_cheque        = facs.filter(f => f.metodo_pago === "CHEQUE")
+      .reduce((a, f) => a + Number(f.total), 0);
+    const ventas_total         = facs.reduce((a, f) => a + Number(f.total), 0);
+
+    // Egresos de caja chica del día
+    const { data: gastosCC } = await supabase
+      .from("caja_chica")
+      .select("monto, tipo")
+      .gte("fecha", desde)
+      .lte("fecha", hasta);
+
+    const gastos = (gastosCC || [])
+      .filter(g => g.tipo === "EGRESO")
+      .reduce((a, g) => a + Number(g.monto), 0);
+
+    // Ventas cafetería del día
+    const { data: ventasCafe } = await supabase
+      .from("cafeteria_ventas")
+      .select("total, metodo_pago")
+      .gte("created_at", desde)
+      .lte("created_at", hasta);
+
+    const cafe_efectivo = (ventasCafe || [])
+      .filter(v => (v.metodo_pago || "EFECTIVO") === "EFECTIVO")
+      .reduce((a, v) => a + Number(v.total), 0);
+    const cafe_total = (ventasCafe || []).reduce((a, v) => a + Number(v.total), 0);
+
+    res.json({
+      fecha,
+      facturas_count: facs.length,
+      ventas_efectivo:       ventas_efectivo + cafe_efectivo,
+      ventas_tarjeta,
+      ventas_transferencia,
+      ventas_cheque,
+      ventas_total:          ventas_total + cafe_total,
+      gastos,
+      cafe_total,
+      por_metodo: [
+        { metodo: "EFECTIVO",      total: ventas_efectivo + cafe_efectivo },
+        { metodo: "TARJETA",       total: ventas_tarjeta },
+        { metodo: "TRANSFERENCIA", total: ventas_transferencia },
+        { metodo: "CHEQUE",        total: ventas_cheque },
+      ].filter(m => m.total > 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 🔧 MANTENIMIENTO PREVENTIVO
+// =====================================================
+
+// Intervalos por defecto según tipo de servicio
+const INTERVALOS_MANT = {
+  CAMBIO_ACEITE:   { dias: 90,  km: 5000  },
+  FILTROS:         { dias: 180, km: 10000 },
+  FRENOS:          { dias: 365, km: 20000 },
+  CORREAS:         { dias: 730, km: 40000 },
+  BUJIAS:          { dias: 365, km: 20000 },
+  ALINEACION:      { dias: 180, km: null  },
+  TRANSMISION:     { dias: 365, km: 40000 },
+  AC:              { dias: 365, km: null  },
+  SUSPENSION:      { dias: 365, km: 20000 },
+  DIAGNOSTICO:     { dias: 180, km: null  },
+  OTRO:            { dias: 180, km: null  },
+};
+
+// Normaliza tipo_servicio del diagnóstico al tipo de mantenimiento
+function normalizarTipoMantenimiento(tipoServicio) {
+  const t = (tipoServicio || "").toUpperCase();
+  if (t.includes("ACEITE"))       return "CAMBIO_ACEITE";
+  if (t.includes("FILTRO"))       return "FILTROS";
+  if (t.includes("FRENO"))        return "FRENOS";
+  if (t.includes("CORREA"))       return "CORREAS";
+  if (t.includes("BUJIA") || t.includes("BUJÍAS")) return "BUJIAS";
+  if (t.includes("ALINEAC"))      return "ALINEACION";
+  if (t.includes("TRANSMIS"))     return "TRANSMISION";
+  if (t.includes("AIRE") || t.includes("A/C") || t.includes("AC")) return "AC";
+  if (t.includes("SUSPENSION") || t.includes("SUSPENSIÓN")) return "SUSPENSION";
+  if (t.includes("DIAGN"))        return "DIAGNOSTICO";
+  return "OTRO";
+}
+
+// GET /mantenimiento — lista todos con info de vehículo y cliente
+app.get("/mantenimiento", async (req, res) => {
+  try {
+    const { data: planes } = await supabase
+      .from("mantenimiento_preventivo")
+      .select("*")
+      .neq("estado", "CANCELADO")
+      .order("proximo_fecha", { ascending: true });
+
+    if (!planes || planes.length === 0) return res.json([]);
+
+    const vehiculoIds = [...new Set(planes.map(p => p.vehiculo_id).filter(Boolean))];
+    const clienteIds  = [...new Set(planes.map(p => p.cliente_id).filter(Boolean))];
+
+    const [{ data: vehiculos }, { data: clientes }] = await Promise.all([
+      supabase.from("vehiculos").select("id, marca, modelo, placa, ano").in("id", vehiculoIds),
+      supabase.from("clientes").select("id, nombre, telefono").in("id", clienteIds),
+    ]);
+
+    const hoy = new Date();
+    const enrich = planes.map(p => {
+      const v = vehiculos?.find(x => x.id === p.vehiculo_id);
+      const c = clientes?.find(x => x.id === p.cliente_id);
+      const diasRestantes = p.proximo_fecha
+        ? Math.ceil((new Date(p.proximo_fecha) - hoy) / 86400000)
+        : null;
+      const semaforo =
+        diasRestantes === null ? "gris" :
+        diasRestantes < 0      ? "rojo"  :
+        diasRestantes <= 7     ? "amarillo" : "verde";
+      return {
+        ...p,
+        vehiculo_info:  v ? `${v.marca} ${v.modelo} (${v.placa})` : "Sin vehículo",
+        vehiculo_placa: v?.placa || "",
+        cliente_nombre: c?.nombre || "Sin cliente",
+        cliente_telefono: c?.telefono || "",
+        dias_restantes: diasRestantes,
+        semaforo,
+      };
+    });
+
+    res.json(enrich);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /mantenimiento/urgentes — vencidos + por vencer en 7 días
+app.get("/mantenimiento/urgentes", async (req, res) => {
+  try {
+    const en7dias = new Date();
+    en7dias.setDate(en7dias.getDate() + 7);
+
+    const { data } = await supabase
+      .from("mantenimiento_preventivo")
+      .select("*")
+      .eq("estado", "ACTIVO")
+      .lte("proximo_fecha", en7dias.toISOString().slice(0, 10))
+      .order("proximo_fecha", { ascending: true });
+
+    const ids = [...new Set((data || []).map(p => p.vehiculo_id).filter(Boolean))];
+    const { data: vehiculos } = ids.length
+      ? await supabase.from("vehiculos").select("id, marca, modelo, placa").in("id", ids)
+      : { data: [] };
+
+    const hoy = new Date();
+    const enrich = (data || []).map(p => {
+      const v = vehiculos?.find(x => x.id === p.vehiculo_id);
+      const diasRestantes = p.proximo_fecha
+        ? Math.ceil((new Date(p.proximo_fecha) - hoy) / 86400000)
+        : null;
+      return {
+        ...p,
+        vehiculo_info: v ? `${v.marca} ${v.modelo} (${v.placa})` : "Sin vehículo",
+        dias_restantes: diasRestantes,
+        semaforo: diasRestantes !== null && diasRestantes < 0 ? "rojo" : "amarillo",
+      };
+    });
+
+    res.json(enrich);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /mantenimiento/vehiculo/:id
+app.get("/mantenimiento/vehiculo/:vehiculoId", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("mantenimiento_preventivo")
+      .select("*")
+      .eq("vehiculo_id", req.params.vehiculoId)
+      .order("proximo_fecha", { ascending: true });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /mantenimiento — crear plan manualmente
+app.post("/mantenimiento", async (req, res) => {
+  try {
+    const {
+      vehiculo_id, cliente_id, tipo_servicio, descripcion,
+      intervalo_dias, intervalo_km,
+      ultimo_servicio_fecha, ultimo_servicio_km, proximo_fecha, proximo_km
+    } = req.body;
+
+    const { data, error } = await supabase
+      .from("mantenimiento_preventivo")
+      .insert([{
+        vehiculo_id, cliente_id: cliente_id || null,
+        tipo_servicio, descripcion: descripcion || null,
+        intervalo_dias:        Number(intervalo_dias  || 180),
+        intervalo_km:          intervalo_km ? Number(intervalo_km) : null,
+        ultimo_servicio_fecha: ultimo_servicio_fecha || null,
+        ultimo_servicio_km:    ultimo_servicio_km ? Number(ultimo_servicio_km) : null,
+        proximo_fecha:         proximo_fecha || null,
+        proximo_km:            proximo_km ? Number(proximo_km) : null,
+        estado: "ACTIVO",
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /mantenimiento/:id — actualizar (completar, editar, cancelar)
+app.patch("/mantenimiento/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updates = { ...req.body, updated_at: new Date().toISOString() };
+
+    // Si se está completando, calcular el próximo vencimiento automáticamente
+    if (req.body.estado === "COMPLETADO" && req.body.ultimo_servicio_fecha) {
+      const tipoKey = normalizarTipoMantenimiento(req.body.tipo_servicio || "");
+      const intervalo = INTERVALOS_MANT[tipoKey] || INTERVALOS_MANT.OTRO;
+      const ultimaFecha = new Date(req.body.ultimo_servicio_fecha);
+      ultimaFecha.setDate(ultimaFecha.getDate() + (req.body.intervalo_dias || intervalo.dias));
+      updates.proximo_fecha = ultimaFecha.toISOString().slice(0, 10);
+      updates.estado = "ACTIVO";  // Reiniciar para el próximo ciclo
+      updates.notificado = false;
+    }
+
+    const { data, error } = await supabase
+      .from("mantenimiento_preventivo")
+      .update(updates)
+      .eq("id", id)
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// DELETE /mantenimiento/:id
+app.delete("/mantenimiento/:id", async (req, res) => {
+  try {
+    await supabase.from("mantenimiento_alertas")
+      .delete().eq("mantenimiento_id", req.params.id);
+    const { error } = await supabase
+      .from("mantenimiento_preventivo")
+      .delete().eq("id", req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /mantenimiento/stats — KPIs para el dashboard
+app.get("/mantenimiento/stats", async (req, res) => {
+  try {
+    const hoy   = new Date().toISOString().slice(0, 10);
+    const en7   = new Date(); en7.setDate(en7.getDate() + 7);
+    const en7s  = en7.toISOString().slice(0, 10);
+
+    const { data: todos } = await supabase
+      .from("mantenimiento_preventivo")
+      .select("estado, proximo_fecha")
+      .neq("estado", "CANCELADO");
+
+    const planes = todos || [];
+    const vencidos       = planes.filter(p => p.proximo_fecha && p.proximo_fecha < hoy && p.estado === "ACTIVO").length;
+    const proximos7dias  = planes.filter(p => p.proximo_fecha >= hoy && p.proximo_fecha <= en7s && p.estado === "ACTIVO").length;
+    const alDia          = planes.filter(p => (!p.proximo_fecha || p.proximo_fecha > en7s) && p.estado === "ACTIVO").length;
+
+    res.json({ vencidos, proximos7dias, alDia, total: planes.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Helper: crea o actualiza plan de mantenimiento desde un diagnóstico completado
+async function crearMantenimientoDesdeDiagnostico(diagId) {
+  try {
+    const { data: diag } = await supabase
+      .from("diagnosticos").select("*").eq("id", diagId).single();
+    if (!diag || !diag.vehiculo_id) return;
+
+    const tipoKey = normalizarTipoMantenimiento(diag.tipo_servicio || "");
+    const intervalo = INTERVALOS_MANT[tipoKey] || INTERVALOS_MANT.OTRO;
+
+    const fechaHoy = new Date();
+    const proximaFecha = new Date(fechaHoy);
+    proximaFecha.setDate(proximaFecha.getDate() + intervalo.dias);
+
+    // Buscar si ya existe un plan activo de este tipo para este vehículo
+    const { data: existente } = await supabase
+      .from("mantenimiento_preventivo")
+      .select("id")
+      .eq("vehiculo_id", diag.vehiculo_id)
+      .eq("tipo_servicio", tipoKey)
+      .neq("estado", "CANCELADO")
+      .maybeSingle();
+
+    const payload = {
+      vehiculo_id:           diag.vehiculo_id,
+      cliente_id:            diag.cliente_id || null,
+      tipo_servicio:         tipoKey,
+      descripcion:           diag.tipo_servicio || tipoKey,
+      intervalo_dias:        intervalo.dias,
+      intervalo_km:          intervalo.km || null,
+      ultimo_servicio_fecha: fechaHoy.toISOString().slice(0, 10),
+      proximo_fecha:         proximaFecha.toISOString().slice(0, 10),
+      estado:                "ACTIVO",
+      notificado:            false,
+      diagnostico_origen_id: diagId,
+      updated_at:            new Date().toISOString(),
+    };
+
+    if (existente) {
+      await supabase.from("mantenimiento_preventivo").update(payload).eq("id", existente.id);
+      console.log(`🔧 Mantenimiento actualizado — Diagnóstico #${diagId} | Tipo: ${tipoKey}`);
+    } else {
+      await supabase.from("mantenimiento_preventivo").insert([payload]);
+      console.log(`🔧 Mantenimiento creado — Diagnóstico #${diagId} | Tipo: ${tipoKey}`);
+    }
+  } catch (err) {
+    console.error("❌ crearMantenimientoDesdeDiagnostico:", err.message);
+  }
+}
+
+// =====================================================
+// 🔮 INTELIGENCIA PREDICTIVA
+// =====================================================
+
+// GET /api/predictivo/fallas-por-modelo
+app.get("/api/predictivo/fallas-por-modelo", async (req, res) => {
+  try {
+    const { data: diags } = await supabase
+      .from("diagnosticos")
+      .select("tipo_servicio, fallas_identificadas, vehiculo_id")
+      .not("tipo_servicio", "is", null);
+
+    const { data: vehiculos } = await supabase
+      .from("vehiculos")
+      .select("id, marca, modelo, ano");
+
+    const vehiculoMap = {};
+    (vehiculos || []).forEach(v => { vehiculoMap[v.id] = v; });
+
+    const conteo = {};
+    (diags || []).forEach(d => {
+      const v = vehiculoMap[d.vehiculo_id];
+      if (!v) return;
+      const clave = `${v.marca} ${v.modelo}`;
+      if (!conteo[clave]) conteo[clave] = { modelo: clave, marca: v.marca, servicios: {}, total: 0 };
+      const srv = d.tipo_servicio || "OTRO";
+      conteo[clave].servicios[srv] = (conteo[clave].servicios[srv] || 0) + 1;
+      conteo[clave].total++;
+    });
+
+    const resultado = Object.values(conteo)
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 15)
+      .map(m => ({
+        ...m,
+        top_servicios: Object.entries(m.servicios)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 4)
+          .map(([servicio, count]) => ({ servicio, count })),
+      }));
+
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/predictivo/demanda-inventario
+app.get("/api/predictivo/demanda-inventario", async (req, res) => {
+  try {
+    // Consumo de los últimos 90 días desde factura_items
+    const desde90 = new Date();
+    desde90.setDate(desde90.getDate() - 90);
+
+    const { data: items } = await supabase
+      .from("factura_items")
+      .select("inventario_id, cantidad, created_at")
+      .eq("tipo", "repuesto")
+      .not("inventario_id", "is", null)
+      .gte("created_at", desde90.toISOString());
+
+    const consumo = {};
+    (items || []).forEach(i => {
+      consumo[i.inventario_id] = (consumo[i.inventario_id] || 0) + Number(i.cantidad);
+    });
+
+    const { data: inventario } = await supabase
+      .from("inventario")
+      .select("id, name, stock, min_stock, price");
+
+    const resultado = (inventario || [])
+      .map(p => {
+        const consumo90 = consumo[p.id] || 0;
+        const consumoMensual = consumo90 / 3;
+        const diasCobertura = consumoMensual > 0 ? Math.floor((p.stock / consumoMensual) * 30) : null;
+        const alerta = consumoMensual > 0 && p.stock < consumoMensual;
+        return {
+          id:               p.id,
+          nombre:           p.name,
+          stock_actual:     p.stock,
+          min_stock:        p.min_stock,
+          consumo_mensual:  Math.ceil(consumoMensual),
+          consumo_90dias:   consumo90,
+          dias_cobertura:   diasCobertura,
+          alerta,
+          precio:           p.price,
+        };
+      })
+      .filter(p => p.consumo_90dias > 0)
+      .sort((a, b) => (a.dias_cobertura ?? 999) - (b.dias_cobertura ?? 999));
+
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/predictivo/clientes-riesgo
+app.get("/api/predictivo/clientes-riesgo", async (req, res) => {
+  try {
+    const { data: historial } = await supabase
+      .from("vehiculo_historial")
+      .select("cliente_id, cliente_nombre, fecha_servicio, created_at")
+      .order("fecha_servicio", { ascending: false });
+
+    const { data: clientes } = await supabase
+      .from("clientes")
+      .select("id, nombre, telefono, email");
+
+    const clienteMap = {};
+    (clientes || []).forEach(c => { clienteMap[c.id] = c; });
+
+    // Agrupar visitas por cliente
+    const visitasPorCliente = {};
+    (historial || []).forEach(h => {
+      if (!h.cliente_id) return;
+      if (!visitasPorCliente[h.cliente_id]) visitasPorCliente[h.cliente_id] = [];
+      visitasPorCliente[h.cliente_id].push(new Date(h.fecha_servicio || h.created_at));
+    });
+
+    const hoy = new Date();
+    const resultado = [];
+
+    Object.entries(visitasPorCliente).forEach(([clienteId, visitas]) => {
+      if (visitas.length < 2) return;
+      visitas.sort((a, b) => b - a);
+      const ultima = visitas[0];
+      const diasDesdeUltima = Math.floor((hoy - ultima) / 86400000);
+
+      // Calcular intervalo promedio entre visitas
+      let sumIntervalos = 0;
+      for (let i = 0; i < visitas.length - 1; i++) {
+        sumIntervalos += Math.floor((visitas[i] - visitas[i + 1]) / 86400000);
+      }
+      const intervaloPromedio = Math.floor(sumIntervalos / (visitas.length - 1));
+
+      // En riesgo si lleva más de 1.5x el intervalo promedio sin aparecer
+      if (intervaloPromedio > 0 && diasDesdeUltima > intervaloPromedio * 1.5) {
+        const c = clienteMap[clienteId];
+        resultado.push({
+          cliente_id:         Number(clienteId),
+          nombre:             c?.nombre || "Sin nombre",
+          telefono:           c?.telefono || "",
+          email:              c?.email || "",
+          visitas_total:      visitas.length,
+          ultima_visita:      ultima.toISOString().slice(0, 10),
+          dias_sin_visita:    diasDesdeUltima,
+          intervalo_promedio: intervaloPromedio,
+          nivel_riesgo:       diasDesdeUltima > intervaloPromedio * 3 ? "ALTO" : "MEDIO",
+        });
+      }
+    });
+
+    resultado.sort((a, b) => b.dias_sin_visita - a.dias_sin_visita);
+    res.json(resultado.slice(0, 50));
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/predictivo/proyeccion-ingresos
+app.get("/api/predictivo/proyeccion-ingresos", async (req, res) => {
+  try {
+    const hoy  = new Date();
+    const mesActualInicio = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
+    const mesAnteriorInicio = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1);
+    const mesAnteriorFin    = new Date(hoy.getFullYear(), hoy.getMonth(), 0);
+
+    const [{ data: facturasMes }, { data: facturasAnt }] = await Promise.all([
+      supabase.from("facturas").select("total, created_at")
+        .neq("estado", "CANCELADA")
+        .gte("created_at", mesActualInicio.toISOString()),
+      supabase.from("facturas").select("total, created_at")
+        .neq("estado", "CANCELADA")
+        .gte("created_at", mesAnteriorInicio.toISOString())
+        .lte("created_at", mesAnteriorFin.toISOString()),
+    ]);
+
+    const ingresosActuales = (facturasMes || []).reduce((a, f) => a + Number(f.total), 0);
+    const ingresosAnt      = (facturasAnt  || []).reduce((a, f) => a + Number(f.total), 0);
+
+    // Proyección lineal: (ingresos actuales / día transcurrido) × días del mes
+    const diasTranscurridos = hoy.getDate();
+    const diasDelMes        = new Date(hoy.getFullYear(), hoy.getMonth() + 1, 0).getDate();
+    const proyeccion = diasTranscurridos > 0
+      ? (ingresosActuales / diasTranscurridos) * diasDelMes
+      : 0;
+
+    // Ingresos por día de los últimos 30 días
+    const desde30 = new Date(); desde30.setDate(desde30.getDate() - 29);
+    const { data: facs30 } = await supabase
+      .from("facturas")
+      .select("total, created_at")
+      .neq("estado", "CANCELADA")
+      .gte("created_at", desde30.toISOString());
+
+    const porDia = {};
+    (facs30 || []).forEach(f => {
+      const d = f.created_at.slice(0, 10);
+      porDia[d] = (porDia[d] || 0) + Number(f.total);
+    });
+    const tendencia30 = Object.entries(porDia)
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([fecha, total]) => ({ fecha, total }));
+
+    res.json({
+      ingresos_actuales:     ingresosActuales,
+      ingresos_mes_anterior: ingresosAnt,
+      proyeccion_mes:        Math.round(proyeccion),
+      dias_transcurridos:    diasTranscurridos,
+      dias_del_mes:          diasDelMes,
+      variacion_pct:         ingresosAnt > 0
+        ? Math.round(((proyeccion - ingresosAnt) / ingresosAnt) * 100)
+        : 0,
+      tendencia_30_dias:     tendencia30,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/predictivo/top-clientes
+app.get("/api/predictivo/top-clientes", async (req, res) => {
+  try {
+    const { data: facturas } = await supabase
+      .from("facturas")
+      .select("cliente_id, cliente_nombre, total, created_at")
+      .neq("estado", "CANCELADA")
+      .not("cliente_id", "is", null);
+
+    const resumen = {};
+    (facturas || []).forEach(f => {
+      const id = f.cliente_id;
+      if (!resumen[id]) resumen[id] = {
+        cliente_id: id,
+        nombre: f.cliente_nombre || "Sin nombre",
+        total_facturado: 0,
+        visitas: 0,
+        ultima_visita: null,
+      };
+      resumen[id].total_facturado += Number(f.total);
+      resumen[id].visitas++;
+      if (!resumen[id].ultima_visita || f.created_at > resumen[id].ultima_visita) {
+        resumen[id].ultima_visita = f.created_at?.slice(0, 10);
+      }
+    });
+
+    const resultado = Object.values(resumen)
+      .map(c => ({
+        ...c,
+        ticket_promedio: c.visitas > 0 ? Math.round(c.total_facturado / c.visitas) : 0,
+      }))
+      .sort((a, b) => b.total_facturado - a.total_facturado)
+      .slice(0, 20);
+
+    res.json(resultado);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/predictivo/resumen — dashboard de inteligencia
+app.get("/api/predictivo/resumen", async (req, res) => {
+  try {
+    // Llamadas en paralelo
+    const [urgentes, riesgo, demanda] = await Promise.all([
+      supabase.from("mantenimiento_preventivo")
+        .select("id", { count: "exact" })
+        .eq("estado", "ACTIVO")
+        .lte("proximo_fecha", new Date(Date.now() + 7 * 86400000).toISOString().slice(0, 10)),
+      supabase.from("vehiculo_historial")
+        .select("cliente_id, fecha_servicio, created_at"),
+      supabase.from("inventario")
+        .select("id, stock, min_stock"),
+    ]);
+
+    const mantenimientosUrgentes = urgentes.count || 0;
+    const stockCritico = (demanda.data || [])
+      .filter(i => i.stock <= i.min_stock).length;
+
+    res.json({
+      mantenimientos_urgentes: mantenimientosUrgentes,
+      stock_critico:           stockCritico,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 💳 CUENTAS POR COBRAR
+// =====================================================
+
+// GET /api/contabilidad/cuentas-cobrar — lista con filtros opcionales
+app.get("/api/contabilidad/cuentas-cobrar", async (req, res) => {
+  try {
+    const { estado, cliente_id } = req.query;
+    let query = supabase
+      .from("cuentas_cobrar")
+      .select("*")
+      .order("fecha_vencimiento", { ascending: true });
+
+    if (estado && estado !== "TODOS") query = query.eq("estado", estado);
+    if (cliente_id)                   query = query.eq("cliente_id", cliente_id);
+
+    const { data, error } = await query;
+    if (error) return res.status(500).json({ error: error.message });
+
+    // Actualizar estados de vencidas automáticamente
+    const hoy = new Date().toISOString().slice(0, 10);
+    const cuentas = (data || []).map(c => {
+      let estadoReal = c.estado;
+      if (estadoReal === "PENDIENTE" && c.fecha_vencimiento < hoy) estadoReal = "VENCIDO";
+      if (estadoReal === "PARCIAL"   && c.fecha_vencimiento < hoy) estadoReal = "VENCIDO";
+      const saldo = Number(c.monto_original) - Number(c.monto_pagado);
+      return { ...c, saldo, estado: estadoReal };
+    });
+
+    res.json(cuentas);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contabilidad/cuentas-cobrar/resumen — KPIs
+app.get("/api/contabilidad/cuentas-cobrar/resumen", async (req, res) => {
+  try {
+    const hoy    = new Date().toISOString().slice(0, 10);
+    const en7    = new Date(); en7.setDate(en7.getDate() + 7);
+    const en7s   = en7.toISOString().slice(0, 10);
+
+    const { data } = await supabase
+      .from("cuentas_cobrar")
+      .select("monto_original, monto_pagado, fecha_vencimiento, estado")
+      .not("estado", "in", '("PAGADO","INCOBRABLE")');
+
+    const cuentas = data || [];
+    const totalPorCobrar = cuentas
+      .reduce((a, c) => a + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+    const vencidas = cuentas
+      .filter(c => c.fecha_vencimiento < hoy)
+      .reduce((a, c) => a + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+    const porVencerSemana = cuentas
+      .filter(c => c.fecha_vencimiento >= hoy && c.fecha_vencimiento <= en7s)
+      .reduce((a, c) => a + (Number(c.monto_original) - Number(c.monto_pagado)), 0);
+
+    res.json({ total_por_cobrar: totalPorCobrar, vencidas, por_vencer_semana: porVencerSemana, count: cuentas.length });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /api/contabilidad/cuentas-cobrar/:id — detalle + pagos
+app.get("/api/contabilidad/cuentas-cobrar/:id", async (req, res) => {
+  try {
+    const [{ data: cuenta }, { data: pagos }] = await Promise.all([
+      supabase.from("cuentas_cobrar").select("*").eq("id", req.params.id).single(),
+      supabase.from("pagos_cobrar").select("*").eq("cuenta_id", req.params.id)
+        .order("fecha", { ascending: false }),
+    ]);
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+    res.json({ cuenta: { ...cuenta, saldo: Number(cuenta.monto_original) - Number(cuenta.monto_pagado) }, pagos: pagos || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contabilidad/cuentas-cobrar — crear cuenta
+app.post("/api/contabilidad/cuentas-cobrar", async (req, res) => {
+  try {
+    const {
+      cliente_id, factura_id, descripcion,
+      monto_original, fecha_emision, fecha_vencimiento, notas, created_by
+    } = req.body;
+
+    if (!descripcion || !monto_original || !fecha_vencimiento)
+      return res.status(400).json({ error: "Descripción, monto y fecha de vencimiento son requeridos" });
+
+    const { data, error } = await supabase
+      .from("cuentas_cobrar")
+      .insert([{
+        cliente_id:        cliente_id || null,
+        factura_id:        factura_id || null,
+        descripcion,
+        monto_original:    Number(monto_original),
+        monto_pagado:      0,
+        fecha_emision:     fecha_emision || new Date().toISOString().slice(0, 10),
+        fecha_vencimiento,
+        estado:            "PENDIENTE",
+        notas:             notas || null,
+        created_by:        created_by || "Sistema",
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /api/contabilidad/cuentas-cobrar/:id/pago — registrar pago
+app.post("/api/contabilidad/cuentas-cobrar/:id/pago", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { monto, fecha, metodo, referencia, notas, usuario } = req.body;
+
+    if (!monto || Number(monto) <= 0)
+      return res.status(400).json({ error: "Monto inválido" });
+
+    // Leer saldo actual
+    const { data: cuenta } = await supabase
+      .from("cuentas_cobrar").select("*").eq("id", id).single();
+    if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+
+    const saldoActual = Number(cuenta.monto_original) - Number(cuenta.monto_pagado);
+    if (Number(monto) > saldoActual + 0.01)
+      return res.status(400).json({ error: `Monto excede el saldo. Saldo: RD$ ${saldoActual.toFixed(2)}` });
+
+    // Registrar pago
+    const { data: pago } = await supabase
+      .from("pagos_cobrar")
+      .insert([{
+        cuenta_id:  Number(id),
+        monto:      Number(monto),
+        fecha:      fecha || new Date().toISOString().slice(0, 10),
+        metodo:     metodo || "EFECTIVO",
+        referencia: referencia || null,
+        notas:      notas || null,
+        usuario:    usuario || "Sistema",
+      }])
+      .select()
+      .single();
+
+    // Actualizar monto_pagado y estado
+    const nuevoMontoPagado = Number(cuenta.monto_pagado) + Number(monto);
+    const nuevoEstado = nuevoMontoPagado >= Number(cuenta.monto_original) - 0.01
+      ? "PAGADO"
+      : "PARCIAL";
+
+    await supabase.from("cuentas_cobrar")
+      .update({
+        monto_pagado: nuevoMontoPagado,
+        estado: nuevoEstado,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", id);
+
+    // Si fue pago total, registrar en caja_movimientos
+    if (nuevoEstado === "PAGADO") {
+      await supabase.from("caja_movimientos").insert([{
+        tipo:       "INGRESO",
+        concepto:   `Cobro cuenta — ${cuenta.descripcion}`,
+        monto:      Number(monto),
+        metodo_pago: metodo || "EFECTIVO",
+        created_at: new Date(),
+      }]);
+    }
+
+    res.json({ pago, nuevo_estado: nuevoEstado, saldo_restante: Number(cuenta.monto_original) - nuevoMontoPagado });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /api/contabilidad/cuentas-cobrar/:id
+app.patch("/api/contabilidad/cuentas-cobrar/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("cuentas_cobrar")
+      .update({ ...req.body, updated_at: new Date().toISOString() })
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ─── Patch DIAGNÓSTICOS: agregar auto-creación de mantenimiento ───────────────
+// (Override del endpoint ya existente — se añade llamada al helper)
+app.patch("/diagnosticos/:id/completar-con-mantenimiento", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from("diagnosticos").update(req.body).eq("id", id).select();
+    if (error) return res.json({ error: error.message });
+
+    if (req.body.estado === "FACTURADO" || req.body.estado === "COMPLETADO") {
+      crearHistorialDesdeDiagnostico(Number(id)).catch(console.error);
+      crearMantenimientoDesdeDiagnostico(Number(id)).catch(console.error);
+    }
+    res.json(data[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+//>>>>>>> bd22cf1 (Actualizar cuenta por cobrar)
   }
 });
 
