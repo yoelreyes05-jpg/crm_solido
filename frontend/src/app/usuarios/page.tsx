@@ -5,7 +5,7 @@ import { API_URL as API } from "@/config";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },
-  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación, inteligencia, contabilidad" },
+  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación, inteligencia, mantenimiento, contabilidad" },
   { value: "tecnico",    label: "🔧 Técnico",            desc: "Órdenes de trabajo y Diagnósticos" },
   { value: "almacen",    label: "📦 Almacén",            desc: "Inventario, Suplidores, Ventas" },
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },
@@ -13,7 +13,7 @@ const ROLES = [
 
 const PERMISOS = {
   gerente:    ["Dashboard", "Clientes", "Vehículos", "Órdenes", "Diagnósticos", "Inventario", "Suplidores", "Ventas", "Facturación", "Contabilidad", "Cafetería", "inteligencia", "Usuarios"],
-  secretaria: ["Dashboard", "Clientes", "Vehículos", "Diagnostico", "Órdenes", "Contabilidad", "inteligencia", "Facturación"],
+  secretaria: ["Dashboard", "Clientes", "Vehículos", "Diagnostico", "Órdenes", "Contabilidad", "Suplidores",  "mantenimiento", "inteligencia", "Facturación"],
   tecnico:    ["Órdenes", "Diagnósticos"],
   almacen:    ["Inventario", "Suplidores", "Ventas"],
   cafeteria:  ["Cafetería"],
@@ -224,7 +224,7 @@ export default function UsuariosPage() {
                 </tr>
               </thead>
               <tbody>
-                {["Dashboard","Clientes","Vehículos","Órdenes","Diagnósticos","Inventario","Suplidores","Ventas","Facturación","Cafetería","Usuarios"].map(modulo => (
+                {["Dashboard","Clientes","Vehículos","Órdenes","Diagnósticos","Inventario","Mantenimiento", "Inteligencia", "Suplidores","Ventas","Facturación","Cafetería","Usuarios"].map(modulo => (
                   <tr key={modulo}>
                     <td style={{ ...td, fontWeight: 600 }}>{modulo}</td>
                     {ROLES.map(r => (
