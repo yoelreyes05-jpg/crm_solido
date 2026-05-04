@@ -30,7 +30,7 @@ const MENU = [
   { href: "/configuracion",      icon: "⚙️", label: "Configuración",       key: "configuracion",       iconBg: "linear-gradient(145deg,#111827,#374151)",    iconShadow: "0 4px 12px rgba(55,65,81,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
   { href: "/pantalla",           icon: "📺", label: "Pantalla TV",          key: "pantalla",            iconBg: "linear-gradient(145deg,#0c4a6e,#0284c7)",    iconShadow: "0 4px 12px rgba(2,132,199,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
    { href: "/inteligencia",      icon: "🔮", label: "Inteligencia",          key: "inteligencia",       iconBg: "linear-gradient(145deg,#0c4a6e,#0284c7)",    iconShadow: "0 4px 12px rgba(2,132,199,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
-
+    { href: "/mantenimiento",      icon: "🛠️", label: "mantenimiento",          key: "mantenimiento",       iconBg: "linear-gradient(145deg,#0c4a6e,#0284c7)",    iconShadow: "0 4px 12px rgba(2,132,199,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
 ];
 
 // Rutas que NO usan el sidebar
