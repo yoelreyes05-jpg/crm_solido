@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useRef } from "react";
+import { useEffect, useState, useRef, useCallback } from "react";
 
 import { API_URL as API } from "@/config";
 
@@ -267,10 +267,14 @@ export default function CafeteriaPage() {
       <h1 style={title}>☕ SOLIDO CAFE GARAGE — {EMPRESA.nombre}</h1>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        {["vender", "productos"].map(t => (
-          <button key={t} onClick={() => setTab(t)}
-            style={{ ...tabBtn, background: tab === t ? "#111827" : "#fff", color: tab === t ? "#fff" : "#111" }}>
-            {t === "vender" ? "🛒 Vender" : "➕ Gestionar Productos"}
+        {[
+          { k: "vender",    l: "🛒 Vender" },
+          { k: "productos", l: "➕ Gestionar Productos" },
+          { k: "cuadre",    l: "🏦 Cuadre" },
+        ].map(t => (
+          <button key={t.k} onClick={() => setTab(t.k)}
+            style={{ ...tabBtn, background: tab === t.k ? "#111827" : "#fff", color: tab === t.k ? "#fff" : "#111" }}>
+            {t.l}
           </button>
         ))}
       </div>
@@ -403,6 +407,8 @@ export default function CafeteriaPage() {
           </div>
         </div>
       )}
+
+      {tab === "cuadre" && <CafeteriaCuadre usuario={typeof window !== "undefined" ? (() => { try { return JSON.parse(localStorage.getItem("usuario") || "{}"); } catch { return {}; } })() : {}} />}
 
       {tab === "productos" && (
         <div style={{ maxWidth: 640 }}>
@@ -539,6 +545,298 @@ export default function CafeteriaPage() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// ☕ CUADRE DE CAFETERÍA
+// ══════════════════════════════════════════════════════════
+function fmtCafe(n: number | string) {
+  return "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtFechaCafe(d: string) {
+  return d ? new Date(d).toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+}
+
+function imprimirCuadreCafe(c: any) {
+  const saldoEsperado = Number(c.ventas_efectivo || 0);
+  const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
+    ? Number(c.efectivo_contado) - saldoEsperado : 0;
+
+  const row = (lbl: string, val: string, color = "#111", bold = false) =>
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+       <span style="color:#555;">${lbl}</span>
+       <span style="font-weight:${bold ? 800 : 500};color:${color};">${val}</span>
+     </div>`;
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>Cuadre Cafetería — ${c.fecha}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;font-size:13px;padding:28px;max-width:560px;margin:auto;}
+    h1{font-size:17px;font-weight:900;} h2{font-size:12px;font-weight:600;color:#555;}
+    .sec-title{font-weight:700;font-size:11px;text-transform:uppercase;color:#d97706;letter-spacing:.5px;
+      margin-bottom:6px;border-bottom:2px solid #fde68a;padding-bottom:3px;margin-top:14px;}
+    .sig{display:inline-block;border-top:1px solid #333;width:180px;text-align:center;
+      font-size:11px;color:#555;padding-top:4px;margin-top:30px;}
+    .footer{text-align:center;font-size:11px;color:#aaa;margin-top:24px;border-top:1px dashed #ddd;padding-top:12px;}
+    @media print{button{display:none!important;}}
+  </style></head><body>
+  <div style="text-align:center;margin-bottom:18px;">
+    <h1>☕ SÓLIDO AUTO SERVICIO SRL</h1>
+    <h2>CUADRE CAFETERÍA — ${c.fecha}</h2>
+    <div style="font-size:11px;color:#888;margin-top:4px;">Responsable: <b>${c.usuario || "—"}</b> · Transacciones: <b>${c.transacciones_count || 0}</b></div>
+  </div>
+
+  <div class="sec-title">Ventas del día</div>
+  ${row("Ventas en efectivo", fmtCafe(c.ventas_efectivo))}
+  ${Number(c.ventas_tarjeta || 0) > 0 ? row("Ventas con tarjeta", fmtCafe(c.ventas_tarjeta)) : ""}
+  ${Number(c.ventas_transferencia || 0) > 0 ? row("Ventas por transferencia", fmtCafe(c.ventas_transferencia)) : ""}
+  <div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #d97706;margin-top:4px;font-weight:800;font-size:15px;">
+    <span>TOTAL VENTAS</span><span>${fmtCafe(c.ventas_total)}</span>
+  </div>
+
+  <div class="sec-title">Cuadre de efectivo</div>
+  ${row("Efectivo esperado en caja", fmtCafe(c.ventas_efectivo))}
+  ${c.efectivo_contado !== null && c.efectivo_contado !== undefined
+    ? row("Efectivo contado físicamente", fmtCafe(c.efectivo_contado), "#111", true) +
+      `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"};margin-top:4px;font-weight:900;font-size:15px;color:${diferencia >= 0 ? "#065f46" : "#991b1b"};">
+         <span>DIFERENCIA</span><span>${diferencia >= 0 ? "+" : ""}${fmtCafe(diferencia)}</span>
+       </div>`
+    : `<div style="color:#aaa;font-size:12px;padding:6px 0;">Sin conteo físico registrado</div>`}
+
+  ${c.notas ? `<div class="sec-title">Notas</div><p style="color:#555;font-size:13px;">${c.notas}</p>` : ""}
+
+  <div style="display:flex;justify-content:space-around;margin-top:14px;">
+    <div style="text-align:center;"><div class="sig"></div><div>Responsable</div><div style="font-size:11px;color:#888;">${c.usuario || ""}</div></div>
+    <div style="text-align:center;"><div class="sig"></div><div>Supervisado por</div></div>
+  </div>
+
+  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>
+  Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
+  <script>setTimeout(()=>window.print(),400);<\/script>
+  </body></html>`;
+
+  const w = window.open("", "_blank", "width=660,height=680");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+function CafeteriaCuadre({ usuario }: { usuario: any }) {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const [historial, setHistorial] = useState<any[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [fetching, setFetching]   = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [preview, setPreview]     = useState<any>(null);
+  const [fechaSel, setFechaSel]   = useState(hoy);
+  const [efectContado, setEfectContado] = useState("");
+  const [notas, setNotas]         = useState("");
+
+  const cargarHistorial = useCallback(async () => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API}/cafeteria/cuadre`);
+      const d = await r.json();
+      setHistorial(Array.isArray(d) ? d : []);
+    } catch { setHistorial([]); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { cargarHistorial(); }, [cargarHistorial]);
+
+  const generarPreview = async (fecha: string) => {
+    setFetching(true);
+    setPreview(null);
+    try {
+      const r = await fetch(`${API}/cafeteria/cuadre/auto?fecha=${fecha}`);
+      const d = await r.json();
+      setPreview(d);
+    } catch { alert("Error al calcular ventas del día"); }
+    setFetching(false);
+  };
+
+  const guardar = async () => {
+    if (!preview) return;
+    setSaving(true);
+    try {
+      const diferencia = efectContado !== ""
+        ? Number(efectContado) - Number(preview.ventas_efectivo)
+        : 0;
+
+      const res = await fetch(`${API}/cafeteria/cuadre`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          fecha:                preview.fecha,
+          usuario:              usuario?.nombre || "Sistema",
+          ventas_efectivo:      preview.ventas_efectivo,
+          ventas_tarjeta:       preview.ventas_tarjeta,
+          ventas_transferencia: preview.ventas_transferencia,
+          ventas_total:         preview.ventas_total,
+          transacciones_count:  preview.transacciones_count,
+          efectivo_contado:     efectContado !== "" ? Number(efectContado) : null,
+          diferencia,
+          notas:                notas || null,
+        }),
+      });
+      const data = await res.json();
+      if (data.error) return alert("Error: " + data.error);
+      setPreview(null);
+      setEfectContado("");
+      setNotas("");
+      await cargarHistorial();
+    } catch { alert("Error al guardar el cuadre"); }
+    setSaving(false);
+  };
+
+  const diferencia = preview && efectContado !== ""
+    ? Number(efectContado) - Number(preview.ventas_efectivo) : null;
+
+  return (
+    <div style={{ maxWidth: 860 }}>
+      {/* Panel de generación */}
+      <div style={{ ...card, border: "2px solid #d97706", marginBottom: 20 }}>
+        <h3 style={{ ...cardTitle, color: "#92400e" }}>☕ Cuadre de Cafetería</h3>
+
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 160 }}>
+            <label style={label}>Fecha del cuadre</label>
+            <input type="date" value={fechaSel}
+              onChange={e => { setFechaSel(e.target.value); setPreview(null); }}
+              style={{ ...input, marginBottom: 0 }} />
+          </div>
+          <button onClick={() => generarPreview(fechaSel)} disabled={fetching}
+            style={{ padding: "12px 22px", background: "#d97706", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14, minWidth: 180 }}>
+            {fetching ? "⏳ Calculando..." : "⚡ Calcular ventas del día"}
+          </button>
+        </div>
+
+        {preview && (
+          <div style={{ marginTop: 18 }}>
+            {/* Banner */}
+            <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#92400e" }}>
+              ☕ <b>{preview.transacciones_count} transacción{preview.transacciones_count !== 1 ? "es" : ""}</b> registradas el {preview.fecha}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* Ventas por método */}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: "#374151", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8, borderBottom: "2px solid #fde68a", paddingBottom: 4 }}>
+                  📥 Ventas por método
+                </div>
+                {[
+                  ["💵 Efectivo", fmtCafe(preview.ventas_efectivo)],
+                  ...(Number(preview.ventas_tarjeta || 0) > 0 ? [["💳 Tarjeta", fmtCafe(preview.ventas_tarjeta)]] : []),
+                  ...(Number(preview.ventas_transferencia || 0) > 0 ? [["🏦 Transferencia", fmtCafe(preview.ventas_transferencia)]] : []),
+                ].map(([lbl, val]) => (
+                  <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                    <span style={{ color: "#555" }}>{lbl}</span><span style={{ fontWeight: 600 }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "2px solid #d97706", marginTop: 4, fontWeight: 800, fontSize: 14 }}>
+                  <span>TOTAL</span><span>{fmtCafe(preview.ventas_total)}</span>
+                </div>
+              </div>
+
+              {/* Cuadre efectivo */}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 12, color: "#374151", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8, borderBottom: "2px solid #fde68a", paddingBottom: 4 }}>
+                  ⚖️ Cuadre de efectivo
+                </div>
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                  <span style={{ color: "#555" }}>Efectivo esperado</span>
+                  <span style={{ fontWeight: 700, color: "#10b981" }}>{fmtCafe(preview.ventas_efectivo)}</span>
+                </div>
+
+                <div style={{ marginTop: 12 }}>
+                  <label style={{ ...label, fontSize: 12 }}>💰 Efectivo contado físicamente (opcional)</label>
+                  <input type="number" value={efectContado} onChange={e => setEfectContado(e.target.value)}
+                    placeholder="Deja vacío si no contaste"
+                    style={{ ...input, marginBottom: 0, fontSize: 14 }} />
+                </div>
+                {diferencia !== null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: `2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"}`, marginTop: 8, fontWeight: 800, fontSize: 14, color: diferencia >= 0 ? "#065f46" : "#991b1b" }}>
+                    <span>DIFERENCIA</span>
+                    <span>{diferencia >= 0 ? "+" : ""}{fmtCafe(diferencia)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notas */}
+            <div style={{ marginTop: 12 }}>
+              <label style={{ ...label, fontSize: 12 }}>📝 Notas (opcional)</label>
+              <textarea value={notas} onChange={e => setNotas(e.target.value)}
+                placeholder="Observaciones, incidencias..."
+                style={{ ...input, height: 54, resize: "vertical" as any, marginBottom: 0, fontSize: 13 }} />
+            </div>
+
+            {/* Botones */}
+            <div style={{ display: "flex", gap: 10, marginTop: 14 }}>
+              <button onClick={guardar} disabled={saving}
+                style={{ flex: 2, padding: "12px", background: "#10b981", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                {saving ? "Guardando..." : "💾 Guardar cuadre"}
+              </button>
+              <button onClick={() => { setPreview(null); setEfectContado(""); setNotas(""); }}
+                style={{ flex: 1, padding: "12px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>
+                ✕ Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Historial */}
+      <div style={card}>
+        <h3 style={cardTitle}>📋 Historial de Cuadres Cafetería</h3>
+        {loading ? (
+          <p style={{ color: "#888", textAlign: "center", padding: 20 }}>Cargando...</p>
+        ) : historial.length === 0 ? (
+          <p style={{ color: "#888", textAlign: "center", padding: 20 }}>Sin cuadres guardados aún.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  {["Fecha", "Responsable", "Trans.", "Efectivo", "Tarjeta+Transf.", "Total", "Ef. Contado", "Diferencia", ""].map(h => (
+                    <th key={h} style={{ textAlign: "left", padding: "10px 12px", background: "#fef9c3", fontSize: 12, fontWeight: 700, borderBottom: "2px solid #fde68a" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {historial.map((c: any) => {
+                  const otros = Number(c.ventas_tarjeta || 0) + Number(c.ventas_transferencia || 0);
+                  return (
+                    <tr key={c.id}>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>{fmtFechaCafe(c.fecha)}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{c.usuario}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13, textAlign: "center" }}>{c.transacciones_count ?? "—"}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{fmtCafe(c.ventas_efectivo)}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{fmtCafe(otros)}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>{fmtCafe(c.ventas_total)}</td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                        {c.efectivo_contado !== null && c.efectivo_contado !== undefined ? fmtCafe(c.efectivo_contado) : <span style={{ color: "#aaa" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700, color: Number(c.diferencia) === 0 ? "#6b7280" : Number(c.diferencia) > 0 ? "#10b981" : "#ef4444" }}>
+                        {c.efectivo_contado !== null && c.efectivo_contado !== undefined
+                          ? (Number(c.diferencia) >= 0 ? "+" : "") + fmtCafe(c.diferencia)
+                          : <span style={{ color: "#aaa", fontSize: 11 }}>sin conteo</span>}
+                      </td>
+                      <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0" }}>
+                        <button onClick={() => imprimirCuadreCafe(c)}
+                          style={{ padding: "5px 10px", background: "#fef9c3", color: "#92400e", border: "1px solid #fde68a", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                          🖨️ Imprimir
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
   );
 }

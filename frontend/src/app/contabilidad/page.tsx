@@ -224,10 +224,8 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
 
   ${section("Saldo Inicial", row("Efectivo inicio del día", fmt(c.efectivo_inicial), "#111", true))}
 
-  ${section("Ingresos del Día",
-    row("Ventas taller (efectivo)", fmt(Number(c.ventas_efectivo || 0) - Number(c.cafe_efectivo || 0))) +
-    row("Ventas cafetería (efectivo)", fmt(c.cafe_efectivo || 0)) +
-    row("Total cafetería (todos los métodos)", fmt(c.cafe_total || 0)) +
+  ${section("Ventas del Taller",
+    row("Ventas en efectivo", fmt(c.ventas_efectivo || 0)) +
     row("Ventas con tarjeta", fmt(c.ventas_tarjeta || 0)) +
     row("Ventas por transferencia", fmt(c.ventas_transferencia || 0)) +
     (Number(c.ventas_cheque || 0) > 0 ? row("Ventas con cheque", fmt(c.ventas_cheque || 0)) : "") +
@@ -337,8 +335,6 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
           ventas_transferencia: preview.ventas_transferencia,
           ventas_cheque:        preview.ventas_cheque || 0,
           ventas_credito:       preview.ventas_credito || 0,
-          cafe_efectivo:        preview.cafe_efectivo || 0,
-          cafe_total:           preview.cafe_total || 0,
           facturas_count:       preview.facturas_count || 0,
           tipo:                 "AUTO",
           efectivo_contado:     efectContado !== "" ? Number(efectContado) : null,
@@ -401,16 +397,15 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
           <div style={{ marginTop: 20 }}>
             {/* Banner info */}
             <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#166534" }}>
-              ✅ <b>Datos calculados automáticamente</b> — {preview.facturas_count} factura{preview.facturas_count !== 1 ? "s" : ""} del taller · Cafetería: {fmt(preview.cafe_total || 0)} · Caja chica egresos: {fmt(preview.gastos || 0)}
+              ✅ <b>Datos calculados automáticamente</b> — {preview.facturas_count} factura{preview.facturas_count !== 1 ? "s" : ""} del taller · Caja chica egresos: {fmt(preview.gastos || 0)}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
               {/* Columna izquierda: ingresos */}
               <div>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>📥 Ingresos del día</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>📥 Ventas del taller</div>
                 {[
-                  ["💵 Efectivo taller", fmt(Number(preview.ventas_efectivo||0) - Number(preview.cafe_efectivo||0))],
-                  ["☕ Efectivo cafetería", fmt(preview.cafe_efectivo || 0)],
+                  ["💵 Efectivo", fmt(preview.ventas_efectivo || 0)],
                   ...(Number(preview.ventas_tarjeta||0)>0 ? [["💳 Tarjeta", fmt(preview.ventas_tarjeta)]] : []),
                   ...(Number(preview.ventas_transferencia||0)>0 ? [["🏦 Transferencia", fmt(preview.ventas_transferencia)]] : []),
                   ...(Number(preview.ventas_cheque||0)>0 ? [["🔖 Cheque", fmt(preview.ventas_cheque)]] : []),

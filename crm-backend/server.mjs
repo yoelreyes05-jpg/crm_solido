@@ -490,6 +490,99 @@ app.post("/cafeteria/venta", async (req, res) => {
 });
 
 // =====================================================
+// ☕ CUADRE DE CAFETERÍA
+// =====================================================
+
+// GET /cafeteria/cuadre/auto?fecha=YYYY-MM-DD — calcula ventas del día
+app.get("/cafeteria/cuadre/auto", async (req, res) => {
+  try {
+    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
+    const desde = `${fecha}T00:00:00`;
+    const hasta  = `${fecha}T23:59:59`;
+
+    const { data: ventas } = await supabase
+      .from("cafeteria_ventas")
+      .select("total, metodo_pago")
+      .gte("created_at", desde)
+      .lte("created_at", hasta);
+
+    const vtas = ventas || [];
+    const ventas_efectivo      = vtas.filter(v => (v.metodo_pago || "EFECTIVO") === "EFECTIVO").reduce((a, v) => a + Number(v.total), 0);
+    const ventas_tarjeta       = vtas.filter(v => v.metodo_pago === "TARJETA").reduce((a, v) => a + Number(v.total), 0);
+    const ventas_transferencia = vtas.filter(v => v.metodo_pago === "TRANSFERENCIA").reduce((a, v) => a + Number(v.total), 0);
+    const ventas_total         = vtas.reduce((a, v) => a + Number(v.total), 0);
+
+    res.json({
+      fecha,
+      transacciones_count: vtas.length,
+      ventas_efectivo,
+      ventas_tarjeta,
+      ventas_transferencia,
+      ventas_total,
+      por_metodo: [
+        { metodo: "EFECTIVO",      total: ventas_efectivo },
+        { metodo: "TARJETA",       total: ventas_tarjeta },
+        { metodo: "TRANSFERENCIA", total: ventas_transferencia },
+      ].filter(m => m.total > 0),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /cafeteria/cuadre — historial de cuadres de cafetería
+app.get("/cafeteria/cuadre", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("cafeteria_cuadre")
+      .select("*")
+      .order("fecha", { ascending: false })
+      .limit(60);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /cafeteria/cuadre — guardar cuadre de cafetería
+app.post("/cafeteria/cuadre", async (req, res) => {
+  try {
+    const {
+      fecha, usuario,
+      ventas_efectivo, ventas_tarjeta, ventas_transferencia, ventas_total,
+      transacciones_count, efectivo_contado, diferencia, notas
+    } = req.body;
+
+    if (!fecha) return res.status(400).json({ error: "La fecha es requerida" });
+
+    const { data, error } = await supabase
+      .from("cafeteria_cuadre")
+      .insert([{
+        fecha,
+        usuario:              usuario || "Sistema",
+        ventas_efectivo:      Number(ventas_efectivo      || 0),
+        ventas_tarjeta:       Number(ventas_tarjeta       || 0),
+        ventas_transferencia: Number(ventas_transferencia || 0),
+        ventas_total:         Number(ventas_total         || 0),
+        transacciones_count:  Number(transacciones_count  || 0),
+        efectivo_contado:     (efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "")
+                                ? Number(efectivo_contado) : null,
+        diferencia:           Number(diferencia || 0),
+        notas:                notas || null,
+        creado_en:            new Date().toISOString()
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
 // 🔬 DIAGNÓSTICOS
 // =====================================================
 app.get("/diagnosticos", async (req, res) => {
@@ -919,53 +1012,51 @@ app.get("/api/contabilidad/cuadre", async (req, res) => {
 app.post("/api/contabilidad/cuadre", async (req, res) => {
   try {
     const {
-      fecha,
-      efectivo_inicial,
-      efectivo_final,
-      ventas_efectivo,
-      ventas_tarjeta,
-      ventas_transferencia,
-      ventas_cheque,
-      ventas_credito,
-      cafe_efectivo,
-      cafe_total,
-      facturas_count,
-      tipo,
-      efectivo_contado,
-      notas,
-      gastos,
-      diferencia,
-      usuario
+      fecha, efectivo_inicial, efectivo_final,
+      ventas_efectivo, ventas_tarjeta, ventas_transferencia,
+      ventas_cheque, ventas_credito,
+      facturas_count, tipo, efectivo_contado, notas,
+      gastos, diferencia, usuario
     } = req.body;
 
     if (!fecha) return res.status(400).json({ error: "La fecha es requerida" });
 
-    const { data, error } = await supabase
-      .from("cuadre_caja")
-      .insert([{
-        fecha,
-        efectivo_inicial:     Number(efectivo_inicial     || 0),
-        efectivo_final:       Number(efectivo_final       || 0),
-        ventas_efectivo:      Number(ventas_efectivo      || 0),
-        ventas_tarjeta:       Number(ventas_tarjeta       || 0),
-        ventas_transferencia: Number(ventas_transferencia || 0),
-        ventas_cheque:        Number(ventas_cheque        || 0),
-        ventas_credito:       Number(ventas_credito       || 0),
-        cafe_efectivo:        Number(cafe_efectivo        || 0),
-        cafe_total:           Number(cafe_total           || 0),
-        facturas_count:       Number(facturas_count       || 0),
-        tipo:                 tipo || "AUTO",
-        efectivo_contado:     efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "" ? Number(efectivo_contado) : null,
-        notas:                notas || null,
-        gastos:               Number(gastos               || 0),
-        diferencia:           Number(diferencia           || 0),
-        usuario:              usuario || "Sistema",
-        creado_en:            new Date().toISOString()
-      }])
-      .select()
-      .single();
+    const basePayload = {
+      fecha,
+      efectivo_inicial:     Number(efectivo_inicial     || 0),
+      efectivo_final:       Number(efectivo_final       || 0),
+      ventas_efectivo:      Number(ventas_efectivo      || 0),
+      ventas_tarjeta:       Number(ventas_tarjeta       || 0),
+      ventas_transferencia: Number(ventas_transferencia || 0),
+      gastos:               Number(gastos               || 0),
+      diferencia:           Number(diferencia           || 0),
+      usuario:              usuario || "Sistema",
+      creado_en:            new Date().toISOString()
+    };
 
-    if (error) return res.status(500).json({ error: error.message });
+    // Campos extendidos (requieren migración v5)
+    const extendedPayload = {
+      ...basePayload,
+      ventas_cheque:    Number(ventas_cheque  || 0),
+      ventas_credito:   Number(ventas_credito || 0),
+      facturas_count:   Number(facturas_count || 0),
+      tipo:             tipo || "AUTO",
+      efectivo_contado: (efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "")
+                          ? Number(efectivo_contado) : null,
+      notas:            notas || null,
+    };
+
+    // Intentar con campos extendidos; si falla (migración no corrida), usar base
+    let { data, error } = await supabase
+      .from("cuadre_caja").insert([extendedPayload]).select().single();
+
+    if (error) {
+      const fallback = await supabase
+        .from("cuadre_caja").insert([basePayload]).select().single();
+      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
+      return res.json(fallback.data);
+    }
+
     res.json(data);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -1924,20 +2015,8 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .filter(g => g.tipo === "EGRESO")
       .reduce((a, g) => a + Number(g.monto), 0);
 
-    // Ventas cafetería del día
-    const { data: ventasCafe } = await supabase
-      .from("cafeteria_ventas")
-      .select("total, metodo_pago")
-      .gte("created_at", desde)
-      .lte("created_at", hasta);
-
-    const cafe_efectivo = (ventasCafe || [])
-      .filter(v => (v.metodo_pago || "EFECTIVO") === "EFECTIVO")
-      .reduce((a, v) => a + Number(v.total), 0);
-    const cafe_total = (ventasCafe || []).reduce((a, v) => a + Number(v.total), 0);
-
-    // Efectivo total (taller efectivo + cafetería efectivo)
-    const ventas_efectivo = ventas_efectivo_taller + cafe_efectivo;
+    // Efectivo del taller solamente (cafetería tiene su propio cuadre)
+    const ventas_efectivo = ventas_efectivo_taller;
 
     // Saldo inicial: efectivo_final del último cuadre anterior a hoy
     const { data: ultimoCuadre } = await supabase
@@ -1959,15 +2038,12 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       saldo_esperado,
       facturas_count: facs.length,
       ventas_efectivo,
-      ventas_efectivo_taller,
       ventas_tarjeta,
       ventas_transferencia,
       ventas_cheque,
       ventas_credito,
-      ventas_total: ventas_total_taller + cafe_total,
+      ventas_total: ventas_total_taller,
       gastos,
-      cafe_efectivo,
-      cafe_total,
       por_metodo: [
         { metodo: "EFECTIVO",      total: ventas_efectivo },
         { metodo: "TARJETA",       total: ventas_tarjeta },
