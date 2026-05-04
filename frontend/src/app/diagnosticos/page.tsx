@@ -302,7 +302,7 @@ export default function DiagnosticosPage() {
     if (!cotForm.mano_obra && !cotForm.repuestos) return alert("Ingresa al menos un monto");
     const totalCalculado = Number(cotForm.mano_obra || 0) + Number(cotForm.repuestos || 0);
     try {
-      const res = await fetch(`${API}/cotizaciones`, {
+      const res = await fetch(`${API}/cotizaciones/diagnostico`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({

@@ -180,7 +180,7 @@ export default function ContabilidadPage() {
 // Imprimir un cuadre de caja
 function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
   const EMPRESA = { nombre: "SÓLIDO AUTO SERVICIO SRL", tel: "809-712-2027", dir: "Santo Domingo, R.D." };
-  const saldoEsperado = Number(c.efectivo_inicial) + Number(c.ventas_efectivo) - Number(c.gastos);
+  const saldoEsperado = Number(c.ventas_efectivo) - Number(c.gastos);
   const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
     ? Number(c.efectivo_contado) - saldoEsperado
     : Number(c.diferencia || 0);
@@ -222,7 +222,6 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
     </div>
   </div>
 
-  ${section("Saldo Inicial", row("Efectivo inicio del día", fmt(c.efectivo_inicial), "#111", true))}
 
   ${section("Ventas del Taller",
     row("Ventas en efectivo", fmt(c.ventas_efectivo || 0)) +
@@ -239,8 +238,7 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
   ${section("Egresos del Día", row("Gastos caja chica", fmt(c.gastos || 0), "#ef4444", true))}
 
   ${section("Cuadre Final",
-    row("Saldo inicial", fmt(c.efectivo_inicial)) +
-    row("+ Ventas efectivo del día", fmt(c.ventas_efectivo || 0)) +
+    row("Ventas efectivo del día", fmt(c.ventas_efectivo || 0)) +
     row("− Gastos del día", fmt(c.gastos || 0)) +
     `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:4px;">
        <span style="font-weight:800;">SALDO ESPERADO EN CAJA</span>
@@ -290,6 +288,7 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
   const [fechaSel, setFechaSel]   = useState(hoy);
   const [efectContado, setEfectContado] = useState("");
   const [notas, setNotas]         = useState("");
+  const [filtrFecha, setFiltrFecha] = useState("");
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -319,7 +318,7 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
     if (!preview) return;
     setSaving(true);
     try {
-      const saldoEsperado = Number(preview.efectivo_inicial) + Number(preview.ventas_efectivo) - Number(preview.gastos);
+      const saldoEsperado = Number(preview.ventas_efectivo) - Number(preview.gastos);
       const efectivo_final = efectContado !== "" ? Number(efectContado) : saldoEsperado;
       const diferencia = efectContado !== "" ? Number(efectContado) - saldoEsperado : 0;
 
@@ -356,7 +355,7 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
   };
 
   const saldoEsperado = preview
-    ? Number(preview.efectivo_inicial) + Number(preview.ventas_efectivo) - Number(preview.gastos)
+    ? Number(preview.ventas_efectivo) - Number(preview.gastos)
     : 0;
   const diferencia = efectContado !== "" ? Number(efectContado) - saldoEsperado : null;
 
@@ -365,7 +364,7 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
       {/* KPIs del último cuadre */}
       {historial.length > 0 && (() => {
         const ult = historial[0];
-        const saldoUlt = Number(ult.efectivo_inicial) + Number(ult.ventas_efectivo) - Number(ult.gastos);
+        const saldoUlt = Number(ult.ventas_efectivo) - Number(ult.gastos);
         return (
           <div style={s.kpiRow}>
             <KpiCard label="Último cuadre" value={fmtDate(ult.fecha)} icon="📅" color="#6366f1" />
@@ -424,8 +423,7 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>⚖️ Cuadre efectivo</div>
                 {[
-                  ["Saldo anterior (ef. inicial)", fmt(preview.efectivo_inicial)],
-                  ["+ Ventas en efectivo hoy", fmt(preview.ventas_efectivo)],
+                  ["Ventas en efectivo hoy", fmt(preview.ventas_efectivo)],
                   ["− Gastos caja chica", fmt(preview.gastos)],
                 ].map(([lbl, val]) => (
                   <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
@@ -475,7 +473,21 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
 
       {/* HISTORIAL */}
       <div style={s.card}>
-        <h3 style={s.cardTitle}>📋 Historial de Cuadres</h3>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 10 }}>
+          <h3 style={{ ...s.cardTitle, marginBottom: 0 }}>📋 Historial de Cuadres</h3>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label style={{ fontSize: 13, fontWeight: 600, color: "#555", whiteSpace: "nowrap" }}>📅 Filtrar por fecha:</label>
+            <input type="date" value={filtrFecha}
+              onChange={e => setFiltrFecha(e.target.value)}
+              style={{ ...s.input, marginBottom: 0, width: 160, fontSize: 13 }} />
+            {filtrFecha && (
+              <button onClick={() => setFiltrFecha("")}
+                style={{ padding: "8px 12px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#555" }}>
+                ✕ Limpiar
+              </button>
+            )}
+          </div>
+        </div>
         {loading ? <p style={s.empty}>Cargando...</p> : historial.length === 0 ? (
           <p style={s.empty}>Sin cuadres registrados aún.</p>
         ) : (
@@ -483,13 +495,13 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
             <table style={s.table}>
               <thead>
                 <tr>
-                  {["Fecha", "Responsable", "Facturas", "Ef. Inicial", "Ventas Total", "Efectivo", "Tarjeta+Transf.", "Gastos", "Diferencia", ""].map(h => (
+                  {["Fecha", "Responsable", "Facturas", "Ventas Total", "Efectivo", "Tarjeta+Transf.", "Gastos", "Diferencia", ""].map(h => (
                     <th key={h} style={s.th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {historial.map((c: Cuadre) => {
+                {historial.filter((c: Cuadre) => !filtrFecha || c.fecha === filtrFecha).map((c: Cuadre) => {
                   const vTot = Number(c.ventas_efectivo||0)+Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
                   const vOtros = Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
                   return (
@@ -497,7 +509,6 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
                       <td style={s.td}><b>{fmtDate(c.fecha)}</b>{c.tipo === "AUTO" && <span style={{ marginLeft: 4, fontSize: 10, background: "#dcfce7", color: "#16a34a", padding: "1px 6px", borderRadius: 99, fontWeight: 700 }}>AUTO</span>}</td>
                       <td style={s.td}>{c.usuario}</td>
                       <td style={{ ...s.td, textAlign: "center" }}>{c.facturas_count ?? "—"}</td>
-                      <td style={s.td}>{fmt(c.efectivo_inicial)}</td>
                       <td style={{ ...s.td, fontWeight: 700 }}>{fmt(vTot)}</td>
                       <td style={s.td}>{fmt(c.ventas_efectivo)}</td>
                       <td style={s.td}>{fmt(vOtros)}</td>

@@ -637,9 +637,9 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 });
 
 // =====================================================
-// 💰 COTIZACIONES
+// 💰 COTIZACIONES (internas de diagnóstico)
 // =====================================================
-app.post("/cotizaciones", async (req, res) => {
+app.post("/cotizaciones/diagnostico", async (req, res) => {
   const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
 
   const totalCalculado = Number(mano_obra || 0) + Number(repuestos || 0);
