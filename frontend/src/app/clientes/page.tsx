@@ -91,7 +91,19 @@ export default function Clientes() {
                   <tr key={c.id}>
                     <td style={td}>{c.id}</td>
                     <td style={{ ...td, fontWeight: 600 }}>{c.nombre}</td>
-                    <td style={td}>{c.telefono || "—"}</td>
+                    <td style={td}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span>{c.telefono || "—"}</span>
+                        {c.telefono && (
+                          <a
+                            href={`https://wa.me/${c.telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${c.nombre}, le contactamos desde Sólido Auto Servicio. `)}`}
+                            target="_blank" rel="noreferrer"
+                            style={{ display:"inline-flex", alignItems:"center", gap:3, padding:"3px 8px", background:"#25d366", color:"#fff", borderRadius:6, fontSize:11, fontWeight:700, textDecoration:"none", whiteSpace:"nowrap" }}>
+                            💬 WA
+                          </a>
+                        )}
+                      </div>
+                    </td>
                     <td style={td}>{c.email || "—"}</td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6 }}>

@@ -192,6 +192,16 @@ function generarHTML(
 
   <button class="btn-imprimir" onclick="imprimirAhora()">🖨️ Imprimir / Guardar PDF</button>
 
+  ${esCotizacion ? `
+  <div style="margin:24px 0 8px;padding:16px 20px;background:#f0fdf4;border:2px solid #25d366;border-radius:10px;text-align:center;">
+    <p style="font-size:13px;color:#374151;margin-bottom:12px;">¿De acuerdo con esta cotización? Apruébela directamente por WhatsApp:</p>
+    <a href="https://wa.me/${EMPRESA.telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola, apruebo la cotización *${factura.ncf || ""}* por un total de *RD$ ${total.toFixed(2)}*. Pueden proceder con el trabajo. Gracias.`)}"
+      style="display:inline-block;background:#25d366;color:#fff;padding:12px 28px;border-radius:8px;font-weight:900;font-size:14px;text-decoration:none;">
+      💬 Aprobar por WhatsApp
+    </a>
+    <p style="font-size:11px;color:#888;margin-top:8px;">Al hacer clic se abrirá WhatsApp con el mensaje listo para enviar</p>
+  </div>` : ""}
+
   <div class="footer">
     <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
     ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}

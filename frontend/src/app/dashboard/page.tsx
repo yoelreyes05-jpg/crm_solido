@@ -180,6 +180,18 @@ export default function Dashboard() {
                                     {new Date(orden.created_at).toLocaleDateString("es-DO")}
                                   </div>
                                 )}
+                                {fase.key === "LISTO" && orden.cliente_telefono && (
+                                  <a
+                                    href={`https://wa.me/${orden.cliente_telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre} 👋, le informamos que su vehículo *${orden.vehiculo_info}* ya está listo para ser retirado en *Sólido Auto Servicio*. Nuestro horario es de 8am a 6pm. ¡Le esperamos!`)}`}
+                                    target="_blank" rel="noreferrer"
+                                    onClick={e => e.stopPropagation()}
+                                    style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:4, marginTop:7, padding:"5px 0", background:"#25d366", color:"#fff", borderRadius:6, fontSize:11, fontWeight:700, textDecoration:"none" }}>
+                                    💬 Notificar cliente
+                                  </a>
+                                )}
+                                {fase.key === "LISTO" && !orden.cliente_telefono && (
+                                  <div style={{ marginTop:6, fontSize:10, color:"#f59e0b", textAlign:"center" }}>⚠️ Sin teléfono</div>
+                                )}
                               </div>
                             )}
                           </Draggable>

@@ -378,6 +378,21 @@ export default function ClienteApp() {
           cursor:pointer; box-shadow:0 4px 14px rgba(22,163,74,.25);
         }
 
+        .btn-camino {
+          display:block; width:100%; margin-top:18px; padding:16px;
+          background:linear-gradient(135deg,#14532d,#22c55e);
+          color:#fff; border:none; border-radius:14px;
+          font-family:'Syne',sans-serif; font-weight:800; font-size:16px;
+          letter-spacing:.5px; cursor:pointer; text-decoration:none;
+          text-align:center;
+          box-shadow:0 6px 24px rgba(34,197,94,.45);
+          animation: pulse-green 2s infinite;
+        }
+        @keyframes pulse-green {
+          0%,100% { box-shadow:0 6px 24px rgba(34,197,94,.45); }
+          50%      { box-shadow:0 8px 32px rgba(34,197,94,.75); }
+        }
+
         .diag-card {
           border-radius:18px; padding:18px; margin-bottom:10px;
           background:rgba(15,23,42,0.95); border:1px solid rgba(255,255,255,0.07);
@@ -726,6 +741,19 @@ export default function ClienteApp() {
                         );
                       })}
                     </div>
+
+                    {ultimaOrden.estado === "LISTO" && (
+                      <a
+                        href={`https://wa.me/18097122027?text=${encodeURIComponent(
+                          `Hola, soy el dueño del vehículo *${resultado.vehiculo.marca} ${resultado.vehiculo.modelo}* · Placa *${resultado.vehiculo.placa}*. Ya estoy en camino a buscarlo. Llegaré aproximadamente en 20 minutos. 🚗`
+                        )}`}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="btn-camino"
+                      >
+                        🚗 ¡Voy a buscarlo!
+                      </a>
+                    )}
                   </div>
                 )}
 

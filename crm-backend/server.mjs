@@ -111,16 +111,18 @@ app.get("/ordenes", async (req, res) => {
   try {
     const { data: ordenes } = await supabase.from("ordenes_trabajo").select("*").order("id", { ascending: false });
     if (!ordenes) return res.json([]);
-    const { data: clientes } = await supabase.from("clientes").select("id, nombre");
+    const { data: clientes } = await supabase.from("clientes").select("id, nombre, telefono");
     const { data: vehiculos } = await supabase.from("vehiculos").select("id, marca, modelo, placa");
     const fixed = ordenes.map(o => ({
       ...o,
       estado: o.estado || o.status || "RECIBIDO",
-      cliente_nombre: clientes?.find(c => c.id === o.cliente_id)?.nombre || "Sin cliente",
+      cliente_nombre:    clientes?.find(c => c.id === o.cliente_id)?.nombre    || "Sin cliente",
+      cliente_telefono:  clientes?.find(c => c.id === o.cliente_id)?.telefono  || "",
       vehiculo_info: (() => {
         const v = vehiculos?.find(v => v.id === o.vehiculo_id);
         return v ? `${v.marca} ${v.modelo} (${v.placa})` : "Sin vehículo";
-      })()
+      })(),
+      vehiculo_placa: vehiculos?.find(v => v.id === o.vehiculo_id)?.placa || "",
     }));
     res.json(fixed);
   } catch (err) {

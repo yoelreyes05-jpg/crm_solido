@@ -562,8 +562,26 @@ export default function DiagnosticosPage() {
                 </div>
               )}
 
+              {/* WhatsApp: compartir diagnóstico */}
+              {detalle.cliente?.telefono && (
+                <a
+                  href={`https://wa.me/${detalle.cliente.telefono.replace(/\D/g,"")}?text=${encodeURIComponent(
+                    `Hola ${detalle.cliente.nombre} 👋, le compartimos el diagnóstico de su vehículo *${detalle.vehiculo?.marca || ""} ${detalle.vehiculo?.modelo || ""} (${detalle.vehiculo?.placa || ""})* en *Sólido Auto Servicio*:\n\n` +
+                    (detalle.diag.fallas_identificadas ? `⚠️ *Fallas:* ${detalle.diag.fallas_identificadas}\n` : "") +
+                    (detalle.diag.inspeccion_mecanica ? `🔧 *Mecánica:* ${detalle.diag.inspeccion_mecanica}\n` : "") +
+                    (detalle.diag.mano_de_obra_detalle ? `🛠️ *Trabajos:* ${detalle.diag.mano_de_obra_detalle}\n` : "") +
+                    (detalle.diag.costo_estimado > 0 ? `\n💰 *Costo estimado:* RD$ ${Number(detalle.diag.costo_estimado).toLocaleString("es-DO", { minimumFractionDigits: 2 })}\n` : "") +
+                    (detalle.cotizacion?.tiempo_estimado ? `⏱️ *Tiempo estimado:* ${detalle.cotizacion.tiempo_estimado}\n` : "") +
+                    `\n¿Aprueba proceder? Responda *SÍ* para comenzar. ¡Gracias!`
+                  )}`}
+                  target="_blank" rel="noreferrer"
+                  style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:6, marginTop:12, padding:"10px 0", background:"#25d366", color:"#fff", borderRadius:8, fontWeight:700, fontSize:13, textDecoration:"none" }}>
+                  💬 Enviar diagnóstico por WhatsApp
+                </a>
+              )}
+
               {detalle.diag.estado !== "COMPLETADO" && detalle.diag.estado !== "FACTURADO" && (
-                <button onClick={completar} style={{ ...btnPrimary, marginTop: 16, background: "#10b981" }}>
+                <button onClick={completar} style={{ ...btnPrimary, marginTop: 12, background: "#10b981" }}>
                   ✅ Marcar como Completado
                 </button>
               )}
