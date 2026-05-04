@@ -9,6 +9,7 @@ const PERMISOS = {
   secretaria: [
     "/dashboard", "/clientes", "/vehiculos", "/ordenes",
     "/facturacion", "/mantenimiento", "/contabilidad",
+    "/historial-vehiculo", "/inteligencia",
   ],
   tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento"],
   almacen:   ["/inventario", "/suplidores", "/ventas"],

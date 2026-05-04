@@ -5,7 +5,7 @@ import { API_URL as API } from "@/config";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },
-  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación, contabilidad" },
+  { value: "secretaria", label: "💼 Secretaria",         desc: "Clientes, Vehículos, Órdenes, Facturación, inteligencia, contabilidad" },
   { value: "tecnico",    label: "🔧 Técnico",            desc: "Órdenes de trabajo y Diagnósticos" },
   { value: "almacen",    label: "📦 Almacén",            desc: "Inventario, Suplidores, Ventas" },
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },

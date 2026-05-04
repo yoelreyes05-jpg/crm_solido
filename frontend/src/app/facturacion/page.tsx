@@ -55,7 +55,7 @@ function generarHTML(
   }).join("");
 
   const banner = esCotizacion
-    ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN PREVENTIVA — Válida por 15 días</div>`
+    ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN — Válida por 15 días</div>`
     : factura.estado === "CANCELADA"
     ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
     : "";
@@ -128,7 +128,9 @@ function generarHTML(
     <div class="cab-doc">
       <div class="doc-tipo">${esCotizacion ? "Cotización" : "Factura"}</div>
       <div class="doc-num">
-        ${esCotizacion ? "PRO-FORMA" : "FAC-" + String(factura.id).padStart(5, "0")}
+        ${esCotizacion
+          ? (factura.ncf ? factura.ncf : "COT-?????")
+          : "FAC-" + String(factura.id).padStart(5, "0")}
       </div>
       <div class="doc-meta">
         <strong>Fecha:</strong> ${fecha}<br/>
@@ -193,7 +195,7 @@ function generarHTML(
   <div class="footer">
     <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
     ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}
-    <p class="dgii-note">Comprobante Fiscal válido para crédito ITBIS — República Dominicana</p>
+    ${!esCotizacion ? `<p class="dgii-note">Comprobante Fiscal válido para crédito ITBIS — República Dominicana</p>` : ""}
     <p class="dgii-note">${EMPRESA.email} · ${EMPRESA.direccion}</p>
   </div>
 

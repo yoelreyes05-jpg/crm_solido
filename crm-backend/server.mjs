@@ -2860,17 +2860,14 @@ app.get("/cotizaciones", async (req, res) => {
 
 app.post("/cotizaciones", async (req, res) => {
   try {
-    // Generar número secuencial COT-XXXXX
-    const { count } = await supabase.from("cotizaciones").select("id", { count: "exact", head: true });
-    const seq    = String((count || 0) + 1).padStart(5, "0");
-    const numero = `COT-${seq}`;
     const vencimiento = new Date(); vencimiento.setDate(vencimiento.getDate() + 15);
 
     const { cliente_id, cliente_nombre, cliente_rnc, vehiculo_id, vehiculo_info,
             items, subtotal, itbis, total, ncf_tipo, notas, created_by } = req.body;
 
+    // Insertar sin número primero para obtener el id SERIAL real
     const { data, error } = await supabase.from("cotizaciones").insert([{
-      numero, cliente_id: cliente_id || null, cliente_nombre, cliente_rnc,
+      cliente_id: cliente_id || null, cliente_nombre, cliente_rnc,
       vehiculo_id: vehiculo_id || null, vehiculo_info,
       items: items || [], subtotal, itbis, total,
       ncf_tipo: ncf_tipo || "B02",
@@ -2878,7 +2875,17 @@ app.post("/cotizaciones", async (req, res) => {
       estado: "PENDIENTE", notas, created_by,
     }]).select();
     if (error) return res.status(400).json({ error: error.message });
-    res.json(data[0]);
+
+    // Generar número basado en el id real para garantizar unicidad y secuencia correcta
+    const numero = `COT-${String(data[0].id).padStart(5, "0")}`;
+    const { data: updated, error: updErr } = await supabase
+      .from("cotizaciones")
+      .update({ numero })
+      .eq("id", data[0].id)
+      .select();
+    if (updErr) return res.status(400).json({ error: updErr.message });
+
+    res.json(updated[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
