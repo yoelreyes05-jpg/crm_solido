@@ -25,7 +25,8 @@ function generarHTML(
 
   const fecha = new Date(factura.created_at || Date.now()).toLocaleString("es-DO", {
     day: "2-digit", month: "2-digit", year: "numeric",
-    hour: "2-digit", minute: "2-digit"
+    hour: "2-digit", minute: "2-digit",
+    timeZone: "America/Santo_Domingo"
   });
 
   const ncfVence = factura.ncf_vence
@@ -192,8 +193,8 @@ function generarHTML(
   <div class="footer">
     <p>¡Gracias por confiar en <strong>${EMPRESA.nombre}</strong>! · ${EMPRESA.telefono}</p>
     ${esCotizacion ? "<p>Esta cotización tiene una validez de 15 días. Precios sujetos a cambios.</p>" : ""}
-    <p class="dgii-note">Documento fiscal emitido conforme a la Norma General 06-2018 de la DGII — República Dominicana</p>
-    <p class="dgii-note">Valide este comprobante en: <strong>www.dgii.gov.do</strong></p>
+    <p class="dgii-note">Comprobante Fiscal válido para crédito ITBIS — República Dominicana</p>
+    <p class="dgii-note">${EMPRESA.email} · ${EMPRESA.direccion}</p>
   </div>
 
   ${printScript}
@@ -274,27 +275,40 @@ export default function FacturaPage() {
   const [modalFac, setModalFac]         = useState<any>(null);
   const [modalMethod, setModalMethod]   = useState("EFECTIVO");
   const [modalCliente, setModalCliente] = useState("");
+  const [cotizaciones, setCotizaciones] = useState<any[]>([]);
+  const [busCot, setBusCot]             = useState("");
+  const [convirtiendo, setConvirtiendo] = useState<number | null>(null);
 
   // ── Carga inicial ────────────────────────────────────────────────────────
   const fetchData = async () => {
     try {
-      const [cRes, vRes, iRes, fRes, dRes] = await Promise.all([
+      const [cRes, vRes, iRes, fRes, dRes, cotRes] = await Promise.all([
         fetch(`${API}/clientes`),
         fetch(`${API}/vehiculos`),
         fetch(`${API}/inventario`),
         fetch(`${API}/facturas`),
-        fetch(`${API}/diagnosticos`)
+        fetch(`${API}/diagnosticos`),
+        fetch(`${API}/cotizaciones`),
       ]);
       setClientes(await cRes.json() || []);
       setVehiculos(await vRes.json() || []);
       setItems(await iRes.json() || []);
       setFacturas(await fRes.json() || []);
+      const cotData = await cotRes.json();
+      setCotizaciones(Array.isArray(cotData) ? cotData : []);
       const diags = await dRes.json() || [];
-
       setDiagnosticos(diags.filter((d: any) =>
         !["FACTURADO", "COMPLETADO"].includes(d.estado)
       ));
     } catch (err) { console.error(err); }
+  };
+
+  const recargarCotizaciones = async () => {
+    try {
+      const r = await fetch(`${API}/cotizaciones`);
+      const d = await r.json();
+      setCotizaciones(Array.isArray(d) ? d : []);
+    } catch { /* silent */ }
   };
 
   useEffect(() => { fetchData(); }, []);
@@ -458,22 +472,46 @@ export default function FacturaPage() {
   const rncEfectivo    = clienteSeleccionado?.rnc || rncManual || null;
   const nombreEfectivo = clienteSeleccionado?.nombre || razonSocial || "";
 
-  // ── Cotización (sin guardar en BD) ────────────────────────────────────────
-  const handleCotizacion = () => {
+  // ── Cotización — guarda en BD + imprime ──────────────────────────────────
+  const handleCotizacion = async () => {
     if (carrito.length === 0) return alert("Carrito vacío");
     if (NCF_REQUIERE_RNC.includes(ncfTipo) && !rncEfectivo) {
       return alert("Este tipo de NCF requiere el RNC/Cédula del cliente.");
     }
-    const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
-    const mockFac = {
-      subtotal, itbis, total,
-      metodo_pago: method,
-      vehiculo_info: veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "",
-      cliente_nombre: clienteSeleccionado?.nombre || "Consumidor Final",
-      cliente_rnc:    rncEfectivo,
-      created_at: new Date()
-    };
-    abrirImpresion(generarHTML(mockFac, carrito, clienteSeleccionado, true));
+    const veh = vehiculosFiltrados.find((v: any) => v.id === Number(vehiculoId));
+    const vehiculoInfo = veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : "";
+    try {
+      const res = await fetch(`${API}/cotizaciones`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          cliente_id:     clienteId ? Number(clienteId) : null,
+          cliente_nombre: nombreEfectivo || "Consumidor Final",
+          cliente_rnc:    rncEfectivo,
+          vehiculo_id:    vehiculoId ? Number(vehiculoId) : null,
+          vehiculo_info:  vehiculoInfo,
+          items: carrito.map(p => ({
+            tipo: p.tipo, descripcion: p.descripcion,
+            cantidad: p.cantidad, precio_unitario: p.precio_unitario,
+            itbis_aplica: p.itbis_aplica, inventario_id: p.inventario_id || null,
+          })),
+          subtotal, itbis, total,
+          ncf_tipo: ncfTipo,
+        }),
+      });
+      const cot = await res.json();
+      if (cot.error) return alert(cot.error);
+      recargarCotizaciones();
+      const mockFac = {
+        subtotal, itbis, total, metodo_pago: method,
+        vehiculo_info: vehiculoInfo,
+        cliente_nombre: nombreEfectivo || "Consumidor Final",
+        cliente_rnc: rncEfectivo,
+        created_at: new Date(),
+        ncf: cot.numero,
+      };
+      abrirImpresion(generarHTML(mockFac, carrito, clienteSeleccionado, true));
+    } catch { alert("Error al guardar la cotización"); }
   };
 
   // ── Generar factura real ──────────────────────────────────────────────────
@@ -579,15 +617,17 @@ export default function FacturaPage() {
     <div style={container}>
       <h1 style={title}>🧾 Facturación — {EMPRESA.nombre}</h1>
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
-        {["nueva", "historial"].map(t => (
-          <button key={t} onClick={() => setTab(t)}
+      <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
+        {[
+          { key: "nueva",       label: "➕ Nueva Factura / Cotización" },
+          { key: "historial",   label: `📋 Facturas (${facturas.length})` },
+          { key: "cotizaciones",label: `📄 Cotizaciones (${cotizaciones.length})` },
+        ].map(t => (
+          <button key={t.key} onClick={() => setTab(t.key)}
             style={{ ...tabBtn,
-              background: tab === t ? "#111827" : "#fff",
-              color:      tab === t ? "#fff"    : "#111" }}>
-            {t === "nueva"
-              ? "➕ Nueva Factura / Cotización"
-              : `📋 Historial (${facturas.length})`}
+              background: tab === t.key ? "#111827" : "#fff",
+              color:      tab === t.key ? "#fff"    : "#111" }}>
+            {t.label}
           </button>
         ))}
       </div>
@@ -1036,7 +1076,7 @@ export default function FacturaPage() {
                       <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(f.total).toFixed(2)}</td>
                       <td style={td}>{cancelada ? "🔴 CANCELADA" : "🟢 ACTIVA"}</td>
                       <td style={{ ...td, fontSize: 11 }}>
-                        {f.created_at ? new Date(f.created_at).toLocaleString("es-DO") : "—"}
+                        {f.created_at ? new Date(f.created_at).toLocaleString("es-DO", { day:"numeric", month:"numeric", year:"2-digit", hour:"2-digit", minute:"2-digit", timeZone:"America/Santo_Domingo" }) : "—"}
                       </td>
                       <td style={td}>
                         <div style={{ display: "flex", gap: 4 }}>
@@ -1056,6 +1096,108 @@ export default function FacturaPage() {
                       Sin facturas registradas
                     </td>
                   </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ COTIZACIONES ══════════════ */}
+      {tab === "cotizaciones" && (
+        <div style={card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+            <h2 style={cardTitle}>📄 Historial de Cotizaciones</h2>
+            <input placeholder="Buscar por cliente o número..."
+              value={busCot} onChange={e => setBusCot(e.target.value)}
+              style={{ ...input, width: 260, marginBottom: 0 }} />
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {["Número","Cliente","Vehículo","Total","Estado","Válida hasta","Fecha","Acciones"].map(h => (
+                    <th key={h} style={th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {cotizaciones.filter((c: any) =>
+                  !busCot ||
+                  c.numero?.toLowerCase().includes(busCot.toLowerCase()) ||
+                  c.cliente_nombre?.toLowerCase().includes(busCot.toLowerCase())
+                ).map((c: any) => {
+                  const vencida  = c.valida_hasta && new Date(c.valida_hasta) < new Date() && c.estado === "PENDIENTE";
+                  const estadoReal = vencida ? "VENCIDA" : c.estado;
+                  const colores: any = {
+                    PENDIENTE: { bg: "#fef3c7", color: "#d97706" },
+                    CONVERTIDA:{ bg: "#dcfce7", color: "#166534" },
+                    CANCELADA: { bg: "#fee2e2", color: "#dc2626" },
+                    VENCIDA:   { bg: "#f3f4f6", color: "#6b7280" },
+                  };
+                  const clr = colores[estadoReal] || colores.PENDIENTE;
+                  return (
+                    <tr key={c.id}>
+                      <td style={{ ...td, fontWeight: 800, fontFamily: "monospace" }}>{c.numero}</td>
+                      <td style={td}>{c.cliente_nombre || "Consumidor Final"}</td>
+                      <td style={{ ...td, fontSize: 12 }}>{c.vehiculo_info || "—"}</td>
+                      <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(c.total).toFixed(2)}</td>
+                      <td style={td}>
+                        <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: clr.bg, color: clr.color }}>{estadoReal}</span>
+                      </td>
+                      <td style={{ ...td, fontSize: 12 }}>
+                        {c.valida_hasta ? new Date(c.valida_hasta).toLocaleDateString("es-DO", { day:"numeric", month:"numeric", year:"2-digit" }) : "—"}
+                      </td>
+                      <td style={{ ...td, fontSize: 11 }}>
+                        {c.created_at ? new Date(c.created_at).toLocaleString("es-DO", { day:"numeric", month:"numeric", year:"2-digit", hour:"2-digit", minute:"2-digit", timeZone:"America/Santo_Domingo" }) : "—"}
+                      </td>
+                      <td style={td}>
+                        <div style={{ display: "flex", gap: 4 }}>
+                          {/* Reimprimir cotización */}
+                          <button
+                            onClick={() => {
+                              const mockFac = { subtotal: c.subtotal, itbis: c.itbis, total: c.total, metodo_pago: "—", vehiculo_info: c.vehiculo_info, cliente_nombre: c.cliente_nombre, cliente_rnc: c.cliente_rnc, created_at: c.created_at, ncf: c.numero };
+                              abrirImpresion(generarHTML(mockFac, c.items || [], {}, true));
+                            }}
+                            style={btnAcc("#64748b")}>🖨️</button>
+                          {/* Convertir a factura */}
+                          {estadoReal === "PENDIENTE" && (
+                            <button
+                              disabled={convirtiendo === c.id}
+                              onClick={async () => {
+                                if (!confirm(`¿Convertir ${c.numero} en factura?\nMétodo de pago: EFECTIVO`)) return;
+                                setConvirtiendo(c.id);
+                                try {
+                                  const r = await fetch(`${API}/cotizaciones/${c.id}/convertir`, {
+                                    method: "POST",
+                                    headers: { "Content-Type": "application/json" },
+                                    body: JSON.stringify({ metodo_pago: "EFECTIVO" }),
+                                  });
+                                  const d = await r.json();
+                                  if (d.error) return alert(d.error);
+                                  // Imprimir la nueva factura
+                                  const items = d.factura_items || c.items || [];
+                                  abrirImpresion(generarHTML(d.factura, items, {}, false));
+                                  fetchData();
+                                } catch { alert("Error al convertir"); }
+                                setConvirtiendo(null);
+                              }}
+                              style={btnAcc("#10b981")}>
+                              {convirtiendo === c.id ? "..." : "📋 Convertir"}
+                            </button>
+                          )}
+                          {estadoReal === "CONVERTIDA" && c.factura_id && (
+                            <span style={{ fontSize: 11, color: "#10b981", fontWeight: 700 }}>
+                              FAC-{String(c.factura_id).padStart(5,"0")}
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+                {cotizaciones.length === 0 && (
+                  <tr><td colSpan={8} style={{ textAlign: "center", color: "#888", padding: 32 }}>Sin cotizaciones registradas</td></tr>
                 )}
               </tbody>
             </table>

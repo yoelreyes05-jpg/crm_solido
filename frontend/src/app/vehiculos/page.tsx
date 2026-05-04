@@ -13,6 +13,9 @@ export default function Vehiculos() {
   const [form, setForm] = useState({
     cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: ""
   });
+  const [editVehiculo, setEditVehiculo] = useState<any>(null);
+  const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "" });
+  const [savingEdit, setSavingEdit] = useState(false);
 
   const getClientes = async () => {
     try { const r = await fetch(`${API}/clientes`); setClientes(await r.json()); } catch { setClientes([]); }
@@ -72,6 +75,28 @@ export default function Vehiculos() {
       if (data.error) return alert("Error: " + data.error);
       await getVehiculos();
     } catch { alert("Error al eliminar"); }
+  };
+
+  const abrirEdicion = (v: any) => {
+    setEditVehiculo(v);
+    setEditForm({ marca: v.marca, modelo: v.modelo, ano: String(v.ano), placa: v.placa, color: v.color || "", cliente_id: String(v.cliente_id || "") });
+  };
+
+  const guardarEdicion = async () => {
+    if (!editVehiculo) return;
+    setSavingEdit(true);
+    try {
+      const res = await fetch(`${API}/vehiculos/${editVehiculo.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...editForm, ano: Number(editForm.ano), cliente_id: Number(editForm.cliente_id), placa: editForm.placa.toUpperCase().trim() }),
+      });
+      const data = await res.json();
+      if (data.error) return alert("Error: " + data.error);
+      setEditVehiculo(null);
+      await getVehiculos();
+    } catch { alert("Error al actualizar"); }
+    setSavingEdit(false);
   };
 
   const modelosDisponibles = form.marca ? (catalogo[form.marca] || []) : [];
@@ -172,13 +197,16 @@ export default function Vehiculos() {
                     </td>
                     <td style={td}>{v.color || "—"}</td>
                     <td style={td}>
-                      <button
-                        onClick={() => eliminarVehiculo(v.id, `${v.marca} ${v.modelo} (${v.placa})`)}
-                        style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}
-                        title="Eliminar vehículo"
-                      >
-                        🗑️ Eliminar
-                      </button>
+                      <div style={{ display: "flex", gap: 6 }}>
+                        <button onClick={() => abrirEdicion(v)}
+                          style={{ padding: "6px 12px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                          ✏️ Editar
+                        </button>
+                        <button onClick={() => eliminarVehiculo(v.id, `${v.marca} ${v.modelo} (${v.placa})`)}
+                          style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                          🗑️ Borrar
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -187,6 +215,61 @@ export default function Vehiculos() {
           </div>
         </div>
       </div>
+
+      {/* ── MODAL EDITAR VEHÍCULO ── */}
+      {editVehiculo && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 480, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
+            <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 18 }}>✏️ Editar: {editVehiculo.marca} {editVehiculo.modelo} — {editVehiculo.placa}</h3>
+
+            <label style={label}>Cliente</label>
+            <select value={editForm.cliente_id} onChange={e => setEditForm(f => ({ ...f, cliente_id: e.target.value }))} style={input}>
+              <option value="">— Sin cliente —</option>
+              {clientes.map((c: any) => <option key={c.id} value={c.id}>{c.nombre}</option>)}
+            </select>
+
+            <label style={label}>Marca</label>
+            <select value={editForm.marca} onChange={e => setEditForm(f => ({ ...f, marca: e.target.value, modelo: "" }))} style={input}>
+              <option value="">— Seleccionar —</option>
+              {Object.keys(catalogo).map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            <label style={label}>Modelo</label>
+            <select value={editForm.modelo} onChange={e => setEditForm(f => ({ ...f, modelo: e.target.value }))} style={input}
+              disabled={!editForm.marca}>
+              <option value="">— Seleccionar —</option>
+              {(catalogo[editForm.marca] || []).map((m: string) => <option key={m} value={m}>{m}</option>)}
+            </select>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+              <div>
+                <label style={label}>Año</label>
+                <select value={editForm.ano} onChange={e => setEditForm(f => ({ ...f, ano: e.target.value }))} style={{ ...input, marginBottom: 0 }}>
+                  {Array.from({ length: 36 }, (_, i) => 2025 - i).map(y => <option key={y} value={y}>{y}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={label}>Color</label>
+                <input value={editForm.color} onChange={e => setEditForm(f => ({ ...f, color: e.target.value }))} style={{ ...input, marginBottom: 0 }} placeholder="Color" />
+              </div>
+            </div>
+
+            <label style={{ ...label, marginTop: 12 }}>Placa</label>
+            <input value={editForm.placa} onChange={e => setEditForm(f => ({ ...f, placa: e.target.value.toUpperCase() }))} style={input} />
+
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button onClick={guardarEdicion} disabled={savingEdit}
+                style={{ ...btnPrimary, flex: 2, background: "#2563eb" }}>
+                {savingEdit ? "Guardando..." : "💾 Guardar cambios"}
+              </button>
+              <button onClick={() => setEditVehiculo(null)}
+                style={{ ...btnPrimary, flex: 1, background: "#6b7280" }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

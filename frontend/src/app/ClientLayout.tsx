@@ -59,8 +59,8 @@ export default function ClientLayout({ children }) {
 
         {/* MENU */}
         {MENU.filter(item => {
-          if (!usuario) return false;
-          const perms = PERMISOS[usuario.rol] || [];
+          if (!usuario) return true; // mostrar todo mientras carga para evitar parpadeo
+          const perms = PERMISOS[usuario.rol as keyof typeof PERMISOS] || Object.values(PERMISOS).flat();
           return perms.includes(item.key);
         }).map(item => {
           const activo = pathname.startsWith(item.href);

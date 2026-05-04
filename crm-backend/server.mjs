@@ -93,6 +93,17 @@ app.delete("/vehiculos/:id", async (req, res) => {
   res.json({ ok: true });
 });
 
+app.patch("/vehiculos/:id", async (req, res) => {
+  const { id } = req.params;
+  const campos = ["cliente_id","marca","modelo","ano","placa","color"].reduce((o, k) => {
+    if (req.body[k] !== undefined) o[k] = req.body[k];
+    return o;
+  }, {});
+  const { data, error } = await supabase.from("vehiculos").update(campos).eq("id", id).select();
+  if (error) return res.json({ error: error.message });
+  res.json(data[0]);
+});
+
 // =====================================================
 // 🧾 ÓRDENES DE TRABAJO
 // =====================================================
@@ -206,10 +217,28 @@ app.get("/suplidores", async (req, res) => {
 });
 
 app.post("/suplidores", async (req, res) => {
-  const { name } = req.body;
-  const { data, error } = await supabase.from("suplidores").insert([{ name }]).select();
+  const { name, rnc, direccion, telefono, correo } = req.body;
+  const { data, error } = await supabase.from("suplidores").insert([{ name, rnc, direccion, telefono, correo }]).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
+});
+
+app.patch("/suplidores/:id", async (req, res) => {
+  const { id } = req.params;
+  const campos = ["name","rnc","direccion","telefono","correo"].reduce((o, k) => {
+    if (req.body[k] !== undefined) o[k] = req.body[k];
+    return o;
+  }, {});
+  const { data, error } = await supabase.from("suplidores").update(campos).eq("id", id).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete("/suplidores/:id", async (req, res) => {
+  const { id } = req.params;
+  const { error } = await supabase.from("suplidores").delete().eq("id", id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
 });
 
 // =====================================================
@@ -896,6 +925,14 @@ app.post("/api/contabilidad/cuadre", async (req, res) => {
       ventas_efectivo,
       ventas_tarjeta,
       ventas_transferencia,
+      ventas_cheque,
+      ventas_credito,
+      cafe_efectivo,
+      cafe_total,
+      facturas_count,
+      tipo,
+      efectivo_contado,
+      notas,
       gastos,
       diferencia,
       usuario
@@ -912,6 +949,14 @@ app.post("/api/contabilidad/cuadre", async (req, res) => {
         ventas_efectivo:      Number(ventas_efectivo      || 0),
         ventas_tarjeta:       Number(ventas_tarjeta       || 0),
         ventas_transferencia: Number(ventas_transferencia || 0),
+        ventas_cheque:        Number(ventas_cheque        || 0),
+        ventas_credito:       Number(ventas_credito       || 0),
+        cafe_efectivo:        Number(cafe_efectivo        || 0),
+        cafe_total:           Number(cafe_total           || 0),
+        facturas_count:       Number(facturas_count       || 0),
+        tipo:                 tipo || "AUTO",
+        efectivo_contado:     efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "" ? Number(efectivo_contado) : null,
+        notas:                notas || null,
         gastos:               Number(gastos               || 0),
         diferencia:           Number(diferencia           || 0),
         usuario:              usuario || "Sistema",
@@ -1856,7 +1901,7 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .lte("created_at", hasta);
 
     const facs = facturas || [];
-    const ventas_efectivo      = facs.filter(f => f.metodo_pago === "EFECTIVO")
+    const ventas_efectivo_taller = facs.filter(f => f.metodo_pago === "EFECTIVO")
       .reduce((a, f) => a + Number(f.total), 0);
     const ventas_tarjeta       = facs.filter(f => f.metodo_pago === "TARJETA")
       .reduce((a, f) => a + Number(f.total), 0);
@@ -1864,7 +1909,9 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .reduce((a, f) => a + Number(f.total), 0);
     const ventas_cheque        = facs.filter(f => f.metodo_pago === "CHEQUE")
       .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_total         = facs.reduce((a, f) => a + Number(f.total), 0);
+    const ventas_credito       = facs.filter(f => f.metodo_pago === "CREDITO")
+      .reduce((a, f) => a + Number(f.total), 0);
+    const ventas_total_taller  = facs.reduce((a, f) => a + Number(f.total), 0);
 
     // Egresos de caja chica del día
     const { data: gastosCC } = await supabase
@@ -1889,21 +1936,44 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .reduce((a, v) => a + Number(v.total), 0);
     const cafe_total = (ventasCafe || []).reduce((a, v) => a + Number(v.total), 0);
 
+    // Efectivo total (taller efectivo + cafetería efectivo)
+    const ventas_efectivo = ventas_efectivo_taller + cafe_efectivo;
+
+    // Saldo inicial: efectivo_final del último cuadre anterior a hoy
+    const { data: ultimoCuadre } = await supabase
+      .from("cuadre_caja")
+      .select("efectivo_final, fecha")
+      .lt("fecha", fecha)
+      .order("fecha", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    const efectivo_inicial = ultimoCuadre ? Number(ultimoCuadre.efectivo_final || 0) : 0;
+
+    // Saldo esperado = efectivo_inicial + ventas_efectivo - gastos
+    const saldo_esperado = efectivo_inicial + ventas_efectivo - gastos;
+
     res.json({
       fecha,
+      efectivo_inicial,
+      saldo_esperado,
       facturas_count: facs.length,
-      ventas_efectivo:       ventas_efectivo + cafe_efectivo,
+      ventas_efectivo,
+      ventas_efectivo_taller,
       ventas_tarjeta,
       ventas_transferencia,
       ventas_cheque,
-      ventas_total:          ventas_total + cafe_total,
+      ventas_credito,
+      ventas_total: ventas_total_taller + cafe_total,
       gastos,
+      cafe_efectivo,
       cafe_total,
       por_metodo: [
-        { metodo: "EFECTIVO",      total: ventas_efectivo + cafe_efectivo },
+        { metodo: "EFECTIVO",      total: ventas_efectivo },
         { metodo: "TARJETA",       total: ventas_tarjeta },
         { metodo: "TRANSFERENCIA", total: ventas_transferencia },
         { metodo: "CHEQUE",        total: ventas_cheque },
+        { metodo: "CRÉDITO",       total: ventas_credito },
       ].filter(m => m.total > 0),
     });
   } catch (err) {
@@ -2695,6 +2765,134 @@ app.patch("/diagnosticos/:id/completar-con-mantenimiento", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// =====================================================
+// 📄 COTIZACIONES
+// =====================================================
+
+app.get("/cotizaciones", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("cotizaciones")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/cotizaciones", async (req, res) => {
+  try {
+    // Generar número secuencial COT-XXXXX
+    const { count } = await supabase.from("cotizaciones").select("id", { count: "exact", head: true });
+    const seq    = String((count || 0) + 1).padStart(5, "0");
+    const numero = `COT-${seq}`;
+    const vencimiento = new Date(); vencimiento.setDate(vencimiento.getDate() + 15);
+
+    const { cliente_id, cliente_nombre, cliente_rnc, vehiculo_id, vehiculo_info,
+            items, subtotal, itbis, total, ncf_tipo, notas, created_by } = req.body;
+
+    const { data, error } = await supabase.from("cotizaciones").insert([{
+      numero, cliente_id: cliente_id || null, cliente_nombre, cliente_rnc,
+      vehiculo_id: vehiculo_id || null, vehiculo_info,
+      items: items || [], subtotal, itbis, total,
+      ncf_tipo: ncf_tipo || "B02",
+      valida_hasta: vencimiento.toISOString().slice(0, 10),
+      estado: "PENDIENTE", notas, created_by,
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Convertir cotización a factura
+app.post("/cotizaciones/:id/convertir", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: cot } = await supabase.from("cotizaciones").select("*").eq("id", id).single();
+    if (!cot) return res.status(404).json({ error: "Cotización no encontrada" });
+    if (cot.estado === "CONVERTIDA") return res.status(400).json({ error: "Ya fue convertida" });
+
+    // Crear factura con los datos de la cotización
+    const { metodo_pago = "EFECTIVO", dias_credito } = req.body;
+
+    // Obtener siguiente NCF
+    const { data: ncfRow } = await supabase
+      .from("ncf_secuencias")
+      .select("*")
+      .eq("tipo", cot.ncf_tipo)
+      .single();
+
+    let ncf = null;
+    if (ncfRow) {
+      const siguienteNum = (ncfRow.actual || 0) + 1;
+      ncf = `${cot.ncf_tipo}${String(siguienteNum).padStart(8, "0")}`;
+      await supabase.from("ncf_secuencias").update({ actual: siguienteNum }).eq("tipo", cot.ncf_tipo);
+    }
+
+    const { data: factura, error: fErr } = await supabase.from("facturas").insert([{
+      cliente_id:     cot.cliente_id,
+      cliente_nombre: cot.cliente_nombre,
+      cliente_rnc:    cot.cliente_rnc,
+      vehiculo_id:    cot.vehiculo_id,
+      vehiculo_info:  cot.vehiculo_info,
+      ncf, ncf_tipo: cot.ncf_tipo,
+      subtotal: cot.subtotal, itbis: cot.itbis, total: cot.total,
+      metodo_pago, estado: "ACTIVA",
+    }]).select();
+    if (fErr) return res.status(400).json({ error: fErr.message });
+
+    // Insertar items
+    const itemsF = (cot.items || []).map(i => ({
+      factura_id: factura[0].id,
+      tipo: i.tipo || "servicio",
+      descripcion: i.descripcion,
+      cantidad: i.cantidad,
+      precio_unitario: i.precio_unitario,
+      itbis_aplica: i.itbis_aplica,
+      inventario_id: i.inventario_id || null,
+    }));
+    if (itemsF.length > 0) await supabase.from("factura_items").insert(itemsF);
+
+    // Registrar en caja
+    if (metodo_pago !== "CREDITO") {
+      await supabase.from("caja_movimientos").insert([{
+        tipo: "INGRESO", monto: cot.total,
+        descripcion: `Factura convertida desde ${cot.numero}`,
+        metodo: metodo_pago,
+      }]);
+    } else if (dias_credito) {
+      const venceCred = new Date();
+      venceCred.setDate(venceCred.getDate() + Number(dias_credito));
+      await supabase.from("cuentas_cobrar").insert([{
+        cliente_id: cot.cliente_id,
+        factura_id: factura[0].id,
+        descripcion: `Factura FAC-${String(factura[0].id).padStart(5,"0")} — ${cot.cliente_nombre || "Consumidor Final"}`,
+        monto_original: cot.total,
+        fecha_vencimiento: venceCred.toISOString().slice(0,10),
+        estado: "PENDIENTE",
+      }]);
+    }
+
+    // Marcar cotización como convertida
+    await supabase.from("cotizaciones").update({ estado: "CONVERTIDA", factura_id: factura[0].id }).eq("id", id);
+
+    res.json({ factura: factura[0], factura_items: itemsF });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/cotizaciones/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const campos = ["estado","notas"].reduce((o, k) => {
+      if (req.body[k] !== undefined) o[k] = req.body[k];
+      return o;
+    }, {});
+    const { data, error } = await supabase.from("cotizaciones").update(campos).eq("id", id).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 // =====================================================

@@ -24,6 +24,14 @@ type Cuadre = {
   ventas_efectivo: number;
   ventas_transferencia: number;
   ventas_tarjeta: number;
+  ventas_cheque: number;
+  ventas_credito: number;
+  cafe_efectivo: number;
+  cafe_total: number;
+  facturas_count: number;
+  tipo: string;
+  efectivo_contado: number | null;
+  notas: string | null;
   gastos: number;
   diferencia: number;
   creado_en: string;
@@ -59,10 +67,46 @@ const fmt = (n: number | string) =>
   "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
 const fmtDate = (d: string) =>
-  d ? new Date(d).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric" }) : "—";
+  d ? new Date(d).toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
 
 const fmtDatetime = (d: string) =>
-  d ? new Date(d).toLocaleString("es-DO", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit" }) : "—";
+  d ? new Date(d).toLocaleString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+
+// ── Imprimir recibo de pago ────────────────────────────────────────────────
+function imprimirRecibo(cuenta: any, pagos: any[], tipo: "cobrar" | "pagar") {
+  const titulo  = tipo === "cobrar" ? "RECIBO DE COBRO" : "COMPROBANTE DE PAGO";
+  const saldo   = Number(cuenta.monto_original) - Number(cuenta.monto_pagado);
+  const rows    = pagos.map(p => `
+    <tr>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;">${fmtDate(p.fecha)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;font-weight:700;color:#111;">${fmt(p.monto)}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;">${p.metodo}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;">${p.referencia || "—"}</td>
+      <td style="padding:7px 10px;border-bottom:1px solid #eee;">${p.usuario || "—"}</td>
+    </tr>`).join("");
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>${titulo}</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:13px;padding:30px;max-width:600px;margin:auto;}
+  h1{font-size:20px;font-weight:900;border-bottom:3px solid #111;padding-bottom:10px;margin-bottom:16px;}
+  .row{display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #eee;font-size:13px;}
+  .total{font-size:18px;font-weight:900;border-top:3px solid #111;padding-top:10px;margin-top:8px;}
+  table{width:100%;border-collapse:collapse;margin-top:14px;}
+  th{text-align:left;padding:8px 10px;background:#f1f5f9;font-size:12px;}
+  .footer{text-align:center;margin-top:24px;font-size:11px;color:#888;border-top:1px dashed #ccc;padding-top:14px;}
+  @media print{button{display:none!important;}}</style></head><body>
+  <h1>SÓLIDO AUTO SERVICIO SRL<br/><span style="font-size:14px;font-weight:600;">${titulo}</span></h1>
+  <div class="row"><span>Descripción</span><strong>${cuenta.descripcion}</strong></div>
+  ${cuenta.suplidor_display && cuenta.suplidor_display !== "—" ? `<div class="row"><span>Suplidor</span><strong>${cuenta.suplidor_display}</strong></div>` : ""}
+  <div class="row"><span>Monto original</span><strong>${fmt(cuenta.monto_original)}</strong></div>
+  <div class="row"><span>Total pagado</span><strong style="color:#10b981;">${fmt(cuenta.monto_pagado)}</strong></div>
+  <div class="row total"><span>Saldo pendiente</span><span>${fmt(saldo)}</span></div>
+  <table><thead><tr><th>Fecha</th><th>Monto</th><th>Método</th><th>Referencia</th><th>Usuario</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
+  <script>setTimeout(()=>window.print(),500);<\/script></body></html>`;
+  const w = window.open("", "_blank", "width=700,height=600");
+  if (w) { w.document.write(html); w.document.close(); }
+}
 
 const CATEGORIAS_GASTO = [
   "Limpieza", "Papelería", "Comida / refrigerio", "Transporte",
@@ -132,23 +176,122 @@ export default function ContabilidadPage() {
 // ═══════════════════════════════════════════════════════════════════════════
 // CUADRE DE CAJA
 // ═══════════════════════════════════════════════════════════════════════════
+
+// Imprimir un cuadre de caja
+function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
+  const EMPRESA = { nombre: "SÓLIDO AUTO SERVICIO SRL", tel: "809-712-2027", dir: "Santo Domingo, R.D." };
+  const saldoEsperado = Number(c.efectivo_inicial) + Number(c.ventas_efectivo) - Number(c.gastos);
+  const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
+    ? Number(c.efectivo_contado) - saldoEsperado
+    : Number(c.diferencia || 0);
+  const ventas_total  = Number(c.ventas_efectivo || 0) + Number(c.ventas_tarjeta || 0) + Number(c.ventas_transferencia || 0) + Number(c.ventas_cheque || 0) + Number(c.ventas_credito || 0);
+
+  const row = (label: string, val: string, color = "#111", bold = false) =>
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;">
+       <span style="color:#555;">${label}</span>
+       <span style="font-weight:${bold ? 800 : 500};color:${color};">${val}</span>
+     </div>`;
+
+  const section = (title: string, content: string) =>
+    `<div style="margin-bottom:16px;">
+       <div style="font-weight:700;font-size:12px;text-transform:uppercase;color:#6366f1;letter-spacing:.5px;margin-bottom:6px;border-bottom:2px solid #e0e7ff;padding-bottom:4px;">${title}</div>
+       ${content}
+     </div>`;
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>Cuadre de Caja — ${c.fecha}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;font-size:13px;padding:30px;max-width:640px;margin:auto;}
+    h1{font-size:18px;font-weight:900;}
+    h2{font-size:13px;font-weight:600;color:#555;}
+    .total{font-size:17px;font-weight:900;}
+    .sig{display:inline-block;border-top:1px solid #333;width:200px;text-align:center;font-size:11px;color:#555;padding-top:4px;margin-top:32px;}
+    .badge{display:inline-block;padding:2px 10px;border-radius:99px;font-size:11px;font-weight:700;}
+    .badge-auto{background:#dcfce7;color:#16a34a;}
+    .badge-manual{background:#fef9c3;color:#854d0e;}
+    .footer{text-align:center;font-size:11px;color:#aaa;margin-top:28px;border-top:1px dashed #ddd;padding-top:14px;}
+    @media print{button{display:none!important;}}
+  </style></head><body>
+  <div style="text-align:center;margin-bottom:20px;">
+    <h1>${EMPRESA.nombre}</h1>
+    <h2>CUADRE DE CAJA — ${c.fecha}</h2>
+    <div style="margin-top:6px;">
+      <span class="badge badge-${(c.tipo || "AUTO").toLowerCase()}">${c.tipo || "AUTO"}</span>
+      &nbsp;<span style="font-size:11px;color:#888;">Responsable: <b>${c.usuario}</b></span>
+    </div>
+  </div>
+
+  ${section("Saldo Inicial", row("Efectivo inicio del día", fmt(c.efectivo_inicial), "#111", true))}
+
+  ${section("Ingresos del Día",
+    row("Ventas taller (efectivo)", fmt(Number(c.ventas_efectivo || 0) - Number(c.cafe_efectivo || 0))) +
+    row("Ventas cafetería (efectivo)", fmt(c.cafe_efectivo || 0)) +
+    row("Total cafetería (todos los métodos)", fmt(c.cafe_total || 0)) +
+    row("Ventas con tarjeta", fmt(c.ventas_tarjeta || 0)) +
+    row("Ventas por transferencia", fmt(c.ventas_transferencia || 0)) +
+    (Number(c.ventas_cheque || 0) > 0 ? row("Ventas con cheque", fmt(c.ventas_cheque || 0)) : "") +
+    (Number(c.ventas_credito || 0) > 0 ? row("Ventas a crédito", fmt(c.ventas_credito || 0)) : "") +
+    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #6366f1;margin-top:4px;">
+       <span style="font-weight:800;">TOTAL VENTAS DÍA</span>
+       <span style="font-weight:800;font-size:16px;">${fmt(ventas_total)}</span>
+     </div>`
+  )}
+
+  ${section("Egresos del Día", row("Gastos caja chica", fmt(c.gastos || 0), "#ef4444", true))}
+
+  ${section("Cuadre Final",
+    row("Saldo inicial", fmt(c.efectivo_inicial)) +
+    row("+ Ventas efectivo del día", fmt(c.ventas_efectivo || 0)) +
+    row("− Gastos del día", fmt(c.gastos || 0)) +
+    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:4px;">
+       <span style="font-weight:800;">SALDO ESPERADO EN CAJA</span>
+       <span style="font-weight:800;font-size:16px;">${fmt(saldoEsperado)}</span>
+     </div>` +
+    (c.efectivo_contado !== null && c.efectivo_contado !== undefined
+      ? row("Efectivo contado físicamente", fmt(c.efectivo_contado), "#111", true) +
+        `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"};margin-top:4px;">
+           <span style="font-weight:800;">DIFERENCIA</span>
+           <span style="font-weight:900;font-size:16px;color:${diferencia >= 0 ? "#10b981" : "#ef4444"};">${diferencia >= 0 ? "+" : ""}${fmt(diferencia)}</span>
+         </div>`
+      : `<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#888;font-size:12px;">Sin conteo físico registrado</span><span style="color:#888;font-size:12px;">Diferencia: —</span></div>`)
+  )}
+
+  ${c.notas ? section("Notas", `<p style="color:#555;font-size:13px;">${c.notas}</p>`) : ""}
+
+  <div style="display:flex;justify-content:space-around;margin-top:16px;">
+    <div style="text-align:center;">
+      <div class="sig"></div>
+      <div>Responsable</div>
+      <div style="font-size:11px;color:#888;">${c.usuario}</div>
+    </div>
+    <div style="text-align:center;">
+      <div class="sig"></div>
+      <div>Supervisado por</div>
+    </div>
+  </div>
+
+  <div class="footer">${EMPRESA.nombre} · ${EMPRESA.tel} · ${EMPRESA.dir}<br/>
+  Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
+  <script>setTimeout(()=>window.print(),500);<\/script>
+  </body></html>`;
+
+  const w = window.open("", "_blank", "width=720,height=750");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
   const hoy = new Date().toISOString().slice(0, 10);
-  const [historial, setHistorial]   = useState<Cuadre[]>([]);
-  const [loading, setLoading]       = useState(false);
-  const [saving, setSaving]         = useState(false);
-  const [showForm, setShowForm]     = useState(false);
-  const [facturasDia, setFacturasDia] = useState<any>(null);
+  const [historial, setHistorial] = useState<Cuadre[]>([]);
+  const [loading, setLoading]     = useState(false);
+  const [saving, setSaving]       = useState(false);
+  const [fetching, setFetching]   = useState(false);
 
-  const [form, setForm] = useState({
-    fecha: hoy,
-    efectivo_inicial: "",
-    efectivo_final: "",
-    ventas_efectivo: "",
-    ventas_tarjeta: "",
-    ventas_transferencia: "",
-    gastos: "",
-  });
+  // Auto-cuadre preview
+  const [preview, setPreview]     = useState<any>(null);
+  const [fechaSel, setFechaSel]   = useState(hoy);
+  const [efectContado, setEfectContado] = useState("");
+  const [notas, setNotas]         = useState("");
 
   const cargar = useCallback(async () => {
     setLoading(true);
@@ -161,161 +304,179 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
     setLoading(false);
   }, []);
 
-  // Cargar totales del día desde facturas reales
-  const cargarTotalesDia = useCallback(async (fecha: string) => {
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const generarPreview = async (fecha: string) => {
+    setFetching(true);
+    setPreview(null);
     try {
-      // Usar el nuevo endpoint de cuadre automático
       const r = await fetch(`${API}/api/contabilidad/cuadre/auto?fecha=${fecha}`);
       const d = await r.json();
-      setFacturasDia({
-        efectivo: d.ventas_efectivo || 0,
-        tarjeta:  d.ventas_tarjeta  || 0,
-        transf:   d.ventas_transferencia || 0,
-        count:    d.facturas_count || 0,
-        cafe:     d.cafe_total || 0,
-        gastos:   d.gastos || 0,
-      });
-      setForm(prev => ({
-        ...prev,
-        ventas_efectivo:      String(d.ventas_efectivo      || 0),
-        ventas_tarjeta:       String(d.ventas_tarjeta       || 0),
-        ventas_transferencia: String(d.ventas_transferencia || 0),
-        gastos:               String(d.gastos               || 0),
-      }));
-    } catch {}
-  }, []);
-
-  useEffect(() => { cargar(); }, [cargar]);
-  useEffect(() => { if (showForm) cargarTotalesDia(form.fecha); }, [showForm]);
-
-  const totalIngresos = Number(form.ventas_efectivo || 0) + Number(form.ventas_tarjeta || 0) + Number(form.ventas_transferencia || 0);
-  const diferencia    = Number(form.efectivo_final || 0) - Number(form.efectivo_inicial || 0) - Number(form.ventas_efectivo || 0) + Number(form.gastos || 0);
+      setPreview(d);
+    } catch { alert("Error al cargar datos del día"); }
+    setFetching(false);
+  };
 
   const guardar = async () => {
-    if (!form.efectivo_inicial) return alert("Ingresa el efectivo inicial");
+    if (!preview) return;
     setSaving(true);
     try {
-      await fetch(`${API}/api/contabilidad/cuadre`, {
+      const saldoEsperado = Number(preview.efectivo_inicial) + Number(preview.ventas_efectivo) - Number(preview.gastos);
+      const efectivo_final = efectContado !== "" ? Number(efectContado) : saldoEsperado;
+      const diferencia = efectContado !== "" ? Number(efectContado) - saldoEsperado : 0;
+
+      const res = await fetch(`${API}/api/contabilidad/cuadre`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          ...form,
-          efectivo_inicial:     Number(form.efectivo_inicial),
-          efectivo_final:       Number(form.efectivo_final),
-          ventas_efectivo:      Number(form.ventas_efectivo),
-          ventas_tarjeta:       Number(form.ventas_tarjeta),
-          ventas_transferencia: Number(form.ventas_transferencia),
-          gastos:               Number(form.gastos),
+          fecha:                preview.fecha,
+          efectivo_inicial:     preview.efectivo_inicial,
+          efectivo_final,
+          ventas_efectivo:      preview.ventas_efectivo,
+          ventas_tarjeta:       preview.ventas_tarjeta,
+          ventas_transferencia: preview.ventas_transferencia,
+          ventas_cheque:        preview.ventas_cheque || 0,
+          ventas_credito:       preview.ventas_credito || 0,
+          cafe_efectivo:        preview.cafe_efectivo || 0,
+          cafe_total:           preview.cafe_total || 0,
+          facturas_count:       preview.facturas_count || 0,
+          tipo:                 "AUTO",
+          efectivo_contado:     efectContado !== "" ? Number(efectContado) : null,
+          notas:                notas || null,
+          gastos:               preview.gastos,
           diferencia,
-          usuario: usuario?.nombre || "Sistema",
+          usuario:              usuario?.nombre || "Sistema",
         }),
       });
-      setShowForm(false);
-      setForm({ fecha: hoy, efectivo_inicial: "", efectivo_final: "", ventas_efectivo: "", ventas_tarjeta: "", ventas_transferencia: "", gastos: "" });
-      cargar();
-    } catch { alert("Error al guardar"); }
+      const data = await res.json();
+      if (data.error) return alert("Error: " + data.error);
+
+      setPreview(null);
+      setEfectContado("");
+      setNotas("");
+      await cargar();
+    } catch { alert("Error al guardar el cuadre"); }
     setSaving(false);
   };
 
+  const saldoEsperado = preview
+    ? Number(preview.efectivo_inicial) + Number(preview.ventas_efectivo) - Number(preview.gastos)
+    : 0;
+  const diferencia = efectContado !== "" ? Number(efectContado) - saldoEsperado : null;
+
   return (
     <div>
-      {/* KPI RÁPIDOS del historial */}
+      {/* KPIs del último cuadre */}
       {historial.length > 0 && (() => {
         const ult = historial[0];
+        const saldoUlt = Number(ult.efectivo_inicial) + Number(ult.ventas_efectivo) - Number(ult.gastos);
         return (
           <div style={s.kpiRow}>
             <KpiCard label="Último cuadre" value={fmtDate(ult.fecha)} icon="📅" color="#6366f1" />
-            <KpiCard label="Ventas efectivo" value={fmt(ult.ventas_efectivo)} icon="💵" color="#10b981" />
-            <KpiCard label="Ventas tarjeta" value={fmt(ult.ventas_tarjeta)} icon="💳" color="#3b82f6" />
+            <KpiCard label="Ventas totales" value={fmt(Number(ult.ventas_efectivo||0)+Number(ult.ventas_tarjeta||0)+Number(ult.ventas_transferencia||0))} icon="💰" color="#10b981" />
+            <KpiCard label="Facturas" value={String(ult.facturas_count || "—")} icon="🧾" color="#3b82f6" />
             <KpiCard label="Diferencia" value={fmt(ult.diferencia)} icon="⚖️" color={Number(ult.diferencia) >= 0 ? "#10b981" : "#ef4444"} />
           </div>
         );
       })()}
 
-      <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16, gap: 8 }}>
-        <button
-          onClick={async () => {
-            setShowForm(true);
-            await cargarTotalesDia(hoy);
-          }}
-          style={{ ...s.btnPrimary, background: "#10b981" }}
-        >
-          ⚡ Auto-cuadre de hoy
-        </button>
-        <button onClick={() => setShowForm(!showForm)} style={s.btnPrimary}>
-          {showForm ? "✕ Cancelar" : "➕ Cuadre manual"}
-        </button>
-      </div>
-
-      {showForm && (
-        <div style={{ ...s.card, marginBottom: 20, border: "2px solid #6366f1" }}>
-          <h3 style={{ ...s.cardTitle, color: "#4338ca" }}>📋 Registrar Cuadre de Caja</h3>
-
-          {facturasDia && (
-            <div style={s.infoBanner}>
-              <span>
-                ✅ <b>Auto-calculado:</b> {facturasDia.count} factura{facturasDia.count !== 1 ? "s" : ""},
-                cafetería: RD$ {Number(facturasDia.cafe || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })},
-                egresos caja chica: RD$ {Number(facturasDia.gastos || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })}
-              </span>
-            </div>
-          )}
-
-          <div style={s.formGrid}>
-            <FormField label="Fecha">
-              <input type="date" value={form.fecha}
-                onChange={e => { setForm({ ...form, fecha: e.target.value }); cargarTotalesDia(e.target.value); }}
-                style={s.input} />
-            </FormField>
-            <FormField label="💰 Efectivo inicial (RD$)">
-              <input type="number" value={form.efectivo_inicial}
-                onChange={e => setForm({ ...form, efectivo_inicial: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
-            <FormField label="💰 Efectivo final físico (RD$)">
-              <input type="number" value={form.efectivo_final}
-                onChange={e => setForm({ ...form, efectivo_final: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
-            <FormField label="💵 Ventas en efectivo (RD$)">
-              <input type="number" value={form.ventas_efectivo}
-                onChange={e => setForm({ ...form, ventas_efectivo: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
-            <FormField label="💳 Ventas con tarjeta (RD$)">
-              <input type="number" value={form.ventas_tarjeta}
-                onChange={e => setForm({ ...form, ventas_tarjeta: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
-            <FormField label="🏦 Ventas por transferencia (RD$)">
-              <input type="number" value={form.ventas_transferencia}
-                onChange={e => setForm({ ...form, ventas_transferencia: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
-            <FormField label="📉 Gastos del día (RD$)">
-              <input type="number" value={form.gastos}
-                onChange={e => setForm({ ...form, gastos: e.target.value })}
-                placeholder="0.00" style={s.input} />
-            </FormField>
+      {/* Selector de fecha + botón generar */}
+      <div style={{ ...s.card, marginBottom: 20, border: "2px solid #6366f1" }}>
+        <h3 style={{ ...s.cardTitle, color: "#4338ca" }}>⚡ Generar Cuadre de Caja</h3>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div style={{ flex: 1, minWidth: 180 }}>
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 6, color: "#444" }}>Fecha del cuadre</label>
+            <input type="date" value={fechaSel}
+              onChange={e => { setFechaSel(e.target.value); setPreview(null); }}
+              style={{ ...s.input, marginBottom: 0 }} />
           </div>
-
-          {/* Resumen cuadre */}
-          <div style={s.resumenBox}>
-            <div style={s.resumenRow}><span>Total ingresos del día</span><span style={{ fontWeight: 700 }}>{fmt(totalIngresos)}</span></div>
-            <div style={s.resumenRow}><span>Gastos registrados</span><span style={{ color: "#ef4444" }}>− {fmt(form.gastos || 0)}</span></div>
-            <div style={{ ...s.resumenRow, borderTop: "2px solid #e2e8f0", paddingTop: 10, marginTop: 4, fontSize: 18, fontWeight: 800 }}>
-              <span>Diferencia de caja</span>
-              <span style={{ color: diferencia >= 0 ? "#10b981" : "#ef4444" }}>
-                {diferencia >= 0 ? "+" : ""}{fmt(diferencia)}
-              </span>
-            </div>
-          </div>
-
-          <button onClick={guardar} disabled={saving} style={{ ...s.btnPrimary, width: "100%", marginTop: 16 }}>
-            {saving ? "Guardando..." : "💾 Guardar Cuadre"}
+          <button onClick={() => generarPreview(fechaSel)} disabled={fetching}
+            style={{ ...s.btnPrimary, background: "#6366f1", minWidth: 180 }}>
+            {fetching ? "⏳ Calculando..." : "⚡ Calcular automático"}
           </button>
         </div>
-      )}
+
+        {/* PREVIEW del cuadre auto */}
+        {preview && (
+          <div style={{ marginTop: 20 }}>
+            {/* Banner info */}
+            <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#166534" }}>
+              ✅ <b>Datos calculados automáticamente</b> — {preview.facturas_count} factura{preview.facturas_count !== 1 ? "s" : ""} del taller · Cafetería: {fmt(preview.cafe_total || 0)} · Caja chica egresos: {fmt(preview.gastos || 0)}
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+              {/* Columna izquierda: ingresos */}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>📥 Ingresos del día</div>
+                {[
+                  ["💵 Efectivo taller", fmt(Number(preview.ventas_efectivo||0) - Number(preview.cafe_efectivo||0))],
+                  ["☕ Efectivo cafetería", fmt(preview.cafe_efectivo || 0)],
+                  ...(Number(preview.ventas_tarjeta||0)>0 ? [["💳 Tarjeta", fmt(preview.ventas_tarjeta)]] : []),
+                  ...(Number(preview.ventas_transferencia||0)>0 ? [["🏦 Transferencia", fmt(preview.ventas_transferencia)]] : []),
+                  ...(Number(preview.ventas_cheque||0)>0 ? [["🔖 Cheque", fmt(preview.ventas_cheque)]] : []),
+                  ...(Number(preview.ventas_credito||0)>0 ? [["📋 Crédito", fmt(preview.ventas_credito)]] : []),
+                ].map(([lbl, val]) => (
+                  <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                    <span style={{ color: "#555" }}>{lbl}</span><span style={{ fontWeight: 600 }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "2px solid #6366f1", marginTop: 4, fontWeight: 800, fontSize: 14 }}>
+                  <span>TOTAL VENTAS</span><span>{fmt(preview.ventas_total || 0)}</span>
+                </div>
+              </div>
+
+              {/* Columna derecha: cuadre */}
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>⚖️ Cuadre efectivo</div>
+                {[
+                  ["Saldo anterior (ef. inicial)", fmt(preview.efectivo_inicial)],
+                  ["+ Ventas en efectivo hoy", fmt(preview.ventas_efectivo)],
+                  ["− Gastos caja chica", fmt(preview.gastos)],
+                ].map(([lbl, val]) => (
+                  <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                    <span style={{ color: "#555" }}>{lbl}</span><span style={{ fontWeight: 600 }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "2px solid #10b981", marginTop: 4, fontWeight: 800, fontSize: 15, color: "#065f46" }}>
+                  <span>SALDO ESPERADO</span><span>{fmt(saldoEsperado)}</span>
+                </div>
+
+                {/* Conteo físico opcional */}
+                <div style={{ marginTop: 14 }}>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "#444" }}>💰 Efectivo contado físicamente (opcional)</label>
+                  <input type="number" value={efectContado} onChange={e => setEfectContado(e.target.value)}
+                    placeholder="Deja vacío si no contaste" style={{ ...s.input, marginBottom: 0, fontSize: 14 }} />
+                </div>
+                {diferencia !== null && (
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: `2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"}`, marginTop: 8, fontWeight: 800, fontSize: 15, color: diferencia >= 0 ? "#065f46" : "#991b1b" }}>
+                    <span>DIFERENCIA</span>
+                    <span>{diferencia >= 0 ? "+" : ""}{fmt(diferencia)}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Notas */}
+            <div style={{ marginTop: 14 }}>
+              <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "#444" }}>📝 Notas del cuadre (opcional)</label>
+              <textarea value={notas} onChange={e => setNotas(e.target.value)}
+                placeholder="Observaciones, incidencias, novedades..."
+                style={{ ...s.input, height: 60, resize: "vertical" as any, marginBottom: 0, fontSize: 13 }} />
+            </div>
+
+            {/* Botones */}
+            <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+              <button onClick={guardar} disabled={saving} style={{ ...s.btnPrimary, flex: 2, background: "#10b981" }}>
+                {saving ? "Guardando..." : "💾 Confirmar y guardar cuadre"}
+              </button>
+              <button onClick={() => { setPreview(null); setEfectContado(""); setNotas(""); }}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6b7280" }}>
+                ✕ Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
 
       {/* HISTORIAL */}
       <div style={s.card}>
@@ -327,27 +488,39 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
             <table style={s.table}>
               <thead>
                 <tr>
-                  {["Fecha", "Responsable", "Ef. Inicial", "Ef. Final", "Ventas Ef.", "Tarjeta", "Transf.", "Gastos", "Diferencia"].map(h => (
+                  {["Fecha", "Responsable", "Facturas", "Ef. Inicial", "Ventas Total", "Efectivo", "Tarjeta+Transf.", "Gastos", "Diferencia", ""].map(h => (
                     <th key={h} style={s.th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {historial.map((c: Cuadre) => (
-                  <tr key={c.id}>
-                    <td style={s.td}><b>{fmtDate(c.fecha)}</b></td>
-                    <td style={s.td}>{c.usuario}</td>
-                    <td style={s.td}>{fmt(c.efectivo_inicial)}</td>
-                    <td style={s.td}>{fmt(c.efectivo_final)}</td>
-                    <td style={s.td}>{fmt(c.ventas_efectivo)}</td>
-                    <td style={s.td}>{fmt(c.ventas_tarjeta)}</td>
-                    <td style={s.td}>{fmt(c.ventas_transferencia)}</td>
-                    <td style={{ ...s.td, color: "#ef4444" }}>{fmt(c.gastos)}</td>
-                    <td style={{ ...s.td, fontWeight: 700, color: Number(c.diferencia) >= 0 ? "#10b981" : "#ef4444" }}>
-                      {Number(c.diferencia) >= 0 ? "+" : ""}{fmt(c.diferencia)}
-                    </td>
-                  </tr>
-                ))}
+                {historial.map((c: Cuadre) => {
+                  const vTot = Number(c.ventas_efectivo||0)+Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
+                  const vOtros = Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
+                  return (
+                    <tr key={c.id}>
+                      <td style={s.td}><b>{fmtDate(c.fecha)}</b>{c.tipo === "AUTO" && <span style={{ marginLeft: 4, fontSize: 10, background: "#dcfce7", color: "#16a34a", padding: "1px 6px", borderRadius: 99, fontWeight: 700 }}>AUTO</span>}</td>
+                      <td style={s.td}>{c.usuario}</td>
+                      <td style={{ ...s.td, textAlign: "center" }}>{c.facturas_count ?? "—"}</td>
+                      <td style={s.td}>{fmt(c.efectivo_inicial)}</td>
+                      <td style={{ ...s.td, fontWeight: 700 }}>{fmt(vTot)}</td>
+                      <td style={s.td}>{fmt(c.ventas_efectivo)}</td>
+                      <td style={s.td}>{fmt(vOtros)}</td>
+                      <td style={{ ...s.td, color: "#ef4444" }}>{fmt(c.gastos)}</td>
+                      <td style={{ ...s.td, fontWeight: 700, color: Number(c.diferencia) === 0 ? "#6b7280" : Number(c.diferencia) > 0 ? "#10b981" : "#ef4444" }}>
+                        {c.efectivo_contado !== null && c.efectivo_contado !== undefined
+                          ? (Number(c.diferencia) >= 0 ? "+" : "") + fmt(c.diferencia)
+                          : <span style={{ color: "#aaa", fontSize: 12 }}>sin conteo</span>}
+                      </td>
+                      <td style={s.td}>
+                        <button onClick={() => imprimirCuadre(c)}
+                          style={{ padding: "5px 10px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                          🖨️ Imprimir
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1026,8 +1199,12 @@ function CuentasCobrar({ usuario }: { usuario: Usuario }) {
                 </tbody>
               </table>
             )}
-            <button onClick={() => setModalDetalle(null)}
-              style={{ ...s.btnPrimary, width: "100%", marginTop: 16 }}>Cerrar</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => imprimirRecibo(modalDetalle.cuenta, modalDetalle.pagos, "cobrar")}
+                style={{ ...s.btnPrimary, flex: 1, background: "#2563eb" }}>🖨️ Imprimir</button>
+              <button onClick={() => setModalDetalle(null)}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6b7280" }}>Cerrar</button>
+            </div>
           </div>
         </div>
       )}
@@ -1365,8 +1542,12 @@ function CuentasPagar({ usuario }: { usuario: Usuario }) {
                 </tbody>
               </table>
             )}
-            <button onClick={() => setModalDetalle(null)}
-              style={{ ...s.btnPrimary, width: "100%", marginTop: 16 }}>Cerrar</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={() => imprimirRecibo(modalDetalle.cuenta, modalDetalle.pagos, "pagar")}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6366f1" }}>🖨️ Imprimir</button>
+              <button onClick={() => setModalDetalle(null)}
+                style={{ ...s.btnPrimary, flex: 1, background: "#6b7280" }}>Cerrar</button>
+            </div>
           </div>
         </div>
       )}
