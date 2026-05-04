@@ -302,7 +302,7 @@ function TabClientesRiesgo({ d, loading }: { d: any[]; loading: boolean }) {
     setContactados(prev => {
       const nuevo = new Set(prev);
       if (nuevo.has(id)) { nuevo.delete(id); } else { nuevo.add(id); }
-      localStorage.setItem("solido_contactados", JSON.stringify([...nuevo]));
+      localStorage.setItem("solido_contactados", JSON.stringify(Array.from(nuevo)));
       return nuevo;
     });
   };
