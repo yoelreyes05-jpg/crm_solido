@@ -1,11 +1,18 @@
 import { NextResponse } from "next/server";
 
 const PERMISOS = {
-  gerente:    ["/"],
-  secretaria: ["/dashboard", "/clientes", "/vehiculos", "/ordenes", "/facturacion"],
-  tecnico:    ["/ordenes", "/diagnosticos"],
-  almacen:    ["/inventario", "/suplidores", "/ventas"],
-  cafeteria:  ["/cafeteria"],
+  gerente: [
+    "/dashboard", "/clientes", "/vehiculos", "/ordenes", "/diagnosticos",
+    "/inventario", "/suplidores", "/ventas", "/facturacion", "/cafeteria",
+    "/usuarios", "/configuracion", "/mantenimiento", "/inteligencia", "/contabilidad",
+  ],
+  secretaria: [
+    "/dashboard", "/clientes", "/vehiculos", "/ordenes",
+    "/facturacion", "/mantenimiento", "/contabilidad",
+  ],
+  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento"],
+  almacen:   ["/inventario", "/suplidores", "/ventas"],
+  cafeteria: ["/cafeteria"],
 };
 
 export function middleware(request) {
@@ -17,19 +24,16 @@ export function middleware(request) {
     pathname.startsWith("/catalogo") ||
     pathname === "/manifest.json" ||
     pathname === "/sw.js" ||
-    pathname === "/workbox-*.js" ||
     pathname.startsWith("/icons") ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
-    pathname.endsWith(".png") ||   // ← NUEVO: todas las imágenes PNG
-    pathname.endsWith(".jpg") ||   // ← NUEVO
-    pathname.endsWith(".ico") ||   // ← NUEVO
-    pathname.endsWith(".svg") ||   // ← NUEVO
+    pathname.endsWith(".png") ||
+    pathname.endsWith(".jpg") ||
+    pathname.endsWith(".ico") ||
+    pathname.endsWith(".svg") ||
     pathname.includes("favicon");
 
-  if (esPublica) {
-    return NextResponse.next();
-  }
+  if (esPublica) return NextResponse.next();
 
   const usuarioCookie = request.cookies.get("usuario")?.value;
   if (!usuarioCookie) {
@@ -38,10 +42,13 @@ export function middleware(request) {
 
   try {
     const usuario = JSON.parse(decodeURIComponent(usuarioCookie));
+    // Normalizar rol a minúsculas por si acaso viene diferente de la DB
+    const rol = (usuario.rol || "").toLowerCase();
 
-    if (usuario.rol === "gerente") return NextResponse.next();
+    // Gerente tiene acceso total
+    if (rol === "gerente") return NextResponse.next();
 
-    const permitidas = PERMISOS[usuario.rol] || [];
+    const permitidas = PERMISOS[rol] || [];
     const tieneAcceso = permitidas.some(ruta =>
       pathname === ruta || pathname.startsWith(ruta + "/")
     );
@@ -49,11 +56,11 @@ export function middleware(request) {
     if (!tieneAcceso) {
       const destinos = {
         secretaria: "/dashboard",
-        tecnico: "/ordenes",
-        almacen: "/inventario",
-        cafeteria: "/cafeteria"
+        tecnico:    "/ordenes",
+        almacen:    "/inventario",
+        cafeteria:  "/cafeteria",
       };
-      return NextResponse.redirect(new URL(destinos[usuario.rol] || "/login", request.url));
+      return NextResponse.redirect(new URL(destinos[rol] || "/login", request.url));
     }
   } catch {
     return NextResponse.redirect(new URL("/login", request.url));

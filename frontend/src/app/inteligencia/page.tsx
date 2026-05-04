@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { API_URL as API } from "@/config";
 
 const fmt = (n: number) =>
@@ -36,7 +36,7 @@ export default function InteligenciaPage() {
     { key: "proyeccion",  label: "📈 Proyección" },
     { key: "inventario",  label: "📦 Inventario" },
     { key: "fallas",      label: "🔩 Fallas por Modelo" },
-    { key: "clientes",    label: "⚠️ Clientes en Riesgo" },
+    { key: "clientes",    label: "📞 Llamar Clientes" },
     { key: "topclientes", label: "🏆 Top Clientes" },
   ];
 
@@ -243,68 +243,213 @@ function TabFallas({ d, loading }: { d: any[]; loading: boolean }) {
   );
 }
 
-// ─── Clientes en Riesgo ───────────────────────────────────────────────────────
+// ─── Llamar Clientes / Clientes en Riesgo ────────────────────────────────────
+function limpiarTelefono(tel: string): string {
+  // Quitar todo excepto dígitos
+  const digits = (tel || "").replace(/\D/g, "");
+  // RD: números de 10 dígitos → +1 + número
+  if (digits.length === 10) return "+1" + digits;
+  if (digits.length === 11 && digits.startsWith("1")) return "+" + digits;
+  return digits;
+}
+
+function imprimirListaLlamadas(clientes: any[], contactados: Set<string>) {
+  const rows = clientes.map(c => {
+    const ya = contactados.has(String(c.cliente_id));
+    return `<tr style="background:${ya ? "#f0fdf4" : c.nivel_riesgo === "ALTO" ? "#fff5f5" : "#fffbeb"}">
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">${ya ? "✅" : c.nivel_riesgo === "ALTO" ? "🔴" : "🟡"}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;font-weight:700;">${c.nombre}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">${c.telefono || "Sin teléfono"}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">${c.dias_sin_visita} días sin visitar</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;">Última: ${fmtDate(c.ultima_visita)}</td>
+      <td style="padding:8px 10px;border-bottom:1px solid #eee;color:#888;">${ya ? "CONTACTADO" : "PENDIENTE"}</td>
+    </tr>`;
+  }).join("");
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>Lista de Llamadas</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:13px;padding:28px;}
+  h1{font-size:18px;font-weight:900;margin-bottom:4px;}h2{font-size:12px;color:#555;font-weight:400;margin-bottom:16px;}
+  table{width:100%;border-collapse:collapse;}th{background:#111;color:#fff;padding:8px 10px;text-align:left;font-size:12px;}
+  .footer{text-align:center;font-size:11px;color:#aaa;margin-top:20px;border-top:1px dashed #ddd;padding-top:12px;}
+  @media print{button{display:none!important;}}</style></head><body>
+  <h1>SÓLIDO AUTO SERVICIO SRL — Lista de Llamadas</h1>
+  <h2>Clientes sin visitar · Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</h2>
+  <table><thead><tr><th></th><th>Cliente</th><th>Teléfono</th><th>Ausencia</th><th>Última visita</th><th>Estado</th></tr></thead>
+  <tbody>${rows}</tbody></table>
+  <div class="footer">Total: ${clientes.length} clientes · ${contactados.size} contactados · ${clientes.length - contactados.size} pendientes</div>
+  <script>setTimeout(()=>window.print(),400);<\/script></body></html>`;
+
+  const w = window.open("", "_blank", "width=800,height=650");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
 function TabClientesRiesgo({ d, loading }: { d: any[]; loading: boolean }) {
+  const [contactados, setContactados] = React.useState<Set<string>>(() => {
+    try {
+      const saved = localStorage.getItem("solido_contactados");
+      return saved ? new Set(JSON.parse(saved)) : new Set();
+    } catch { return new Set(); }
+  });
+  const [filtro, setFiltro] = React.useState<"todos" | "pendientes" | "contactados">("pendientes");
+  const [busqueda, setBusqueda] = React.useState("");
+
   if (loading || !d) return <Spinner loading={loading} />;
   const altos  = d.filter(c => c.nivel_riesgo === "ALTO");
   const medios = d.filter(c => c.nivel_riesgo === "MEDIO");
 
+  const marcarContactado = (id: string) => {
+    setContactados(prev => {
+      const nuevo = new Set(prev);
+      if (nuevo.has(id)) { nuevo.delete(id); } else { nuevo.add(id); }
+      localStorage.setItem("solido_contactados", JSON.stringify([...nuevo]));
+      return nuevo;
+    });
+  };
+
+  const clientesFiltrados = d.filter(c => {
+    const yaContactado = contactados.has(String(c.cliente_id));
+    if (filtro === "pendientes" && yaContactado) return false;
+    if (filtro === "contactados" && !yaContactado) return false;
+    if (busqueda && !c.nombre?.toLowerCase().includes(busqueda.toLowerCase()) &&
+        !c.telefono?.includes(busqueda)) return false;
+    return true;
+  });
+
   return (
     <div>
+      {/* KPIs */}
       <div style={S.kpiRow}>
-        <KpiCard icon="🔴" label="Riesgo alto" value={`${altos.length} clientes`} color="#ef4444" />
-        <KpiCard icon="🟡" label="Riesgo medio" value={`${medios.length} clientes`} color="#f59e0b" />
+        <KpiCard icon="🔴" label="Riesgo alto (hace 3x+)"   value={`${altos.length} clientes`}  color="#ef4444" />
+        <KpiCard icon="🟡" label="Riesgo medio (hace 1.5x)" value={`${medios.length} clientes`}  color="#f59e0b" />
+        <KpiCard icon="✅" label="Ya contactados"            value={`${contactados.size}`}         color="#10b981" />
+        <KpiCard icon="📞" label="Pendientes de llamar"     value={`${d.length - contactados.size}`} color="#6366f1" />
       </div>
 
+      {/* Banner */}
       <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 10,
         padding: "12px 16px", fontSize: 13, color: "#92400e", marginBottom: 16 }}>
         💡 Clientes que llevan más de 1.5× su intervalo habitual sin volver al taller.
-        Considera llamarlos para ofrecerles un servicio de mantenimiento.
+        Llámalos para ofrecerles un mantenimiento o revisión. Los marcados como contactados se recuerdan en este dispositivo.
       </div>
 
-      <div style={S.card}>
-        <h3 style={S.cardTitle}>⚠️ Clientes que podrían no regresar ({d.length})</h3>
-        <div style={{ overflowX: "auto" }}>
-          <table style={S.table}>
-            <thead>
-              <tr>
-                {["Riesgo", "Cliente", "Teléfono", "Visitas", "Última visita",
-                  "Días sin visitar", "Intervalo promedio"].map(h => (
-                  <th key={h} style={S.th}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {d.map((c: any) => (
-                <tr key={c.cliente_id}>
-                  <td style={S.td}>
+      {/* Controles */}
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap", alignItems: "center" }}>
+        <input placeholder="🔍 Buscar por nombre o teléfono..."
+          value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          style={{ flex: 1, minWidth: 200, padding: "10px 14px", borderRadius: 8,
+            border: "1px solid #e2e8f0", fontSize: 14 }} />
+        {(["pendientes", "contactados", "todos"] as const).map(f => (
+          <button key={f} onClick={() => setFiltro(f)} style={{
+            padding: "10px 16px", borderRadius: 8, border: "none", cursor: "pointer",
+            fontWeight: 700, fontSize: 13,
+            background: filtro === f ? "#111827" : "#f1f5f9",
+            color: filtro === f ? "#fff" : "#374151",
+          }}>
+            {f === "pendientes" ? `📞 Por llamar (${d.length - contactados.size})` :
+             f === "contactados" ? `✅ Contactados (${contactados.size})` : "Todos"}
+          </button>
+        ))}
+        <button onClick={() => imprimirListaLlamadas(clientesFiltrados, contactados)}
+          style={{ padding: "10px 16px", borderRadius: 8, border: "1px solid #e2e8f0",
+            background: "#fff", cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+          🖨️ Imprimir lista
+        </button>
+      </div>
+
+      {/* Tarjetas de clientes */}
+      {clientesFiltrados.length === 0 ? (
+        <div style={S.card}>
+          <p style={S.empty}>
+            {filtro === "pendientes" ? "✅ ¡Todos los clientes en riesgo ya fueron contactados!" :
+             filtro === "contactados" ? "Ningún cliente marcado como contactado aún." :
+             "No hay clientes en riesgo con los datos actuales."}
+          </p>
+        </div>
+      ) : (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(340px, 1fr))", gap: 14 }}>
+          {clientesFiltrados.map((c: any) => {
+            const yaContactado = contactados.has(String(c.cliente_id));
+            const telLimpio = limpiarTelefono(c.telefono);
+            const msgWA = encodeURIComponent(
+              `Hola ${c.nombre}, le saludamos desde SÓLIDO AUTO SERVICIO SRL. ` +
+              `Han pasado ${c.dias_sin_visita} días desde su última visita. ` +
+              `¿Desea agendar un mantenimiento o revisión para su vehículo? ` +
+              `Llámenos al 809-712-2027 o responda este mensaje. ¡Gracias!`
+            );
+            const urlWA = `https://wa.me/${telLimpio}?text=${msgWA}`;
+
+            return (
+              <div key={c.cliente_id} style={{
+                background: yaContactado ? "#f0fdf4" : "#fff",
+                border: `2px solid ${yaContactado ? "#86efac" : c.nivel_riesgo === "ALTO" ? "#fca5a5" : "#fde68a"}`,
+                borderRadius: 14,
+                padding: 18,
+                boxShadow: "0 2px 10px rgba(0,0,0,.06)",
+                opacity: yaContactado ? 0.85 : 1,
+              }}>
+                {/* Header */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: 15, color: "#111827", marginBottom: 2 }}>
+                      {yaContactado ? "✅ " : ""}{c.nombre}
+                    </div>
                     <span style={{
-                      padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                      padding: "2px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
                       background: c.nivel_riesgo === "ALTO" ? "#fee2e2" : "#fef3c7",
                       color:      c.nivel_riesgo === "ALTO" ? "#dc2626" : "#d97706",
                     }}>
-                      {c.nivel_riesgo === "ALTO" ? "🔴 ALTO" : "🟡 MEDIO"}
+                      {c.nivel_riesgo === "ALTO" ? "🔴 RIESGO ALTO" : "🟡 RIESGO MEDIO"}
                     </span>
-                  </td>
-                  <td style={{ ...S.td, fontWeight: 700 }}>{c.nombre}</td>
-                  <td style={S.td}>
-                    {c.telefono
-                      ? <a href={`tel:${c.telefono}`} style={{ color: "#3b82f6" }}>{c.telefono}</a>
-                      : "—"}
-                  </td>
-                  <td style={S.td}>{c.visitas_total}</td>
-                  <td style={S.td}>{fmtDate(c.ultima_visita)}</td>
-                  <td style={{ ...S.td, fontWeight: 700, color: c.nivel_riesgo === "ALTO" ? "#ef4444" : "#f59e0b" }}>
-                    {c.dias_sin_visita} días
-                  </td>
-                  <td style={{ ...S.td, color: "#888" }}>cada {c.intervalo_promedio} días</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  </div>
+                  <button
+                    onClick={() => marcarContactado(String(c.cliente_id))}
+                    title={yaContactado ? "Marcar como pendiente" : "Marcar como contactado"}
+                    style={{
+                      padding: "6px 12px", borderRadius: 8, border: "none", cursor: "pointer",
+                      fontWeight: 700, fontSize: 12,
+                      background: yaContactado ? "#dcfce7" : "#f1f5f9",
+                      color: yaContactado ? "#16a34a" : "#374151",
+                    }}>
+                    {yaContactado ? "✅ Contactado" : "◻ Marcar"}
+                  </button>
+                </div>
+
+                {/* Info */}
+                <div style={{ fontSize: 13, color: "#555", marginBottom: 14, lineHeight: 1.7 }}>
+                  <div>🕐 Sin visitar: <b style={{ color: c.nivel_riesgo === "ALTO" ? "#ef4444" : "#f59e0b" }}>{c.dias_sin_visita} días</b></div>
+                  <div>📅 Última visita: <b>{fmtDate(c.ultima_visita)}</b></div>
+                  <div>🔁 Visitaba cada: <b>{c.intervalo_promedio} días</b> · {c.visitas_total} visitas totales</div>
+                  {c.email && <div>✉️ {c.email}</div>}
+                </div>
+
+                {/* Botones de contacto */}
+                {c.telefono ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <a href={`tel:${c.telefono}`}
+                      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                        gap: 6, padding: "10px", background: "#1d4ed8", color: "#fff",
+                        borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
+                      📞 Llamar
+                    </a>
+                    <a href={urlWA} target="_blank" rel="noopener noreferrer"
+                      style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center",
+                        gap: 6, padding: "10px", background: "#16a34a", color: "#fff",
+                        borderRadius: 10, fontWeight: 700, fontSize: 14, textDecoration: "none" }}>
+                      💬 WhatsApp
+                    </a>
+                  </div>
+                ) : (
+                  <div style={{ padding: "10px", background: "#f1f5f9", borderRadius: 8,
+                    fontSize: 13, color: "#aaa", textAlign: "center" }}>
+                    📵 Sin teléfono registrado
+                  </div>
+                )}
+              </div>
+            );
+          })}
         </div>
-        {d.length === 0 && <p style={S.empty}>¡Excelente! No hay clientes en riesgo de abandono con los datos actuales.</p>}
-      </div>
+      )}
     </div>
   );
 }

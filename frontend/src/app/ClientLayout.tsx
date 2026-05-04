@@ -47,20 +47,32 @@ export default function ClientLayout({ children }) {
   if (esPublica) return <>{children}</>;
 
   return (
-    <div style={{ display: "flex" }}>
-      
+    <div style={{ display: "flex", minHeight: "100vh" }}>
+
       {/* SIDEBAR */}
-      <aside style={{ width: sidebarOpen ? 250 : 70, background: "#111827", color: "#fff" }}>
-        
+      <aside style={{
+        width: sidebarOpen ? 250 : 70,
+        background: "#111827",
+        color: "#fff",
+        position: "sticky",
+        top: 0,
+        height: "100vh",
+        overflowY: "auto",
+        flexShrink: 0,
+        display: "flex",
+        flexDirection: "column",
+      }}>
+
         {/* LOGO AQUÍ 👇 */}
-        <div style={{ padding: 20 }}>
+        <div style={{ padding: 20, flexShrink: 0 }}>
           <Image src="/logo.png" alt="Logo" width={120} height={40} />
         </div>
 
         {/* MENU */}
         {MENU.filter(item => {
           if (!usuario) return true; // mostrar todo mientras carga para evitar parpadeo
-          const perms = PERMISOS[usuario.rol as keyof typeof PERMISOS] || Object.values(PERMISOS).flat();
+          const rol = ((usuario as any).rol || "").toLowerCase() as keyof typeof PERMISOS;
+          const perms = PERMISOS[rol] || Object.values(PERMISOS).flat();
           return perms.includes(item.key);
         }).map(item => {
           const activo = pathname.startsWith(item.href);
