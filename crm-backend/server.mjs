@@ -16,6 +16,21 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 
 app.get("/", (req, res) => res.send("🔥 SÓLIDO AUTO SERVICIO — SISTEMA ACTIVO"));
 
+// ── DIAGNÓSTICO TEMPORAL (borrar después de resolver el problema) ─────────────
+app.get("/debug", async (req, res) => {
+  const keyRaw  = process.env.SUPABASE_KEY || "";
+  const urlRaw  = process.env.SUPABASE_URL || "";
+  const keyPrev = keyRaw ? keyRaw.substring(0, 40) + "..." : "⚠️ NO ENCONTRADA";
+  const { data, error } = await supabase.from("clientes").select("count").limit(1);
+  res.json({
+    supabase_url:      urlRaw || "⚠️ NO ENCONTRADA",
+    supabase_key_prev: keyPrev,
+    key_length:        keyRaw.length,
+    query_data:        data,
+    query_error:       error ? { message: error.message, code: error.code, details: error.details } : null,
+  });
+});
+
 // =====================================================
 // 📌 CLIENTES
 // =====================================================
