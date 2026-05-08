@@ -67,6 +67,18 @@ app.post("/clientes", async (req, res) => {
   res.json(data[0]);
 });
 
+app.patch("/clientes/:id", async (req, res) => {
+  const { id } = req.params;
+  const { nombre, telefono, email } = req.body;
+  const campos: any = {};
+  if (nombre   !== undefined) campos.nombre   = nombre;
+  if (telefono !== undefined) campos.telefono = telefono;
+  if (email    !== undefined) campos.email    = email;
+  const { data, error } = await supabase.from("clientes").update(campos).eq("id", id).select();
+  if (error) return res.json({ error: error.message });
+  res.json(data[0]);
+});
+
 app.delete("/clientes/:id", async (req, res) => {
   const { id } = req.params;
   const { error } = await supabase.from("clientes").delete().eq("id", id);
@@ -191,13 +203,23 @@ app.post("/ordenes", async (req, res) => {
 
 app.patch("/ordenes/:id", async (req, res) => {
   const { id } = req.params;
-
-  // Bloquear cambio manual de estado — usar los endpoints dedicados (/aprobar, /rechazar, etc.)
   const campos = { ...req.body };
+
+  // Si viene un cambio de estado, usar la máquina de estados (kanban drag & drop)
   if (campos.estado !== undefined || campos.status !== undefined) {
-    return res.status(403).json({
-      error: "El estado de una orden no puede cambiarse manualmente. Usa los endpoints del flujo: /aprobar, /rechazar, /calidad-aprobada, /entregar."
-    });
+    const nuevoEstado = campos.estado || campos.status;
+    const usr = campos.usuario_nombre || "Sistema";
+    const uid = campos.usuario_id || null;
+    try {
+      const ordenActualizada = await transicionarEstado(Number(id), nuevoEstado, {
+        usuarioId: uid,
+        usuarioNombre: usr,
+        motivo: "Cambio desde kanban"
+      });
+      return res.json(ordenActualizada);
+    } catch (e) {
+      return res.status(400).json({ error: e.message });
+    }
   }
 
   const { data, error } = await supabase.from("ordenes_trabajo").update(campos).eq("id", id).select();
