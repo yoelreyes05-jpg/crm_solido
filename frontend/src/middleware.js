@@ -23,6 +23,8 @@ export function middleware(request) {
     pathname === "/login" ||
     pathname.startsWith("/cliente") ||
     pathname.startsWith("/catalogo") ||
+    pathname.startsWith("/repuestos") ||
+    pathname.startsWith("/menu") ||
     pathname === "/manifest.json" ||
     pathname === "/sw.js" ||
     pathname.startsWith("/icons") ||
