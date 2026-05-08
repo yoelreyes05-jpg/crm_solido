@@ -1,6 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
-
+import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 interface Order {
@@ -79,13 +79,16 @@ export default function OrdenesPage() {
     if (!form.descripcion.trim()) return alert("Escribe la descripción del trabajo");
 
     try {
+      const usr = JSON.parse(localStorage.getItem("usuario") || "{}");
       const res = await fetch(`${API}/ordenes`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cliente_id: Number(form.cliente_id),
-          vehiculo_id: Number(form.vehiculo_id),
-          descripcion: form.descripcion
+          cliente_id:      Number(form.cliente_id),
+          vehiculo_id:     Number(form.vehiculo_id),
+          descripcion:     form.descripcion,
+          usuario_id:      usr.id     || null,
+          usuario_nombre:  usr.nombre || "Sistema",
         })
       });
       const data = await res.json();
@@ -96,19 +99,6 @@ export default function OrdenesPage() {
       fetchAll();
     } catch {
       alert("Error al crear orden");
-    }
-  };
-
-  const cambiarEstado = async (id: number, estado: string) => {
-    try {
-      await fetch(`${API}/ordenes/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ estado, status: estado })
-      });
-      fetchAll();
-    } catch {
-      alert("Error al cambiar estado");
     }
   };
 
@@ -221,33 +211,30 @@ export default function OrdenesPage() {
                         <td style={td}>{o.vehiculo_info}</td>
                         <td style={{ ...td, maxWidth: 200 }}>{o.descripcion}</td>
                         <td style={td}>
-                          <select
-                            value={o.estado}
-                            onChange={e => cambiarEstado(o.id, e.target.value)}
-                            style={{
-                              background: color,
-                              color: "#fff",
-                              border: "none",
-                              borderRadius: 6,
-                              padding: "6px 10px",
-                              fontWeight: "bold",
-                              cursor: "pointer",
-                              fontSize: 12
-                            }}
-                          >
-                            {ESTADOS.map(s => (
-                              <option key={s} value={s} style={{ background: "#fff", color: "#111" }}>
-                                {s}
-                              </option>
-                            ))}
-                          </select>
+                          <span style={{
+                            background: color + "22",
+                            color,
+                            border: `1.5px solid ${color}44`,
+                            borderRadius: 14,
+                            padding: "4px 12px",
+                            fontWeight: 800,
+                            fontSize: 11,
+                            whiteSpace: "nowrap",
+                          }}>
+                            {o.estado}
+                          </span>
                         </td>
                         <td style={td}>
                           {o.created_at
                             ? new Date(o.created_at).toLocaleString("es-DO")
                             : "Sin fecha"}
                         </td>
-                        <td style={td}>
+                        <td style={{ ...td, display: "flex", gap: 6, flexWrap: "wrap" }}>
+                          <Link href={`/ordenes/${o.id}`}>
+                            <button style={{ padding: "5px 10px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                              👁 Ver
+                            </button>
+                          </Link>
                           <button
                             onClick={() => eliminarOrden(o.id)}
                             style={btnEliminar}

@@ -168,17 +168,39 @@ app.get("/ordenes", async (req, res) => {
 });
 
 app.post("/ordenes", async (req, res) => {
-  const { cliente_id, vehiculo_id, descripcion } = req.body;
+  const { cliente_id, vehiculo_id, descripcion, usuario_id, usuario_nombre } = req.body;
   const { data, error } = await supabase.from("ordenes_trabajo")
     .insert([{ cliente_id, vehiculo_id, descripcion, estado: "RECIBIDO", status: "RECIBIDO", total: 0, created_at: new Date() }])
     .select();
   if (error) return res.json({ error: error.message });
+
+  // Registrar en log de auditoría — estado inicial RECIBIDO
+  await supabase.from("orden_trabajo_log").insert([{
+    orden_id:       data[0].id,
+    estado_anterior: null,
+    estado_nuevo:    "RECIBIDO",
+    usuario_id:      usuario_id || null,
+    usuario_nombre:  usuario_nombre || "Sistema",
+    motivo:          "Orden creada",
+    metadata:        {},
+    created_at:      new Date().toISOString(),
+  }]).catch(err => console.warn("⚠️ Log inicial no registrado (¿tabla existe?):", err.message));
+
   res.json(data[0]);
 });
 
 app.patch("/ordenes/:id", async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase.from("ordenes_trabajo").update(req.body).eq("id", id).select();
+
+  // Bloquear cambio manual de estado — usar los endpoints dedicados (/aprobar, /rechazar, etc.)
+  const campos = { ...req.body };
+  if (campos.estado !== undefined || campos.status !== undefined) {
+    return res.status(403).json({
+      error: "El estado de una orden no puede cambiarse manualmente. Usa los endpoints del flujo: /aprobar, /rechazar, /calidad-aprobada, /entregar."
+    });
+  }
+
+  const { data, error } = await supabase.from("ordenes_trabajo").update(campos).eq("id", id).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
@@ -651,8 +673,25 @@ app.get("/diagnosticos/:id", async (req, res) => {
 });
 
 app.post("/diagnosticos", async (req, res) => {
-  const { data, error } = await supabase.from("diagnosticos").insert([{ ...req.body, estado: "PENDIENTE", created_at: new Date() }]).select();
+  const { data, error } = await supabase.from("diagnosticos")
+    .insert([{ ...req.body, estado: "PENDIENTE", created_at: new Date() }])
+    .select();
   if (error) return res.json({ error: error.message });
+
+  // Auto-transicionar la orden vinculada a DIAGNOSTICO
+  const ordenId = req.body.orden_id;
+  if (ordenId) {
+    const result = await transicionarEstado(Number(ordenId), "DIAGNOSTICO", {
+      usuarioId:     req.body.usuario_id    || null,
+      usuarioNombre: req.body.usuario_nombre || "Técnico",
+      motivo: "Técnico abrió diagnóstico",
+    });
+    if (!result.ok) {
+      // No bloquear si la transición ya fue hecha (ej: ya está en DIAGNOSTICO)
+      console.warn(`⚠️ Transición DIAGNOSTICO para orden ${ordenId}: ${result.error}`);
+    }
+  }
+
   res.json(data[0]);
 });
 
@@ -660,6 +699,23 @@ app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
   const { data, error } = await supabase.from("diagnosticos").update(req.body).eq("id", id).select();
   if (error) return res.json({ error: error.message });
+
+  const diag = data[0];
+
+  // ── Cuando el técnico marca el diagnóstico como TERMINADO → orden pasa a CONTROL_CALIDAD ──
+  if (req.body.estado === "TERMINADO" || req.body.terminado === true) {
+    if (diag?.orden_id) {
+      const r = await transicionarEstado(Number(diag.orden_id), "CONTROL_CALIDAD", {
+        usuarioId:     req.body.usuario_id     || null,
+        usuarioNombre: req.body.usuario_nombre || "Técnico",
+        motivo: "Técnico marcó reparación como terminada",
+      });
+      if (!r.ok) console.warn(`⚠️ Transición CONTROL_CALIDAD orden ${diag.orden_id}: ${r.error}`);
+    }
+  }
+
+  // ── Cuando el técnico agrega avance de reparación → orden ya debe estar en REPARACION ──
+  // (manejado en POST /avances, pero dejamos aquí como respaldo)
 
   // 📚 Auto-crear historial + mantenimiento cuando el diagnóstico pasa a FACTURADO o COMPLETADO
   if (req.body.estado === "FACTURADO" || req.body.estado === "COMPLETADO") {
@@ -671,7 +727,7 @@ app.patch("/diagnosticos/:id", async (req, res) => {
     );
   }
 
-  res.json(data[0]);
+  res.json(diag);
 });
 
 // =====================================================
@@ -722,12 +778,24 @@ app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
 // ⚙️ AVANCES
 // =====================================================
 app.post("/avances", async (req, res) => {
-  const { diagnostico_id, descripcion, tecnico_nombre } = req.body;
+  const { diagnostico_id, descripcion, tecnico_nombre, usuario_id } = req.body;
   const { data, error } = await supabase.from("avances_reparacion")
     .insert([{ diagnostico_id, descripcion, tecnico_nombre, created_at: new Date() }])
     .select();
   if (error) return res.json({ error: error.message });
   await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagnostico_id);
+
+  // Auto-transicionar la orden a REPARACION si está en DIAGNOSTICO
+  const { data: diag } = await supabase.from("diagnosticos").select("orden_id").eq("id", diagnostico_id).single();
+  if (diag?.orden_id) {
+    const r = await transicionarEstado(Number(diag.orden_id), "REPARACION", {
+      usuarioId:     usuario_id   || null,
+      usuarioNombre: tecnico_nombre || "Técnico",
+      motivo: "Técnico inició reparación (primer avance registrado)",
+    });
+    if (!r.ok) console.warn(`⚠️ Transición REPARACION orden ${diag.orden_id}: ${r.error}`);
+  }
+
   res.json(data[0]);
 });
 
@@ -3116,6 +3184,296 @@ app.patch("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
     if (error) return res.status(400).json({ error: error.message });
     res.json(data[0]);
   } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// =====================================================
+// 🔄 MÁQUINA DE ESTADOS — FLUJO AUTOMÁTICO DE ÓRDENES
+// =====================================================
+
+// Transiciones válidas: [estado_actual] → estados_permitidos[]
+const TRANSICIONES_VALIDAS = {
+  RECIBIDO:        ["DIAGNOSTICO"],
+  DIAGNOSTICO:     ["REPARACION", "CANCELADA"],
+  REPARACION:      ["CONTROL_CALIDAD"],
+  CONTROL_CALIDAD: ["LISTO"],
+  LISTO:           ["ENTREGADO"],
+  CANCELADA:       [],
+  ENTREGADO:       [],
+};
+
+/**
+ * transicionarEstado — cambia el estado de una orden de forma controlada
+ * y deja registro en orden_trabajo_log.
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usuarioNombre = "Sistema", motivo = null, extra = {} } = {}) {
+  // Leer orden actual
+  const { data: orden, error: errLeer } = await supabase
+    .from("ordenes_trabajo")
+    .select("id, estado")
+    .eq("id", ordenId)
+    .single();
+
+  if (errLeer || !orden) return { ok: false, error: "Orden no encontrada" };
+
+  const estadoActual = orden.estado || "RECIBIDO";
+
+  // Validar que la transición sea permitida
+  const permitidos = TRANSICIONES_VALIDAS[estadoActual] || [];
+  if (!permitidos.includes(nuevoEstado)) {
+    return {
+      ok: false,
+      error: `Transición inválida: ${estadoActual} → ${nuevoEstado}. Permitidas: ${permitidos.join(", ") || "ninguna"}`
+    };
+  }
+
+  // Campos de fecha según destino
+  const camposFecha = {
+    DIAGNOSTICO:     { fecha_diagnostico:       new Date().toISOString() },
+    REPARACION:      { fecha_inicio_reparacion:  new Date().toISOString() },
+    CANCELADA:       { fecha_cancelacion:        new Date().toISOString() },
+    CONTROL_CALIDAD: { fecha_control_calidad:    new Date().toISOString() },
+    LISTO:           { fecha_listo:              new Date().toISOString() },
+    ENTREGADO:       { fecha_entrega:            new Date().toISOString() },
+  };
+
+  // Actualizar estado en la orden
+  const updatePayload = {
+    estado: nuevoEstado,
+    status: nuevoEstado,
+    ...(camposFecha[nuevoEstado] || {}),
+    ...extra,
+  };
+
+  const { error: errUpdate } = await supabase
+    .from("ordenes_trabajo")
+    .update(updatePayload)
+    .eq("id", ordenId);
+
+  if (errUpdate) return { ok: false, error: errUpdate.message };
+
+  // Insertar en log de auditoría
+  await supabase.from("orden_trabajo_log").insert([{
+    orden_id:       ordenId,
+    estado_anterior: estadoActual,
+    estado_nuevo:    nuevoEstado,
+    usuario_id:      usuarioId,
+    usuario_nombre:  usuarioNombre,
+    motivo:          motivo,
+    metadata:        extra,
+    created_at:      new Date().toISOString(),
+  }]).catch(err => console.warn("⚠️ No se pudo escribir log (¿tabla existe?):", err.message));
+
+  return { ok: true };
+}
+
+// ── GET /ordenes/:id — detalle completo de una orden ────────────────────────
+app.get("/ordenes/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: orden } = await supabase.from("ordenes_trabajo").select("*").eq("id", id).single();
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+    const [{ data: cliente }, { data: vehiculo }, { data: diagnostico }, { data: log }, { data: inspeccion }] = await Promise.all([
+      supabase.from("clientes").select("*").eq("id", orden.cliente_id).single(),
+      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).single(),
+      supabase.from("diagnosticos").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+      supabase.from("orden_trabajo_log").select("*").eq("orden_id", id).order("created_at", { ascending: true }),
+      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    ]);
+
+    res.json({ orden, cliente, vehiculo, diagnostico, log: log || [], inspeccion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── GET /ordenes/:id/log — historial de estados ─────────────────────────────
+app.get("/ordenes/:id/log", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("orden_trabajo_log")
+      .select("*")
+      .eq("orden_id", req.params.id)
+      .order("created_at", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/aprobar — cliente aprueba la reparación ───────────────
+app.post("/ordenes/:id/aprobar", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo } = req.body;
+    const result = await transicionarEstado(Number(id), "REPARACION", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Cliente",
+      motivo: motivo || "Cliente aprobó la reparación",
+      extra: { aprobado_por_cliente: true, fecha_aprobacion: new Date().toISOString() },
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    // Actualizar diagnóstico vinculado si existe
+    await supabase.from("diagnosticos").update({ estado: "APROBADO" }).eq("orden_id", id);
+    res.json({ ok: true, mensaje: "Orden pasó a REPARACIÓN" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/rechazar — cliente rechaza la reparación ──────────────
+app.post("/ordenes/:id/rechazar", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo } = req.body;
+    const result = await transicionarEstado(Number(id), "CANCELADA", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Cliente",
+      motivo: motivo || "Cliente rechazó la reparación",
+      extra: { aprobado_por_cliente: false, motivo_cancelacion: motivo || "Rechazado por cliente" },
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    await supabase.from("diagnosticos").update({ estado: "RECHAZADO" }).eq("orden_id", id);
+    res.json({ ok: true, mensaje: "Orden CANCELADA" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/calidad-aprobada — pasa control de calidad → LISTO ───
+app.post("/ordenes/:id/calidad-aprobada", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo } = req.body;
+    const result = await transicionarEstado(Number(id), "LISTO", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Encargado",
+      motivo: motivo || "Pasó control de calidad",
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ ok: true, mensaje: "Vehículo LISTO para entrega" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/entregar — cliente paga y recibe el vehículo ──────────
+app.post("/ordenes/:id/entregar", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo, notas_entrega } = req.body;
+    const result = await transicionarEstado(Number(id), "ENTREGADO", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Recepcionista",
+      motivo: motivo || "Vehículo entregado al cliente",
+      extra: { notas_entrega: notas_entrega || null },
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    // Crear historial automático
+    const { data: diag } = await supabase
+      .from("diagnosticos").select("id").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (diag?.id) {
+      crearHistorialDesdeDiagnostico(diag.id).catch(console.error);
+      crearMantenimientoDesdeDiagnostico(diag.id).catch(console.error);
+    }
+    res.json({ ok: true, mensaje: "Vehículo ENTREGADO — orden cerrada" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 📋 INSPECCIÓN DE VEHÍCULO
+// =====================================================
+
+// POST /inspeccion — crear inspección al recibir el vehículo
+app.post("/inspeccion", async (req, res) => {
+  try {
+    const {
+      orden_id, vehiculo_id, cliente_id,
+      km_entrada, nivel_combustible, condicion_general,
+      zonas_danio, rayones, golpes, estado_vidrios,
+      estado_llantas, estado_pintura,
+      radio_pantalla, tapiceria_ok, alfombras_ok, luces_ok,
+      bocina_ok, espejos_ok, gato_ok, llanta_repuesto_ok,
+      documentos_ok, herramientas_ok, otros_accesorios,
+      fotos, firma_cliente, observaciones,
+      creado_por_id, creado_por_nombre,
+    } = req.body;
+
+    if (!orden_id) return res.status(400).json({ error: "orden_id es requerido" });
+
+    const { data, error } = await supabase
+      .from("inspeccion_vehiculo")
+      .insert([{
+        orden_id, vehiculo_id: vehiculo_id || null, cliente_id: cliente_id || null,
+        km_entrada: km_entrada ? Number(km_entrada) : null,
+        nivel_combustible: nivel_combustible !== undefined ? Number(nivel_combustible) : 0,
+        condicion_general: condicion_general || null,
+        zonas_danio: zonas_danio || [],
+        rayones: rayones || null, golpes: golpes || null,
+        estado_vidrios: estado_vidrios || null,
+        estado_llantas: estado_llantas || null,
+        estado_pintura: estado_pintura || null,
+        radio_pantalla:    Boolean(radio_pantalla),
+        tapiceria_ok:      Boolean(tapiceria_ok),
+        alfombras_ok:      Boolean(alfombras_ok),
+        luces_ok:          Boolean(luces_ok),
+        bocina_ok:         Boolean(bocina_ok),
+        espejos_ok:        Boolean(espejos_ok),
+        gato_ok:           Boolean(gato_ok),
+        llanta_repuesto_ok: Boolean(llanta_repuesto_ok),
+        documentos_ok:     Boolean(documentos_ok),
+        herramientas_ok:   Boolean(herramientas_ok),
+        otros_accesorios: otros_accesorios || null,
+        fotos: fotos || [],
+        firma_cliente: firma_cliente || null,
+        observaciones: observaciones || null,
+        creado_por_id: creado_por_id || null,
+        creado_por_nombre: creado_por_nombre || "Sistema",
+        created_at: new Date().toISOString(),
+        updated_at: new Date().toISOString(),
+      }])
+      .select()
+      .single();
+
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /inspeccion/orden/:ordenId — obtener inspección de una orden
+app.get("/inspeccion/orden/:ordenId", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("inspeccion_vehiculo")
+      .select("*")
+      .eq("orden_id", req.params.ordenId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || null);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PATCH /inspeccion/:id — actualizar inspección (agregar fotos, firma, etc.)
+app.patch("/inspeccion/:id", async (req, res) => {
+  try {
+    const campos = { ...req.body, updated_at: new Date().toISOString() };
+    const { data, error } = await supabase
+      .from("inspeccion_vehiculo")
+      .update(campos)
+      .eq("id", req.params.id)
+      .select()
+      .single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // =====================================================
