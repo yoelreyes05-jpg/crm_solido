@@ -21,13 +21,34 @@ app.get("/debug", async (req, res) => {
   const keyRaw  = process.env.SUPABASE_KEY || "";
   const urlRaw  = process.env.SUPABASE_URL || "";
   const keyPrev = keyRaw ? keyRaw.substring(0, 40) + "..." : "⚠️ NO ENCONTRADA";
-  const { data, error } = await supabase.from("clientes").select("count").limit(1);
+
+  // Test 1: Supabase JS client
+  const { data: clientData, error: clientError } = await supabase.from("clientes").select("count").limit(1);
+
+  // Test 2: Fetch directo a la REST API (sin cliente JS)
+  let fetchResult = null;
+  let fetchError  = null;
+  try {
+    const r = await fetch(`${urlRaw}/rest/v1/clientes?select=count&limit=1`, {
+      headers: {
+        "apikey":        keyRaw,
+        "Authorization": `Bearer ${keyRaw}`,
+        "Content-Type":  "application/json",
+      },
+    });
+    fetchResult = { status: r.status, ok: r.ok, body: await r.text() };
+  } catch (e) {
+    fetchError = e.message;
+  }
+
   res.json({
-    supabase_url:      urlRaw || "⚠️ NO ENCONTRADA",
-    supabase_key_prev: keyPrev,
-    key_length:        keyRaw.length,
-    query_data:        data,
-    query_error:       error ? { message: error.message, code: error.code, details: error.details } : null,
+    supabase_url:       urlRaw || "⚠️ NO ENCONTRADA",
+    supabase_key_prev:  keyPrev,
+    key_length:         keyRaw.length,
+    client_data:        clientData,
+    client_error:       clientError ? { message: clientError.message, code: clientError.code } : null,
+    fetch_directo:      fetchResult,
+    fetch_directo_error: fetchError,
   });
 });
 
