@@ -24,6 +24,7 @@ export default function LoginPage() {
       if (data.error) { setError(data.error); return; }
 
       localStorage.setItem("usuario", JSON.stringify(data.usuario));
+      if (data.token) localStorage.setItem("crm_token", data.token);
       document.cookie = `usuario=${encodeURIComponent(JSON.stringify(data.usuario))};path=/;max-age=86400`;
 
       const destinos: Record<string, string> = {

@@ -6,13 +6,14 @@ import { API_URL as API } from "@/config";
 
 // ── Config de estados ─────────────────────────────────────────────────────────
 const ESTADO_CONFIG: Record<string, { color: string; bg: string; icon: string; label: string }> = {
-  RECIBIDO:        { color: "#1d4ed8", bg: "#dbeafe", icon: "📥", label: "Recibido" },
-  DIAGNOSTICO:     { color: "#92400e", bg: "#fef3c7", icon: "🔬", label: "Diagnóstico" },
-  REPARACION:      { color: "#991b1b", bg: "#fee2e2", icon: "🔧", label: "Reparación" },
-  CONTROL_CALIDAD: { color: "#5b21b6", bg: "#ede9fe", icon: "✅", label: "Control Calidad" },
-  LISTO:           { color: "#065f46", bg: "#d1fae5", icon: "🎉", label: "Listo" },
-  ENTREGADO:       { color: "#374151", bg: "#f3f4f6", icon: "🏁", label: "Entregado" },
-  CANCELADA:       { color: "#7f1d1d", bg: "#fee2e2", icon: "❌", label: "Cancelada" },
+  RECIBIDO:             { color: "#1d4ed8", bg: "#dbeafe", icon: "📥", label: "Recibido" },
+  DIAGNOSTICO:          { color: "#92400e", bg: "#fef3c7", icon: "🔬", label: "Diagnóstico" },
+  ESPERANDO_APROBACION: { color: "#c2410c", bg: "#ffedd5", icon: "⏳", label: "Esp. Aprobación" },
+  REPARACION:           { color: "#991b1b", bg: "#fee2e2", icon: "🔧", label: "Reparación" },
+  CONTROL_CALIDAD:      { color: "#5b21b6", bg: "#ede9fe", icon: "✅", label: "Control Calidad" },
+  LISTO:                { color: "#065f46", bg: "#d1fae5", icon: "🎉", label: "Listo" },
+  ENTREGADO:            { color: "#374151", bg: "#f3f4f6", icon: "🏁", label: "Entregado" },
+  CANCELADA:            { color: "#7f1d1d", bg: "#fee2e2", icon: "❌", label: "Cancelada" },
 };
 
 export default function OrdenDetallePage() {

@@ -16,15 +16,17 @@ interface Order {
 interface Cliente { id: number; nombre: string; }
 interface Vehiculo { id: number; marca: string; modelo: string; placa: string; cliente_id: number; }
 
-const ESTADOS = ["RECIBIDO", "DIAGNOSTICO", "REPARACION", "CONTROL_CALIDAD", "LISTO", "ENTREGADO"];
+const ESTADOS = ["RECIBIDO", "DIAGNOSTICO", "ESPERANDO_APROBACION", "REPARACION", "CONTROL_CALIDAD", "LISTO", "ENTREGADO", "CANCELADA"];
 
 const STATUS_COLORS: Record<string, string> = {
-  RECIBIDO: "#3b82f6",
-  DIAGNOSTICO: "#f59e0b",
-  REPARACION: "#ef4444",
-  CONTROL_CALIDAD: "#8b5cf6",
-  LISTO: "#10b981",
-  ENTREGADO: "#6b7280"
+  RECIBIDO:             "#3b82f6",
+  DIAGNOSTICO:          "#f59e0b",
+  ESPERANDO_APROBACION: "#f97316",
+  REPARACION:           "#ef4444",
+  CONTROL_CALIDAD:      "#8b5cf6",
+  LISTO:                "#10b981",
+  ENTREGADO:            "#6b7280",
+  CANCELADA:            "#dc2626",
 };
 
 
@@ -206,7 +208,9 @@ export default function OrdenesPage() {
                     const color = STATUS_COLORS[o.estado] || "#7f8c8d";
                     return (
                       <tr key={o.id}>
-                        <td style={td}>#{o.id}</td>
+                        <td style={{ ...td, fontWeight: 700, whiteSpace: "nowrap" }}>
+                          {(o as any).numero_orden || `OT-${String(o.id).padStart(4, "0")}`}
+                        </td>
                         <td style={{ ...td, fontWeight: 600 }}>{o.cliente_nombre}</td>
                         <td style={td}>{o.vehiculo_info}</td>
                         <td style={{ ...td, maxWidth: 200 }}>{o.descripcion}</td>

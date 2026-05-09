@@ -14,12 +14,14 @@ const ESTADOS_COLOR: Record<string, string> = {
 };
 
 const ORDEN_ESTADO_LABEL: Record<string, { label: string; color: string }> = {
-  RECIBIDO:        { label: "Recibido",       color: "#3b82f6" },
-  DIAGNOSTICO:     { label: "Diagnóstico",    color: "#f59e0b" },
-  REPARACION:      { label: "En Reparación",  color: "#ef4444" },
-  CONTROL_CALIDAD: { label: "Ctrl. Calidad",  color: "#8b5cf6" },
-  LISTO:           { label: "Listo",          color: "#10b981" },
-  ENTREGADO:       { label: "Entregado",      color: "#6b7280" },
+  RECIBIDO:              { label: "Recibido",            color: "#3b82f6" },
+  DIAGNOSTICO:           { label: "Diagnóstico",         color: "#f59e0b" },
+  ESPERANDO_APROBACION:  { label: "Esp. Aprobación",     color: "#f97316" },
+  REPARACION:            { label: "En Reparación",       color: "#ef4444" },
+  CONTROL_CALIDAD:       { label: "Ctrl. Calidad",       color: "#8b5cf6" },
+  LISTO:                 { label: "Listo",               color: "#10b981" },
+  ENTREGADO:             { label: "Entregado",           color: "#6b7280" },
+  CANCELADA:             { label: "Cancelada",           color: "#dc2626" },
 };
 
 const imprimirFormatoTecnico = (detalle: any) => {
@@ -100,10 +102,9 @@ export default function DiagnosticosPage() {
       const diags = await dRes.json();
       const ords  = await oRes.json();
       setDiagnosticos(Array.isArray(diags) ? diags : []);
-      // Cola del técnico: órdenes en RECIBIDO sin diagnóstico aún
-      const conDiag = new Set((Array.isArray(diags) ? diags : []).map((d: any) => d.orden_id).filter(Boolean));
+      // Cola del técnico: órdenes en estado RECIBIDO o DIAGNOSTICO (esperando diagnóstico inicial)
       const pendientes = (Array.isArray(ords) ? ords : []).filter(
-        (o: any) => o.estado === "RECIBIDO" && !conDiag.has(o.id)
+        (o: any) => o.estado === "RECIBIDO" || o.estado === "DIAGNOSTICO"
       );
       setOrdenesPendientes(pendientes);
     } catch { }

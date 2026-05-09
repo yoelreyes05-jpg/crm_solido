@@ -4,13 +4,72 @@ import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 
+import jwt from "jsonwebtoken";
+
+const JWT_SECRET = process.env.JWT_SECRET || "solido_auto_secret_2026_cambiar_en_produccion";
+const JWT_EXPIRES = "12h";
+
 const app = express();
+
+// CORS: restringir a dominios propios en producción
+const CORS_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map(o => o.trim())
+  : ["*"];
+
 app.use(cors({
-  origin: "*",
+  origin: (origin, callback) => {
+    if (!origin || CORS_ORIGINS.includes("*") || CORS_ORIGINS.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("No permitido por CORS"));
+    }
+  },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
   allowedHeaders: ["Content-Type", "Authorization"]
 }));
-app.use(express.json());
+app.use(express.json({ limit: "10mb" }));
+
+// ── Middleware de autenticación JWT ──────────────────────────────────────────
+// JWT_REQUIRED=true en .env activa verificación estricta.
+// Durante la migración se puede dejar en false (modo soft: solo loguea warnings).
+const JWT_REQUIRED = process.env.JWT_REQUIRED === "true";
+
+const RUTAS_PUBLICAS = [
+  "/auth/login",
+  "/vehiculo-historial/placa/",
+  "/estado",
+  "/cliente",
+  "/pantalla",
+];
+
+function authMiddleware(req, res, next) {
+  // Rutas públicas: siempre pasan
+  if (RUTAS_PUBLICAS.some(p => req.path.startsWith(p))) return next();
+
+  const authHeader = req.headers["authorization"];
+  const token = authHeader && authHeader.startsWith("Bearer ")
+    ? authHeader.slice(7)
+    : null;
+
+  if (!token) {
+    if (JWT_REQUIRED) return res.status(401).json({ error: "No autorizado — token requerido" });
+    // Modo soft: continúa sin usuario autenticado
+    req.usuario = null;
+    return next();
+  }
+
+  try {
+    const payload = jwt.verify(token, JWT_SECRET);
+    req.usuario = payload;
+    next();
+  } catch {
+    if (JWT_REQUIRED) return res.status(401).json({ error: "Token inválido o expirado" });
+    req.usuario = null;
+    next();
+  }
+}
+
+app.use(authMiddleware);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -56,7 +115,11 @@ app.get("/debug", async (req, res) => {
 // 📌 CLIENTES
 // =====================================================
 app.get("/clientes", async (req, res) => {
-  const { data } = await supabase.from("clientes").select("*").order("id", { ascending: false });
+  const { data } = await supabase
+    .from("clientes")
+    .select("*")
+    .or("activo.eq.true,activo.is.null")
+    .order("id", { ascending: false });
   res.json(data || []);
 });
 
@@ -81,9 +144,10 @@ app.patch("/clientes/:id", async (req, res) => {
 
 app.delete("/clientes/:id", async (req, res) => {
   const { id } = req.params;
-  const { error } = await supabase.from("clientes").delete().eq("id", id);
+  // Soft delete: marcar como inactivo preserva historial de órdenes y vehículos
+  const { error } = await supabase.from("clientes").update({ activo: false }).eq("id", id);
   if (error) return res.json({ error: error.message });
-  res.json({ ok: true });
+  res.json({ ok: true, archived: true });
 });
 
 // Historial completo de un cliente
@@ -118,7 +182,10 @@ app.get("/vehiculos/catalogo", (req, res) => {
 });
 
 app.get("/vehiculos", async (req, res) => {
-  const { data: vehiculos } = await supabase.from("vehiculos").select("*");
+  const { data: vehiculos } = await supabase
+    .from("vehiculos")
+    .select("*")
+    .or("activo.eq.true,activo.is.null");
   const { data: clientes } = await supabase.from("clientes").select("id, nombre");
   const fixed = (vehiculos || []).map(v => ({
     ...v,
@@ -136,9 +203,10 @@ app.post("/vehiculos", async (req, res) => {
 
 app.delete("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
-  const { error } = await supabase.from("vehiculos").delete().eq("id", id);
+  // Soft delete: preserva historial de órdenes y diagnósticos
+  const { error } = await supabase.from("vehiculos").update({ activo: false }).eq("id", id);
   if (error) return res.json({ error: error.message });
-  res.json({ ok: true });
+  res.json({ ok: true, archived: true });
 });
 
 app.patch("/vehiculos/:id", async (req, res) => {
@@ -164,6 +232,7 @@ app.get("/ordenes", async (req, res) => {
     const fixed = ordenes.map(o => ({
       ...o,
       estado: o.estado || o.status || "RECIBIDO",
+      numero_orden: o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
       cliente_nombre:    clientes?.find(c => c.id === o.cliente_id)?.nombre    || "Sin cliente",
       cliente_telefono:  clientes?.find(c => c.id === o.cliente_id)?.telefono  || "",
       vehiculo_info: (() => {
@@ -756,7 +825,7 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 // 💰 COTIZACIONES (internas de diagnóstico)
 // =====================================================
 app.post("/cotizaciones/diagnostico", async (req, res) => {
-  const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas } = req.body;
+  const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas, usuario_id, usuario_nombre } = req.body;
 
   const totalCalculado = Number(mano_obra || 0) + Number(repuestos || 0);
 
@@ -783,6 +852,17 @@ app.post("/cotizaciones/diagnostico", async (req, res) => {
     .eq("id", diagnostico_id);
 
   await supabase.from("diagnosticos").update({ estado: "COTIZADO" }).eq("id", diagnostico_id);
+
+  // Transicionar orden a ESPERANDO_APROBACION automáticamente al guardar cotización
+  const { data: diag } = await supabase.from("diagnosticos").select("orden_id").eq("id", diagnostico_id).single();
+  if (diag?.orden_id) {
+    await transicionarEstado(Number(diag.orden_id), "ESPERANDO_APROBACION", {
+      usuarioId: usuario_id || null,
+      usuarioNombre: usuario_nombre || "Sistema",
+      motivo: "Cotización guardada, esperando aprobación del cliente",
+    }).catch(e => console.warn("⚠️ No se pudo transicionar a ESPERANDO_APROBACION:", e.message));
+  }
+
   res.json(result);
 });
 
@@ -915,8 +995,23 @@ app.post("/auth/login", async (req, res) => {
     .eq("activo", true)
     .single();
   if (!data) return res.json({ error: "Credenciales incorrectas o usuario inactivo" });
+
+  // Actualizar último acceso
+  await supabase.from("usuarios")
+    .update({ ultimo_acceso: new Date().toISOString() })
+    .eq("id", data.id)
+    .catch(() => {});
+
   const { password_hash, ...usuario } = data;
-  res.json({ ok: true, usuario });
+
+  // Generar JWT firmado
+  const token = jwt.sign(
+    { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol },
+    JWT_SECRET,
+    { expiresIn: JWT_EXPIRES }
+  );
+
+  res.json({ ok: true, usuario, token });
 });
 
 // =====================================================
@@ -3214,13 +3309,14 @@ app.patch("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
 
 // Transiciones válidas: [estado_actual] → estados_permitidos[]
 const TRANSICIONES_VALIDAS = {
-  RECIBIDO:        ["DIAGNOSTICO"],
-  DIAGNOSTICO:     ["REPARACION", "CANCELADA"],
-  REPARACION:      ["CONTROL_CALIDAD"],
-  CONTROL_CALIDAD: ["LISTO"],
-  LISTO:           ["ENTREGADO"],
-  CANCELADA:       [],
-  ENTREGADO:       [],
+  RECIBIDO:              ["DIAGNOSTICO"],
+  DIAGNOSTICO:           ["ESPERANDO_APROBACION", "REPARACION", "CANCELADA"],
+  ESPERANDO_APROBACION:  ["REPARACION", "CANCELADA"],
+  REPARACION:            ["CONTROL_CALIDAD"],
+  CONTROL_CALIDAD:       ["LISTO", "REPARACION"],   // puede devolver al técnico
+  LISTO:                 ["ENTREGADO"],
+  CANCELADA:             [],
+  ENTREGADO:             [],
 };
 
 /**
@@ -3251,12 +3347,13 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
 
   // Campos de fecha según destino
   const camposFecha = {
-    DIAGNOSTICO:     { fecha_diagnostico:       new Date().toISOString() },
-    REPARACION:      { fecha_inicio_reparacion:  new Date().toISOString() },
-    CANCELADA:       { fecha_cancelacion:        new Date().toISOString() },
-    CONTROL_CALIDAD: { fecha_control_calidad:    new Date().toISOString() },
-    LISTO:           { fecha_listo:              new Date().toISOString() },
-    ENTREGADO:       { fecha_entrega:            new Date().toISOString() },
+    DIAGNOSTICO:           { fecha_diagnostico:           new Date().toISOString() },
+    ESPERANDO_APROBACION:  { fecha_esperando_aprobacion:  new Date().toISOString() },
+    REPARACION:            { fecha_inicio_reparacion:     new Date().toISOString() },
+    CANCELADA:             { fecha_cancelacion:           new Date().toISOString() },
+    CONTROL_CALIDAD:       { fecha_control_calidad:       new Date().toISOString() },
+    LISTO:                 { fecha_listo:                 new Date().toISOString() },
+    ENTREGADO:             { fecha_entrega:               new Date().toISOString() },
   };
 
   // Actualizar estado en la orden
@@ -3326,10 +3423,21 @@ app.get("/ordenes/:id/log", async (req, res) => {
 });
 
 // ── POST /ordenes/:id/aprobar — cliente aprueba la reparación ───────────────
+// Acepta desde DIAGNOSTICO o ESPERANDO_APROBACION → REPARACION
 app.post("/ordenes/:id/aprobar", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo } = req.body;
+
+    // Verificar estado actual antes de transicionar
+    const { data: orden } = await supabase.from("ordenes_trabajo").select("estado").eq("id", id).single();
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+    const estadoOrigen = orden.estado;
+    if (!["DIAGNOSTICO", "ESPERANDO_APROBACION"].includes(estadoOrigen)) {
+      return res.status(400).json({ error: `No se puede aprobar desde estado ${estadoOrigen}` });
+    }
+
     const result = await transicionarEstado(Number(id), "REPARACION", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Cliente",
       motivo: motivo || "Cliente aprobó la reparación",
@@ -3345,10 +3453,19 @@ app.post("/ordenes/:id/aprobar", async (req, res) => {
 });
 
 // ── POST /ordenes/:id/rechazar — cliente rechaza la reparación ──────────────
+// Acepta desde DIAGNOSTICO o ESPERANDO_APROBACION → CANCELADA
 app.post("/ordenes/:id/rechazar", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo } = req.body;
+
+    const { data: orden } = await supabase.from("ordenes_trabajo").select("estado").eq("id", id).single();
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+    if (!["DIAGNOSTICO", "ESPERANDO_APROBACION"].includes(orden.estado)) {
+      return res.status(400).json({ error: `No se puede rechazar desde estado ${orden.estado}` });
+    }
+
     const result = await transicionarEstado(Number(id), "CANCELADA", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Cliente",
       motivo: motivo || "Cliente rechazó la reparación",
