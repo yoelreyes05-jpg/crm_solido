@@ -133,7 +133,7 @@ app.post("/clientes", async (req, res) => {
 app.patch("/clientes/:id", async (req, res) => {
   const { id } = req.params;
   const { nombre, telefono, email } = req.body;
-  const campos: any = {};
+  const campos = {};
   if (nombre   !== undefined) campos.nombre   = nombre;
   if (telefono !== undefined) campos.telefono = telefono;
   if (email    !== undefined) campos.email    = email;
