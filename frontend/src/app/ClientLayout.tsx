@@ -6,9 +6,9 @@ import Link from "next/link";
 import Image from "next/image";
 
 const PERMISOS = {
-  gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
-  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion","mantenimiento","contabilidad"],
-  tecnico: ["ordenes","diagnosticos","mantenimiento"],
+  gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad","recepcion","taller","aprobacion"],
+  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion","mantenimiento","contabilidad","recepcion","aprobacion"],
+  tecnico: ["ordenes","diagnosticos","mantenimiento","taller"],
   almacen: ["inventario","suplidores","ventas"],
   cafeteria: ["cafeteria"],
 };
@@ -18,6 +18,9 @@ const MENU = [
   { href: "/clientes",      icon: "👤", label: "Clientes",      key: "clientes" },
   { href: "/vehiculos",     icon: "🚗", label: "Vehículos",     key: "vehiculos" },
   { href: "/ordenes",       icon: "🔧", label: "Órdenes",       key: "ordenes" },
+  { href: "/recepcion",     icon: "🚗", label: "Recepción",     key: "recepcion" },
+  { href: "/taller",        icon: "🔧", label: "Taller",        key: "taller" },
+  { href: "/aprobacion",    icon: "✅", label: "Aprobaciones",  key: "aprobacion" },
   { href: "/mantenimiento", icon: "🛠️", label: "Mantenimiento", key: "mantenimiento" },
   { href: "/inteligencia",  icon: "🔮", label: "Inteligencia",  key: "inteligencia" },
   { href: "/contabilidad",  icon: "💰", label: "Contabilidad",  key: "contabilidad" },

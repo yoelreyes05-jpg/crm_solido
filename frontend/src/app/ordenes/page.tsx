@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
 
@@ -37,6 +37,14 @@ export default function OrdenesPage() {
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [loading, setLoading] = useState(true);
   const [tab, setTab] = useState<"lista" | "nueva">("lista");
+  const [toast, setToast] = useState<{ msg: string; tipo: "ok" | "err" } | null>(null);
+  const [confirmId, setConfirmId] = useState<number | null>(null);
+  const [formError, setFormError] = useState("");
+
+  const showToast = useCallback((msg: string, tipo: "ok" | "err" = "ok") => {
+    setToast({ msg, tipo });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
 
   const [form, setForm] = useState({
     cliente_id: "",
@@ -76,9 +84,10 @@ export default function OrdenesPage() {
   );
 
   const crearOrden = async () => {
-    if (!form.cliente_id) return alert("Selecciona un cliente");
-    if (!form.vehiculo_id) return alert("Selecciona un vehículo");
-    if (!form.descripcion.trim()) return alert("Escribe la descripción del trabajo");
+    setFormError("");
+    if (!form.cliente_id) return setFormError("Selecciona un cliente");
+    if (!form.vehiculo_id) return setFormError("Selecciona un vehículo");
+    if (!form.descripcion.trim()) return setFormError("Escribe la descripción del trabajo");
 
     try {
       const usr = JSON.parse(localStorage.getItem("usuario") || "{}");
@@ -94,29 +103,75 @@ export default function OrdenesPage() {
         })
       });
       const data = await res.json();
-      if (data.error) return alert(data.error);
-      alert("✅ Orden creada correctamente");
+      if (data.error) return setFormError(data.error);
+      showToast(`✅ Orden ${data.numero_orden || "creada"} correctamente`);
       setForm({ cliente_id: "", vehiculo_id: "", descripcion: "" });
       setTab("lista");
       fetchAll();
     } catch {
-      alert("Error al crear orden");
+      setFormError("Error al crear orden. Verifica tu conexión.");
     }
   };
 
   const eliminarOrden = async (id: number) => {
-    if (!confirm("¿Eliminar esta orden?")) return;
+    setConfirmId(id);
+  };
+
+  const confirmarEliminar = async () => {
+    if (!confirmId) return;
     try {
-      await fetch(`${API}/ordenes/${id}`, { method: "DELETE" });
+      await fetch(`${API}/ordenes/${confirmId}`, { method: "DELETE" });
+      showToast("🗑️ Orden eliminada");
       fetchAll();
     } catch {
-      alert("Error al eliminar");
+      showToast("Error al eliminar", "err");
+    } finally {
+      setConfirmId(null);
     }
   };
 
   return (
     <div style={container}>
       <h1 style={title}>🧾 Órdenes de Trabajo</h1>
+
+      {/* TOAST */}
+      {toast && (
+        <div style={{
+          position: "fixed", bottom: 24, right: 24, zIndex: 9999,
+          background: toast.tipo === "ok" ? "#10b981" : "#ef4444",
+          color: "#fff", padding: "12px 20px", borderRadius: 10,
+          fontWeight: 600, fontSize: 14, boxShadow: "0 4px 20px rgba(0,0,0,0.3)",
+          animation: "fadeIn .2s ease"
+        }}>{toast.msg}</div>
+      )}
+
+      {/* MODAL CONFIRMAR ELIMINAR */}
+      {confirmId && (
+        <div style={{
+          position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 9998
+        }}>
+          <div style={{
+            background: "#1e293b", borderRadius: 14, padding: "28px 32px",
+            border: "1px solid #334155", maxWidth: 360, width: "90%", textAlign: "center"
+          }}>
+            <div style={{ fontSize: 36, marginBottom: 12 }}>🗑️</div>
+            <div style={{ fontSize: 16, fontWeight: 600, color: "#f1f5f9", marginBottom: 8 }}>¿Eliminar esta orden?</div>
+            <div style={{ fontSize: 13, color: "#64748b", marginBottom: 24 }}>Esta acción no se puede deshacer.</div>
+            <div style={{ display: "flex", gap: 10, justifyContent: "center" }}>
+              <button onClick={() => setConfirmId(null)}
+                style={{ padding: "10px 20px", borderRadius: 8, border: "1px solid #334155", background: "#0f172a", color: "#94a3b8", cursor: "pointer", fontWeight: 600 }}>
+                Cancelar
+              </button>
+              <button onClick={confirmarEliminar}
+                style={{ padding: "10px 20px", borderRadius: 8, border: "none", background: "#ef4444", color: "#fff", cursor: "pointer", fontWeight: 600 }}>
+                Eliminar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
 
       {/* TABS */}
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
@@ -174,6 +229,12 @@ export default function OrdenesPage() {
               rows={4}
               style={{ ...input, resize: "vertical" }}
             />
+
+            {formError && (
+              <div style={{ background: "rgba(220,38,38,0.1)", border: "1px solid rgba(220,38,38,0.3)", color: "#fca5a5", padding: "10px 14px", borderRadius: 8, fontSize: 13, marginBottom: 4 }}>
+                ⚠️ {formError}
+              </div>
+            )}
 
             <button onClick={crearOrden} style={btnPrimary}>
               Crear Orden

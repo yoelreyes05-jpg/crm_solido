@@ -192,25 +192,52 @@ app.get("/ordenes", async (req, res) => {
 });
 
 app.post("/ordenes", async (req, res) => {
-  const { cliente_id, vehiculo_id, descripcion, usuario_id, usuario_nombre } = req.body;
-  const { data, error } = await supabase.from("ordenes_trabajo")
-    .insert([{ cliente_id, vehiculo_id, descripcion, estado: "RECIBIDO", status: "RECIBIDO", total: 0, created_at: new Date() }])
-    .select();
-  if (error) return res.json({ error: error.message });
+  try {
+    const { cliente_id, vehiculo_id, descripcion, usuario_id, usuario_nombre, inspeccion_id, motivo_entrada, prioridad } = req.body;
+    if (!cliente_id || !vehiculo_id) return res.status(400).json({ error: "cliente_id y vehiculo_id son requeridos" });
 
-  // Registrar en log de auditoría — estado inicial RECIBIDO
-  await supabase.from("orden_trabajo_log").insert([{
-    orden_id:       data[0].id,
-    estado_anterior: null,
-    estado_nuevo:    "RECIBIDO",
-    usuario_id:      usuario_id || null,
-    usuario_nombre:  usuario_nombre || "Sistema",
-    motivo:          "Orden creada",
-    metadata:        {},
-    created_at:      new Date().toISOString(),
-  }]).catch(err => console.warn("⚠️ Log inicial no registrado (¿tabla existe?):", err.message));
+    // Construir payload limpio — solo columnas que sabemos que existen
+    const payload = {
+      cliente_id:   Number(cliente_id),
+      vehiculo_id:  Number(vehiculo_id),
+      descripcion:  descripcion || "",
+      estado:       "RECIBIDO",
+      total:        0,
+    };
+    // Columnas opcionales nuevas (solo si fueron enviadas)
+    if (inspeccion_id)  payload.inspeccion_id  = Number(inspeccion_id);
+    if (motivo_entrada) payload.motivo_entrada  = motivo_entrada;
+    if (prioridad)      payload.prioridad       = prioridad;
 
-  res.json(data[0]);
+    const { data, error } = await supabase.from("ordenes_trabajo").insert([payload]).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    const orden = data[0];
+
+    // Generar numero_orden y guardarlo (si la columna existe en Supabase)
+    const numeroOrden = `OT-${String(orden.id).padStart(4, "0")}`;
+    await supabase.from("ordenes_trabajo")
+      .update({ numero_orden: numeroOrden })
+      .eq("id", orden.id)
+      .then(() => { orden.numero_orden = numeroOrden; })
+      .catch(() => { orden.numero_orden = numeroOrden; }); // silencioso si columna no existe
+
+    // Log de auditoría (silencioso si la tabla aún no existe)
+    supabase.from("orden_trabajo_log").insert([{
+      orden_id:        orden.id,
+      estado_anterior: null,
+      estado_nuevo:    "RECIBIDO",
+      usuario_id:      usuario_id || null,
+      usuario_nombre:  usuario_nombre || "Sistema",
+      motivo:          "Orden creada",
+      metadata:        {},
+    }]).then(() => {}).catch(() => {});
+
+    res.json(orden);
+  } catch (err) {
+    console.error("❌ POST /ordenes:", err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.patch("/ordenes/:id", async (req, res) => {
@@ -822,23 +849,56 @@ app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
 // =====================================================
 // ⚙️ AVANCES
 // =====================================================
-app.post("/avances", async (req, res) => {
-  const { diagnostico_id, descripcion, tecnico_nombre, usuario_id } = req.body;
+app.get("/avances/:orden_id", async (req, res) => {
+  const { orden_id } = req.params;
+  // Buscar el diagnóstico de esta orden para obtener sus avances
+  const { data: diag } = await supabase.from("diagnosticos")
+    .select("id")
+    .eq("orden_id", orden_id)
+    .order("id", { ascending: false })
+    .limit(1);
+  if (!diag || diag.length === 0) return res.json([]);
   const { data, error } = await supabase.from("avances_reparacion")
-    .insert([{ diagnostico_id, descripcion, tecnico_nombre, created_at: new Date() }])
+    .select("*")
+    .eq("diagnostico_id", diag[0].id)
+    .order("created_at", { ascending: true });
+  if (error) return res.json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/avances", async (req, res) => {
+  const { diagnostico_id, orden_id, descripcion, tecnico_nombre, usuario_id } = req.body;
+
+  // Resolver diagnostico_id desde orden_id si no viene directo
+  let diagId = diagnostico_id;
+  let ordenIdResuelto = orden_id;
+  if (!diagId && orden_id) {
+    const { data: diag } = await supabase.from("diagnosticos")
+      .select("id, orden_id")
+      .eq("orden_id", orden_id)
+      .order("id", { ascending: false })
+      .limit(1);
+    if (diag && diag.length > 0) { diagId = diag[0].id; ordenIdResuelto = diag[0].orden_id; }
+  }
+
+  const { data, error } = await supabase.from("avances_reparacion")
+    .insert([{ diagnostico_id: diagId, descripcion, tecnico_nombre, created_at: new Date() }])
     .select();
   if (error) return res.json({ error: error.message });
-  await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagnostico_id);
 
-  // Auto-transicionar la orden a REPARACION si está en DIAGNOSTICO
-  const { data: diag } = await supabase.from("diagnosticos").select("orden_id").eq("id", diagnostico_id).single();
-  if (diag?.orden_id) {
-    const r = await transicionarEstado(Number(diag.orden_id), "REPARACION", {
-      usuarioId:     usuario_id   || null,
+  if (diagId) {
+    await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).catch(() => {});
+  }
+
+  // Auto-transicionar la orden a REPARACION si está en DIAGNOSTICO o ESPERANDO_APROBACION
+  const oid = ordenIdResuelto || (diagId ? (await supabase.from("diagnosticos").select("orden_id").eq("id", diagId).single()).data?.orden_id : null);
+  if (oid) {
+    const r = await transicionarEstado(Number(oid), "REPARACION", {
+      usuarioId:     usuario_id    || null,
       usuarioNombre: tecnico_nombre || "Técnico",
-      motivo: "Técnico inició reparación (primer avance registrado)",
+      motivo: "Técnico inició reparación",
     });
-    if (!r.ok) console.warn(`⚠️ Transición REPARACION orden ${diag.orden_id}: ${r.error}`);
+    if (!r.ok) console.warn(`⚠️ Transición REPARACION orden ${oid}: ${r.error}`);
   }
 
   res.json(data[0]);
@@ -3293,20 +3353,19 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
     ENTREGADO:             { fecha_entrega:               new Date().toISOString() },
   };
 
-  // Actualizar estado en la orden
-  const updatePayload = {
-    estado: nuevoEstado,
-    status: nuevoEstado,
-    ...(camposFecha[nuevoEstado] || {}),
-    ...extra,
-  };
-
+  // Actualizar estado en la orden — primero solo el campo estado (siempre existe)
   const { error: errUpdate } = await supabase
     .from("ordenes_trabajo")
-    .update(updatePayload)
+    .update({ estado: nuevoEstado, ...extra })
     .eq("id", ordenId);
 
   if (errUpdate) return { ok: false, error: errUpdate.message };
+
+  // Intentar guardar campo de fecha (silencioso si la columna no existe aún en Supabase)
+  const fechaExtra = camposFecha[nuevoEstado];
+  if (fechaExtra) {
+    await supabase.from("ordenes_trabajo").update(fechaExtra).eq("id", ordenId).catch(() => {});
+  }
 
   // Insertar en log de auditoría
   await supabase.from("orden_trabajo_log").insert([{

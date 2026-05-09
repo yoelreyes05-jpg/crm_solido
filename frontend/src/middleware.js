@@ -6,13 +6,15 @@ const PERMISOS = {
     "/inventario", "/suplidores", "/ventas", "/facturacion", "/cafeteria",
     "/usuarios", "/configuracion", "/mantenimiento", "/inteligencia", "/contabilidad",
     "/inspeccion", "/historial-vehiculo",
+    "/recepcion", "/taller", "/aprobacion",
   ],
   secretaria: [
     "/dashboard", "/clientes", "/vehiculos", "/ordenes",
     "/facturacion", "/mantenimiento", "/contabilidad",
     "/historial-vehiculo", "/inteligencia", "/inspeccion",
+    "/recepcion", "/aprobacion",
   ],
-  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento", "/inspeccion"],
+  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento", "/inspeccion", "/taller"],
   almacen:   ["/inventario", "/suplidores", "/ventas"],
   cafeteria: ["/cafeteria"],
 };
