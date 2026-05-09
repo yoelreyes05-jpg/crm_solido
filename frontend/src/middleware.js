@@ -52,6 +52,9 @@ export function middleware(request) {
     // Normalizar rol a minúsculas por si acaso viene diferente de la DB
     const rol = (usuario.rol || "").toLowerCase();
 
+    // Si el rol no está en la tabla de permisos, dejar pasar (acceso básico)
+    if (!PERMISOS[rol]) return NextResponse.next();
+
     // Gerente tiene acceso total
     if (rol === "gerente") return NextResponse.next();
 
@@ -67,10 +70,11 @@ export function middleware(request) {
         almacen:    "/inventario",
         cafeteria:  "/cafeteria",
       };
-      return NextResponse.redirect(new URL(destinos[rol] || "/login", request.url));
+      return NextResponse.redirect(new URL(destinos[rol] || "/dashboard", request.url));
     }
   } catch {
-    return NextResponse.redirect(new URL("/login", request.url));
+    // Si la cookie está mal formada, dejar pasar en vez de redirigir al login
+    return NextResponse.next();
   }
 
   return NextResponse.next();

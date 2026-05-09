@@ -23,9 +23,9 @@ export default function LoginPage() {
       const data = await res.json();
       if (data.error) { setError(data.error); return; }
 
+      // Guardar usuario en localStorage y cookie para el middleware
       localStorage.setItem("usuario", JSON.stringify(data.usuario));
-      if (data.token) localStorage.setItem("crm_token", data.token);
-      document.cookie = `usuario=${encodeURIComponent(JSON.stringify(data.usuario))};path=/;max-age=86400`;
+      document.cookie = `usuario=${encodeURIComponent(JSON.stringify(data.usuario))};path=/;max-age=86400;SameSite=Lax`;
 
       const destinos: Record<string, string> = {
         gerente:    "/dashboard",
