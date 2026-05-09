@@ -5,13 +5,14 @@ const PERMISOS = {
     "/dashboard", "/clientes", "/vehiculos", "/ordenes", "/diagnosticos",
     "/inventario", "/suplidores", "/ventas", "/facturacion", "/cafeteria",
     "/usuarios", "/configuracion", "/mantenimiento", "/inteligencia", "/contabilidad",
+    "/inspeccion", "/historial-vehiculo",
   ],
   secretaria: [
     "/dashboard", "/clientes", "/vehiculos", "/ordenes",
     "/facturacion", "/mantenimiento", "/contabilidad",
-    "/historial-vehiculo", "/inteligencia",
+    "/historial-vehiculo", "/inteligencia", "/inspeccion",
   ],
-  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento"],
+  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento", "/inspeccion"],
   almacen:   ["/inventario", "/suplidores", "/ventas"],
   cafeteria: ["/cafeteria"],
 };
@@ -21,7 +22,10 @@ export function middleware(request) {
 
   const esPublica =
     pathname === "/login" ||
+    pathname === "/" ||
     pathname.startsWith("/cliente") ||
+    pathname.startsWith("/estado") ||
+    pathname.startsWith("/pantalla") ||
     pathname.startsWith("/catalogo") ||
     pathname.startsWith("/repuestos") ||
     pathname.startsWith("/menu") ||

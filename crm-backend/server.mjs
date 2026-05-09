@@ -3,11 +3,35 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
+import { createHmac } from "crypto";
 
-import jwt from "jsonwebtoken";
-
+// ── JWT nativo (sin dependencia externa, usa crypto de Node.js) ──────────────
 const JWT_SECRET = process.env.JWT_SECRET || "solido_auto_secret_2026_cambiar_en_produccion";
-const JWT_EXPIRES = "12h";
+const JWT_EXPIRES_SECONDS = 12 * 60 * 60; // 12 horas
+
+function b64url(str) {
+  return Buffer.from(str).toString("base64url");
+}
+
+const jwt = {
+  sign(payload, secret, { expiresIn } = {}) {
+    const header = b64url(JSON.stringify({ alg: "HS256", typ: "JWT" }));
+    const exp = Math.floor(Date.now() / 1000) + (typeof expiresIn === "number" ? expiresIn : JWT_EXPIRES_SECONDS);
+    const body = b64url(JSON.stringify({ ...payload, iat: Math.floor(Date.now() / 1000), exp }));
+    const sig = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
+    return `${header}.${body}.${sig}`;
+  },
+  verify(token, secret) {
+    const parts = token.split(".");
+    if (parts.length !== 3) throw new Error("JWT malformado");
+    const [header, body, sig] = parts;
+    const expected = createHmac("sha256", secret).update(`${header}.${body}`).digest("base64url");
+    if (sig !== expected) throw new Error("Firma JWT inválida");
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString());
+    if (payload.exp && payload.exp < Math.floor(Date.now() / 1000)) throw new Error("Token expirado");
+    return payload;
+  },
+};
 
 const app = express();
 
@@ -987,14 +1011,17 @@ app.delete("/usuarios/:id", async (req, res) => {
 
 app.post("/auth/login", async (req, res) => {
   const { email, password } = req.body;
+  if (!email || !password) return res.json({ error: "Email y contraseña requeridos" });
+
   const { data } = await supabase
     .from("usuarios")
     .select("*")
     .eq("email", email)
     .eq("password_hash", password)
-    .eq("activo", true)
     .single();
-  if (!data) return res.json({ error: "Credenciales incorrectas o usuario inactivo" });
+  if (!data) return res.json({ error: "Credenciales incorrectas" });
+  // Si el campo activo existe y está explícitamente en false, bloquear
+  if (data.activo === false) return res.json({ error: "Usuario inactivo. Contacta al administrador." });
 
   // Actualizar último acceso
   await supabase.from("usuarios")
@@ -1007,8 +1034,7 @@ app.post("/auth/login", async (req, res) => {
   // Generar JWT firmado
   const token = jwt.sign(
     { id: usuario.id, nombre: usuario.nombre, email: usuario.email, rol: usuario.rol },
-    JWT_SECRET,
-    { expiresIn: JWT_EXPIRES }
+    JWT_SECRET
   );
 
   res.json({ ok: true, usuario, token });
