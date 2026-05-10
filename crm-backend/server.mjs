@@ -118,16 +118,27 @@ app.get("/clientes/:id/historial", async (req, res) => {
   res.json({ cliente, vehiculos: vehiculos || [], ordenes: ordenes || [], ventas: ventas || [], diagnosticos: diagnosticos || [] });
 });
 
-// GET /clientes/:id/vehiculos — vehículos activos de un cliente (usado en Recepción paso 2)
+// GET /clientes/:id/vehiculos — vehículos de un cliente (usado en Recepción paso 2)
 app.get("/clientes/:id/vehiculos", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("vehiculos")
       .select("*")
       .eq("cliente_id", req.params.id)
       .or("activo.eq.true,activo.is.null")
       .order("id", { ascending: false });
-    if (error) return res.status(500).json({ error: error.message });
+
+    if (error) {
+      // Fallback sin filtro activo
+      const fallback = await supabase
+        .from("vehiculos")
+        .select("*")
+        .eq("cliente_id", req.params.id)
+        .order("id", { ascending: false });
+      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
+      data = fallback.data;
+    }
+
     res.json(data || []);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -155,18 +166,33 @@ app.get("/vehiculos/catalogo", (req, res) => {
 });
 
 app.get("/vehiculos", async (req, res) => {
-  const { data, error } = await supabase
-    .from("vehiculos")
-    .select("*, clientes(id, nombre, telefono)")
-    .or("activo.eq.true,activo.is.null")
-    .order("id", { ascending: false });
-  if (error) return res.json({ error: error.message });
-  const fixed = (data || []).map(v => ({
-    ...v,
-    cliente_nombre:   v.clientes?.nombre   || "Sin cliente",
-    cliente_telefono: v.clientes?.telefono || "",
-  }));
-  res.json(fixed);
+  try {
+    // Intentar con filtro activo primero; si la columna no existe, hacer fallback sin filtro
+    let { data, error } = await supabase
+      .from("vehiculos")
+      .select("*, clientes(id, nombre, telefono)")
+      .or("activo.eq.true,activo.is.null")
+      .order("id", { ascending: false });
+
+    if (error) {
+      // Fallback: la columna activo puede no existir aún — traer todos los vehículos
+      const fallback = await supabase
+        .from("vehiculos")
+        .select("*, clientes(id, nombre, telefono)")
+        .order("id", { ascending: false });
+      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
+      data = fallback.data;
+    }
+
+    const fixed = (data || []).map(v => ({
+      ...v,
+      cliente_nombre:   v.clientes?.nombre   || "Sin cliente",
+      cliente_telefono: v.clientes?.telefono || "",
+    }));
+    res.json(fixed);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.post("/vehiculos", async (req, res) => {
@@ -178,10 +204,14 @@ app.post("/vehiculos", async (req, res) => {
 
 app.delete("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
-  // Soft delete: preserva historial de órdenes y diagnósticos
-  const { error } = await supabase.from("vehiculos").update({ activo: false }).eq("id", id);
-  if (error) return res.json({ error: error.message });
-  res.json({ ok: true, archived: true });
+  // Intentar soft delete primero; si la columna activo no existe, hacer hard delete
+  const { error: softError } = await supabase.from("vehiculos").update({ activo: false }).eq("id", id);
+  if (softError) {
+    // La columna activo puede no existir — hacer delete físico como fallback
+    const { error: hardError } = await supabase.from("vehiculos").delete().eq("id", id);
+    if (hardError) return res.json({ error: hardError.message });
+  }
+  res.json({ ok: true });
 });
 
 app.patch("/vehiculos/:id", async (req, res) => {
