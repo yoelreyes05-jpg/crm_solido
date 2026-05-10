@@ -1039,7 +1039,7 @@ app.get("/dashboard/kpis-gerente", async (req, res) => {
     ]);
 
     // ── Volumen diario últimos 14 días ──────────────────────────────────────
-    const diasMap: Record<string, number> = {};
+    const diasMap = {};
     for (let i = 0; i < 14; i++) {
       const d = new Date(hace14); d.setDate(d.getDate() + i);
       diasMap[d.toISOString().slice(0,10)] = 0;
@@ -1051,7 +1051,7 @@ app.get("/dashboard/kpis-gerente", async (req, res) => {
     const volumenDiario = Object.entries(diasMap).map(([fecha, total]) => ({ fecha, total }));
 
     // ── Ingresos por día (facturación) últimos 7 días ─────────────────────
-    const ingresosMap: Record<string, number> = {};
+    const ingresosMap = {};
     for (let i = 0; i < 7; i++) {
       const d = new Date(hace7); d.setDate(d.getDate() + i);
       ingresosMap[d.toISOString().slice(0,10)] = 0;
@@ -1087,7 +1087,7 @@ app.get("/dashboard/kpis-gerente", async (req, res) => {
         nombre: i.name, stock: i.stock, min: i.min_stock,
       })),
     });
-  } catch (err: any) {
+  } catch (err) {
     res.status(500).json({ error: err.message });
   }
 });
