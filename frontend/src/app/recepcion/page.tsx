@@ -277,11 +277,13 @@ export default function RecepcionPage() {
   // ── Cargar vehículos al seleccionar cliente ───────────────────────────────
   useEffect(() => {
     if (!clienteSeleccionado) return;
-    fetch(`${API}/vehiculos`)
+    setVehiculosCliente([]);
+    setVehiculoSeleccionado(null);
+    setModoCrearVehiculo(false);
+    fetch(`${API}/clientes/${clienteSeleccionado.id}/vehiculos`)
       .then(r => r.json())
       .then(d => {
-        const todos: Vehiculo[] = Array.isArray(d) ? d : [];
-        const suyos = todos.filter(v => v.cliente_id === clienteSeleccionado.id);
+        const suyos: Vehiculo[] = Array.isArray(d) ? d : [];
         setVehiculosCliente(suyos);
         if (suyos.length === 0) setModoCrearVehiculo(true);
       })

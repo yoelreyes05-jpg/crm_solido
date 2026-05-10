@@ -118,6 +118,22 @@ app.get("/clientes/:id/historial", async (req, res) => {
   res.json({ cliente, vehiculos: vehiculos || [], ordenes: ordenes || [], ventas: ventas || [], diagnosticos: diagnosticos || [] });
 });
 
+// GET /clientes/:id/vehiculos — vehículos activos de un cliente (usado en Recepción paso 2)
+app.get("/clientes/:id/vehiculos", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vehiculos")
+      .select("*")
+      .eq("cliente_id", req.params.id)
+      .or("activo.eq.true,activo.is.null")
+      .order("id", { ascending: false });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =====================================================
 // 🚗 VEHÍCULOS
 // =====================================================
@@ -3534,15 +3550,23 @@ app.get("/ordenes/:id", async (req, res) => {
     const { data: orden } = await supabase.from("ordenes_trabajo").select("*").eq("id", id).single();
     if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
 
-    const [{ data: cliente }, { data: vehiculo }, { data: diagnostico }, { data: log }, { data: inspeccion }] = await Promise.all([
-      supabase.from("clientes").select("*").eq("id", orden.cliente_id).single(),
-      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).single(),
-      supabase.from("diagnosticos").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
-      supabase.from("orden_trabajo_log").select("*").eq("orden_id", id).order("created_at", { ascending: true }),
-      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle(),
+    // Cada query es independiente — si una tabla no existe todavía, devuelve null/[] sin romper todo
+    const [clienteRes, vehiculoRes, diagnosticoRes, logRes, inspeccionRes] = await Promise.all([
+      supabase.from("clientes").select("*").eq("id", orden.cliente_id).single().catch(() => ({ data: null })),
+      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).single().catch(() => ({ data: null })),
+      supabase.from("diagnosticos").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("orden_trabajo_log").select("*").eq("orden_id", id).order("created_at", { ascending: true }).catch(() => ({ data: [] })),
+      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
     ]);
 
-    res.json({ orden, cliente, vehiculo, diagnostico, log: log || [], inspeccion });
+    res.json({
+      orden,
+      cliente:     clienteRes.data    || null,
+      vehiculo:    vehiculoRes.data   || null,
+      diagnostico: diagnosticoRes.data || null,
+      log:         logRes.data        || [],
+      inspeccion:  inspeccionRes.data || null,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
