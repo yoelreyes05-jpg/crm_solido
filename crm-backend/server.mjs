@@ -3753,6 +3753,23 @@ app.post("/ordenes/:id/entregar", async (req, res) => {
   }
 });
 
+// POST /ordenes/:id/completar-reparacion — técnico termina reparación → Control de Calidad
+app.post("/ordenes/:id/completar-reparacion", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo } = req.body;
+    const result = await transicionarEstado(Number(id), "CONTROL_CALIDAD", {
+      usuarioId:     usuario_id,
+      usuarioNombre: usuario_nombre || "Técnico",
+      motivo:        motivo || "Reparación completada por técnico",
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    res.json({ ok: true, mensaje: "Reparación completada — orden en Control de Calidad" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =====================================================
 // 📋 INSPECCIÓN DE VEHÍCULO
 // =====================================================

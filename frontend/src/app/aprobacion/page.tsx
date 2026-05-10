@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -634,6 +635,7 @@ function TarjetaHistorial({ orden }: { orden: Orden }) {
 
 // ── Página Principal ──────────────────────────────────────────────────────────
 export default function AprobacionPage() {
+  const router = useRouter();
   const [ordenes, setOrdenes] = useState<Orden[]>([]);
   const [diagnosticos, setDiagnosticos] = useState<Diagnostico[]>([]);
   const [loading, setLoading] = useState(true);
@@ -761,13 +763,19 @@ export default function AprobacionPage() {
           marginBottom: 24,
         }}
       >
-        <div>
-          <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.text }}>
-            ✅ Aprobaciones Pendientes
-          </h1>
-          <p style={{ margin: "4px 0 0", color: C.muted, fontSize: 13 }}>
-            Gestiona las respuestas de los clientes sobre sus cotizaciones
-          </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+          <button
+            onClick={() => router.back()}
+            style={{ background: "transparent", color: C.muted, border: "none", cursor: "pointer", fontSize: 22, padding: 0, lineHeight: 1 }}
+          >←</button>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 26, fontWeight: 800, color: C.text }}>
+              ⏳ Aprobaciones Pendientes
+            </h1>
+            <p style={{ margin: "4px 0 0", color: C.muted, fontSize: 13 }}>
+              Gestiona las respuestas de los clientes sobre sus cotizaciones
+            </p>
+          </div>
         </div>
         {pendientes.length > 0 && (
           <div

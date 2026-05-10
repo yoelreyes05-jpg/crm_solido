@@ -180,19 +180,29 @@ ALTER TABLE usuarios
 
 -- ====================================================================
 -- BLOQUE 7: Tabla de notificaciones internas (preparación Fase D)
+-- Nota: si la tabla ya existe se adapta con ALTER TABLE para no romper
+--       datos existentes. La columna se llama "leida" (femenino) en
+--       tablas creadas antes de esta migración.
 -- ====================================================================
 CREATE TABLE IF NOT EXISTS notificaciones (
   id          BIGSERIAL PRIMARY KEY,
-  usuario_id  BIGINT      REFERENCES usuarios(id) ON DELETE CASCADE,
   tipo        TEXT        NOT NULL DEFAULT 'INFO', -- INFO | ALERTA | URGENTE
   mensaje     TEXT        NOT NULL,
-  leido       BOOLEAN     DEFAULT false,
+  leida       BOOLEAN     DEFAULT false,
   orden_id    BIGINT      REFERENCES ordenes_trabajo(id) ON DELETE CASCADE,
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Agregar columnas opcionales si aún no existen (idempotente)
+ALTER TABLE notificaciones
+  ADD COLUMN IF NOT EXISTS usuario_id BIGINT REFERENCES usuarios(id) ON DELETE CASCADE;
+
+ALTER TABLE notificaciones
+  ADD COLUMN IF NOT EXISTS leida BOOLEAN DEFAULT false;
+
+-- Índices (usan los nombres reales de columna)
 CREATE INDEX IF NOT EXISTS idx_notif_usuario_id ON notificaciones(usuario_id);
-CREATE INDEX IF NOT EXISTS idx_notif_leido      ON notificaciones(leido) WHERE leido = false;
+CREATE INDEX IF NOT EXISTS idx_notif_leida      ON notificaciones(leida) WHERE leida = false;
 
 COMMENT ON TABLE notificaciones IS
   'Notificaciones internas del sistema: nueva orden asignada, aprobación recibida, etc.';

@@ -294,19 +294,20 @@ export default function ReparacionPage() {
         setAvances(prev => [...prev, nuevo]);
       }
 
-      // 2. Transición de estado
-      const resCalidad = await fetch(`${API}/ordenes/${id}/calidad-aprobada`, {
+      // 2. Transición de estado: REPARACION → CONTROL_CALIDAD
+      const resCalidad = await fetch(`${API}/ordenes/${id}/completar-reparacion`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ usuario_id: usuario.id }),
+        body: JSON.stringify({
+          usuario_id:     usuario.id,
+          usuario_nombre: nombreTecnico,
+          motivo:         "Reparación completada por técnico",
+        }),
       });
 
       if (!resCalidad.ok) {
-        await fetch(`${API}/ordenes/${id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ estado: "CONTROL_CALIDAD" }),
-        });
+        const err = await resCalidad.json().catch(() => ({}));
+        throw new Error(err.error || "No se pudo mover la orden a Control de Calidad");
       }
 
       const rOrden = await fetch(`${API}/ordenes/${id}`);
