@@ -460,28 +460,36 @@ export default function RecepcionPage() {
       const ordenId: number = dataOrden.id ?? dataOrden.orden?.id;
       if (!ordenId) throw new Error("El servidor no devolvió el ID de la orden");
 
-      // 2. Crear la inspección
-      const resInsp = await fetch(`${API}/inspeccion`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          orden_id:          ordenId,
-          vehiculo_id:       vehiculoSeleccionado.id,
-          cliente_id:        clienteSeleccionado.id,
-          km_entrada:        kmEntrada ? Number(kmEntrada) : null,
-          nivel_combustible: combustible,
-          condicion_general: condicion,
-          zonas_danio:       [],
-          fotos:             [],
-          firma_cliente:     firma,
-          observaciones:     observaciones.trim(),
-          creado_por_id:     usuario.id    || null,
-          creado_por_nombre: usuario.nombre || "Sistema",
-          ...checklist,
-        }),
-      });
-      const dataInsp = await resInsp.json();
-      if (!resInsp.ok || dataInsp.error) throw new Error(dataInsp.error || "Error al guardar la inspección");
+      // 2. Crear la inspección (no-bloqueante: si la tabla aún no existe en Supabase,
+      //    la orden ya fue creada y no se cancela)
+      try {
+        const resInsp = await fetch(`${API}/inspeccion`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            orden_id:          ordenId,
+            vehiculo_id:       vehiculoSeleccionado.id,
+            cliente_id:        clienteSeleccionado.id,
+            km_entrada:        kmEntrada ? Number(kmEntrada) : null,
+            nivel_combustible: combustible,
+            condicion_general: condicion,
+            zonas_danio:       [],
+            fotos:             [],
+            firma_cliente:     firma,
+            observaciones:     observaciones.trim(),
+            creado_por_id:     usuario.id    || null,
+            creado_por_nombre: usuario.nombre || "Sistema",
+            ...checklist,
+          }),
+        });
+        if (!resInsp.ok) {
+          const errInsp = await resInsp.json().catch(() => ({}));
+          console.warn("⚠️ Inspección no guardada (¿tabla existe?):", errInsp.error || resInsp.status);
+        }
+      } catch (inspErr) {
+        // No bloquear creación de orden por fallo de inspección
+        console.warn("⚠️ Error al crear inspección:", inspErr);
+      }
 
       setNumeroOrden(ordenId);
       setFinalizado(true);

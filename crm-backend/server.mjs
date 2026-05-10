@@ -854,21 +854,33 @@ app.post("/diagnosticos", async (req, res) => {
     .select();
   if (error) return res.json({ error: error.message });
 
-  // Auto-transicionar la orden vinculada a DIAGNOSTICO
+  const diag = data[0];
   const ordenId = req.body.orden_id;
+
   if (ordenId) {
-    const result = await transicionarEstado(Number(ordenId), "DIAGNOSTICO", {
+    // Paso 1: RECIBIDO → DIAGNOSTICO (siempre al crear el diagnóstico)
+    const r1 = await transicionarEstado(Number(ordenId), "DIAGNOSTICO", {
       usuarioId:     req.body.usuario_id    || null,
       usuarioNombre: req.body.usuario_nombre || "Técnico",
       motivo: "Técnico abrió diagnóstico",
     });
-    if (!result.ok) {
-      // No bloquear si la transición ya fue hecha (ej: ya está en DIAGNOSTICO)
-      console.warn(`⚠️ Transición DIAGNOSTICO para orden ${ordenId}: ${result.error}`);
+    if (!r1.ok) {
+      // Silencioso: puede que ya esté en DIAGNOSTICO
+      console.warn(`⚠️ Transición DIAGNOSTICO para orden ${ordenId}: ${r1.error}`);
+    }
+
+    // Paso 2: si el técnico cierra en el mismo POST (terminado=true) → ESPERANDO_APROBACION
+    if (req.body.terminado === true) {
+      const r2 = await transicionarEstado(Number(ordenId), "ESPERANDO_APROBACION", {
+        usuarioId:     req.body.usuario_id    || null,
+        usuarioNombre: req.body.usuario_nombre || "Técnico",
+        motivo: "Técnico cerró el diagnóstico",
+      });
+      if (!r2.ok) console.warn(`⚠️ Transición ESPERANDO_APROBACION orden ${ordenId}: ${r2.error}`);
     }
   }
 
-  res.json(data[0]);
+  res.json(diag);
 });
 
 app.patch("/diagnosticos/:id", async (req, res) => {
@@ -878,15 +890,15 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 
   const diag = data[0];
 
-  // ── Cuando el técnico marca el diagnóstico como TERMINADO → orden pasa a CONTROL_CALIDAD ──
+  // ── Cuando el técnico cierra el diagnóstico → orden pasa a ESPERANDO_APROBACION ──
   if (req.body.estado === "TERMINADO" || req.body.terminado === true) {
     if (diag?.orden_id) {
-      const r = await transicionarEstado(Number(diag.orden_id), "CONTROL_CALIDAD", {
+      const r = await transicionarEstado(Number(diag.orden_id), "ESPERANDO_APROBACION", {
         usuarioId:     req.body.usuario_id     || null,
         usuarioNombre: req.body.usuario_nombre || "Técnico",
-        motivo: "Técnico marcó reparación como terminada",
+        motivo: "Técnico cerró el diagnóstico — esperando aprobación del cliente",
       });
-      if (!r.ok) console.warn(`⚠️ Transición CONTROL_CALIDAD orden ${diag.orden_id}: ${r.error}`);
+      if (!r.ok) console.warn(`⚠️ Transición ESPERANDO_APROBACION orden ${diag.orden_id}: ${r.error}`);
     }
   }
 
