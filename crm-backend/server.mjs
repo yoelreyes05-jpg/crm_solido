@@ -121,25 +121,14 @@ app.get("/clientes/:id/historial", async (req, res) => {
 // GET /clientes/:id/vehiculos — vehículos de un cliente (usado en Recepción paso 2)
 app.get("/clientes/:id/vehiculos", async (req, res) => {
   try {
-    let { data, error } = await supabase
+    const { data, error } = await supabase
       .from("vehiculos")
       .select("*")
       .eq("cliente_id", req.params.id)
-      .or("activo.eq.true,activo.is.null")
       .order("id", { ascending: false });
-
-    if (error) {
-      // Fallback sin filtro activo
-      const fallback = await supabase
-        .from("vehiculos")
-        .select("*")
-        .eq("cliente_id", req.params.id)
-        .order("id", { ascending: false });
-      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
-      data = fallback.data;
-    }
-
-    res.json(data || []);
+    if (error) return res.status(500).json({ error: error.message });
+    // Filtrar soft-deleted si la columna activo existe
+    res.json((data || []).filter(v => v.activo !== false));
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -167,28 +156,27 @@ app.get("/vehiculos/catalogo", (req, res) => {
 
 app.get("/vehiculos", async (req, res) => {
   try {
-    // Intentar con filtro activo primero; si la columna no existe, hacer fallback sin filtro
-    let { data, error } = await supabase
+    // Query 1: todos los vehículos (sin join embebido — más robusto)
+    const { data: vData, error: vError } = await supabase
       .from("vehiculos")
-      .select("*, clientes(id, nombre, telefono)")
-      .or("activo.eq.true,activo.is.null")
+      .select("*")
       .order("id", { ascending: false });
+    if (vError) return res.status(500).json({ error: vError.message });
 
-    if (error) {
-      // Fallback: la columna activo puede no existir aún — traer todos los vehículos
-      const fallback = await supabase
-        .from("vehiculos")
-        .select("*, clientes(id, nombre, telefono)")
-        .order("id", { ascending: false });
-      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
-      data = fallback.data;
-    }
+    // Query 2: clientes (para armar nombre/teléfono)
+    const { data: cData } = await supabase.from("clientes").select("id, nombre, telefono");
+    const clienteMap = {};
+    (cData || []).forEach(c => { clienteMap[c.id] = c; });
 
-    const fixed = (data || []).map(v => ({
-      ...v,
-      cliente_nombre:   v.clientes?.nombre   || "Sin cliente",
-      cliente_telefono: v.clientes?.telefono || "",
-    }));
+    // Unir y filtrar soft-deleted (si la columna activo existe)
+    const fixed = (vData || [])
+      .filter(v => v.activo !== false)
+      .map(v => ({
+        ...v,
+        cliente_nombre:   clienteMap[v.cliente_id]?.nombre   || "Sin cliente",
+        cliente_telefono: clienteMap[v.cliente_id]?.telefono || "",
+      }));
+
     res.json(fixed);
   } catch (err) {
     res.status(500).json({ error: err.message });
