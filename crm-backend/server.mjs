@@ -6,11 +6,25 @@ import { createClient } from "@supabase/supabase-js";
 
 const app = express();
 
-// CORS abierto — acepta cualquier origen
+// CORS — configurable por variable de entorno CORS_ORIGINS
+// En producción: CORS_ORIGINS=https://mi-app.vercel.app,https://otro-dominio.com
+// En desarrollo: dejar vacío para permitir todo
+const CORS_ORIGINS = process.env.CORS_ORIGINS
+  ? process.env.CORS_ORIGINS.split(",").map(o => o.trim())
+  : null;
+
 app.use(cors({
-  origin: "*",
+  origin: (origin, cb) => {
+    // Sin restricción si CORS_ORIGINS no está configurado
+    if (!CORS_ORIGINS) return cb(null, true);
+    // Permitir peticiones sin origin (Postman, Railway-internal, SSR)
+    if (!origin) return cb(null, true);
+    if (CORS_ORIGINS.includes(origin)) return cb(null, true);
+    cb(new Error(`CORS: origen no permitido → ${origin}`));
+  },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"]
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
 
@@ -125,14 +139,16 @@ app.get("/vehiculos/catalogo", (req, res) => {
 });
 
 app.get("/vehiculos", async (req, res) => {
-  const { data: vehiculos } = await supabase
+  const { data, error } = await supabase
     .from("vehiculos")
-    .select("*")
-    .or("activo.eq.true,activo.is.null");
-  const { data: clientes } = await supabase.from("clientes").select("id, nombre");
-  const fixed = (vehiculos || []).map(v => ({
+    .select("*, clientes(id, nombre, telefono)")
+    .or("activo.eq.true,activo.is.null")
+    .order("id", { ascending: false });
+  if (error) return res.json({ error: error.message });
+  const fixed = (data || []).map(v => ({
     ...v,
-    cliente_nombre: clientes?.find(c => c.id === v.cliente_id)?.nombre || "Sin cliente"
+    cliente_nombre:   v.clientes?.nombre   || "Sin cliente",
+    cliente_telefono: v.clientes?.telefono || "",
   }));
   res.json(fixed);
 });
@@ -168,25 +184,25 @@ app.patch("/vehiculos/:id", async (req, res) => {
 // =====================================================
 app.get("/ordenes", async (req, res) => {
   try {
-    const { data: ordenes } = await supabase.from("ordenes_trabajo").select("*").order("id", { ascending: false });
-    if (!ordenes) return res.json([]);
-    const { data: clientes } = await supabase.from("clientes").select("id, nombre, telefono");
-    const { data: vehiculos } = await supabase.from("vehiculos").select("id, marca, modelo, placa");
-    const fixed = ordenes.map(o => ({
+    const { data, error } = await supabase
+      .from("ordenes_trabajo")
+      .select("*, clientes(id, nombre, telefono), vehiculos(id, marca, modelo, placa, ano)")
+      .order("id", { ascending: false });
+    if (error) throw new Error(error.message);
+    const fixed = (data || []).map(o => ({
       ...o,
-      estado: o.estado || o.status || "RECIBIDO",
-      numero_orden: o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-      cliente_nombre:    clientes?.find(c => c.id === o.cliente_id)?.nombre    || "Sin cliente",
-      cliente_telefono:  clientes?.find(c => c.id === o.cliente_id)?.telefono  || "",
-      vehiculo_info: (() => {
-        const v = vehiculos?.find(v => v.id === o.vehiculo_id);
-        return v ? `${v.marca} ${v.modelo} (${v.placa})` : "Sin vehículo";
-      })(),
-      vehiculo_placa: vehiculos?.find(v => v.id === o.vehiculo_id)?.placa || "",
+      estado:           o.estado || "RECIBIDO",
+      numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+      cliente_nombre:   o.clientes?.nombre   || "Sin cliente",
+      cliente_telefono: o.clientes?.telefono || "",
+      vehiculo_info:    o.vehiculos
+        ? `${o.vehiculos.marca} ${o.vehiculos.modelo} (${o.vehiculos.placa})`
+        : "Sin vehículo",
+      vehiculo_placa:   o.vehiculos?.placa || "",
     }));
     res.json(fixed);
   } catch (err) {
-    console.log("ERROR /ordenes:", err);
+    console.error("ERROR /ordenes:", err.message);
     res.json([]);
   }
 });
@@ -320,6 +336,40 @@ app.put("/inventario/:id", async (req, res) => {
     .eq("id", id).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
+});
+
+// PATCH /inventario/:id — actualización parcial (ej: stock_delta para descontar)
+app.patch("/inventario/:id", async (req, res) => {
+  const { id } = req.params;
+  const body = req.body;
+
+  // stock_delta: -N descuenta N unidades, +N suma N unidades
+  if (body.stock_delta !== undefined) {
+    const delta = Number(body.stock_delta);
+    // Leer stock actual
+    const { data: actual, error: errRead } = await supabase
+      .from("inventario").select("stock").eq("id", id).single();
+    if (errRead) return res.status(404).json({ error: errRead.message });
+
+    const nuevoStock = Math.max(0, (actual.stock || 0) + delta);
+    const { data, error } = await supabase.from("inventario")
+      .update({ stock: nuevoStock }).eq("id", id).select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    return res.json(data);
+  }
+
+  // Actualización genérica de campos enviados
+  const campos = {};
+  if (body.stock    !== undefined) campos.stock    = Number(body.stock);
+  if (body.price    !== undefined) campos.price    = Number(body.price);
+  if (body.name     !== undefined) campos.name     = body.name;
+  if (body.code     !== undefined) campos.code     = body.code;
+  if (Object.keys(campos).length === 0) return res.status(400).json({ error: "Sin campos para actualizar" });
+
+  const { data, error } = await supabase.from("inventario")
+    .update(campos).eq("id", id).select().single();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
 });
 
 app.delete("/inventario/:id", async (req, res) => {
@@ -707,17 +757,17 @@ app.post("/cafeteria/cuadre", async (req, res) => {
 // 🔬 DIAGNÓSTICOS
 // =====================================================
 app.get("/diagnosticos", async (req, res) => {
-  const { data } = await supabase.from("diagnosticos").select("*").order("created_at", { ascending: false });
-  if (!data) return res.json([]);
-  const { data: clientes } = await supabase.from("clientes").select("id, nombre");
-  const { data: vehiculos } = await supabase.from("vehiculos").select("id, marca, modelo, placa");
-  const fixed = data.map(d => ({
+  const { data, error } = await supabase
+    .from("diagnosticos")
+    .select("*, clientes(id, nombre), vehiculos(id, marca, modelo, placa)")
+    .order("created_at", { ascending: false });
+  if (error) return res.json({ error: error.message });
+  const fixed = (data || []).map(d => ({
     ...d,
-    cliente_nombre: clientes?.find(c => c.id === d.cliente_id)?.nombre || "Sin cliente",
-    vehiculo_info: (() => {
-      const v = vehiculos?.find(v => v.id === d.vehiculo_id);
-      return v ? `${v.marca} ${v.modelo} (${v.placa})` : "Sin vehículo";
-    })()
+    cliente_nombre: d.clientes?.nombre || "Sin cliente",
+    vehiculo_info:  d.vehiculos
+      ? `${d.vehiculos.marca} ${d.vehiculos.modelo} (${d.vehiculos.placa})`
+      : "Sin vehículo",
   }));
   res.json(fixed);
 });
@@ -944,6 +994,101 @@ app.get("/dashboard/stats", async (req, res) => {
     });
   } catch (err) {
     res.json({ error: err });
+  }
+});
+
+// GET /dashboard/kpis-gerente — KPIs avanzados para el rol gerente (C7)
+app.get("/dashboard/kpis-gerente", async (req, res) => {
+  try {
+    const ahora = new Date();
+    // Ventanas de tiempo
+    const hace14 = new Date(ahora); hace14.setDate(hace14.getDate() - 13); hace14.setHours(0,0,0,0);
+    const hace7  = new Date(ahora); hace7.setDate(hace7.getDate() - 6);   hace7.setHours(0,0,0,0);
+    const hoy    = new Date(ahora); hoy.setHours(0,0,0,0);
+    const inicioSemana = new Date(hoy); inicioSemana.setDate(hoy.getDate() - hoy.getDay());
+
+    // Datos en paralelo
+    const [
+      { data: ordenes14 },
+      { data: ventasHoy },
+      { data: ventasSemana },
+      { data: aprobaciones },
+      { data: inventarioBajo },
+      { data: facturas7 },
+    ] = await Promise.all([
+      supabase.from("ordenes_trabajo")
+        .select("id, estado, total, created_at")
+        .gte("created_at", hace14.toISOString()),
+      supabase.from("ventas")
+        .select("total")
+        .gte("created_at", hoy.toISOString()),
+      supabase.from("ventas")
+        .select("total")
+        .gte("created_at", inicioSemana.toISOString()),
+      supabase.from("ordenes_trabajo")
+        .select("id, estado, created_at")
+        .in("estado", ["LISTO","ENTREGADO","CANCELADA"])
+        .gte("created_at", hace14.toISOString()),
+      supabase.from("inventario")
+        .select("id, name, stock, min_stock")
+        .filter("stock", "lte", "min_stock"),
+      supabase.from("facturacion")
+        .select("total, created_at")
+        .gte("created_at", hace7.toISOString())
+        .order("created_at", { ascending: false }),
+    ]);
+
+    // ── Volumen diario últimos 14 días ──────────────────────────────────────
+    const diasMap: Record<string, number> = {};
+    for (let i = 0; i < 14; i++) {
+      const d = new Date(hace14); d.setDate(d.getDate() + i);
+      diasMap[d.toISOString().slice(0,10)] = 0;
+    }
+    for (const o of (ordenes14 || [])) {
+      const dia = o.created_at?.slice(0,10);
+      if (dia && diasMap[dia] !== undefined) diasMap[dia]++;
+    }
+    const volumenDiario = Object.entries(diasMap).map(([fecha, total]) => ({ fecha, total }));
+
+    // ── Ingresos por día (facturación) últimos 7 días ─────────────────────
+    const ingresosMap: Record<string, number> = {};
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(hace7); d.setDate(d.getDate() + i);
+      ingresosMap[d.toISOString().slice(0,10)] = 0;
+    }
+    for (const f of (facturas7 || [])) {
+      const dia = f.created_at?.slice(0,10);
+      if (dia && ingresosMap[dia] !== undefined) ingresosMap[dia] += Number(f.total) || 0;
+    }
+    const ingresosDiarios = Object.entries(ingresosMap).map(([fecha, total]) => ({ fecha, total }));
+
+    // ── KPIs calculados ───────────────────────────────────────────────────
+    const ingresoHoy    = (ventasHoy    || []).reduce((s, v) => s + Number(v.total), 0);
+    const ingresoSemana = (ventasSemana || []).reduce((s, v) => s + Number(v.total), 0);
+    const ordenesConTotal = (ordenes14 || []).filter(o => o.total > 0);
+    const ticketPromedio  = ordenesConTotal.length > 0
+      ? ordenesConTotal.reduce((s, o) => s + Number(o.total), 0) / ordenesConTotal.length
+      : 0;
+    const completadas   = (aprobaciones || []).filter(o => ["LISTO","ENTREGADO"].includes(o.estado)).length;
+    const canceladas    = (aprobaciones || []).filter(o => o.estado === "CANCELADA").length;
+    const tasaAprob     = completadas + canceladas > 0
+      ? Math.round((completadas / (completadas + canceladas)) * 100)
+      : null;
+
+    res.json({
+      ingresoHoy,
+      ingresoSemana,
+      ticketPromedio,
+      tasaAprobacion: tasaAprob,
+      ordenes14dias: ordenes14?.length || 0,
+      volumenDiario,
+      ingresosDiarios,
+      stockBajoItems: (inventarioBajo || []).slice(0, 5).map(i => ({
+        nombre: i.name, stock: i.stock, min: i.min_stock,
+      })),
+    });
+  } catch (err: any) {
+    res.status(500).json({ error: err.message });
   }
 });
 
@@ -3609,6 +3754,45 @@ app.patch("/inspeccion/:id", async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// =====================================================
+// 🔍 BÚSQUEDA GLOBAL
+// =====================================================
+app.get("/busqueda", async (req, res) => {
+  const q = (req.query.q || "").trim();
+  if (q.length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
+  const term = `%${q}%`;
+  const [
+    { data: clientes },
+    { data: vehiculos },
+    { data: ordenes },
+  ] = await Promise.all([
+    supabase.from("clientes")
+      .select("id, nombre, telefono, cedula")
+      .or(`nombre.ilike.${term},telefono.ilike.${term},cedula.ilike.${term}`)
+      .or("activo.eq.true,activo.is.null")
+      .limit(5),
+    supabase.from("vehiculos")
+      .select("id, marca, modelo, ano, placa, clientes(nombre)")
+      .or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
+      .or("activo.eq.true,activo.is.null")
+      .limit(5),
+    supabase.from("ordenes_trabajo")
+      .select("id, numero_orden, estado, descripcion, clientes(nombre)")
+      .or(`numero_orden.ilike.${term},descripcion.ilike.${term}`)
+      .order("id", { ascending: false })
+      .limit(5),
+  ]);
+  res.json({
+    clientes: clientes || [],
+    vehiculos: (vehiculos || []).map(v => ({ ...v, cliente_nombre: v.clientes?.nombre || "" })),
+    ordenes:   (ordenes  || []).map(o => ({
+      ...o,
+      numero_orden:   o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+      cliente_nombre: o.clientes?.nombre || "",
+    })),
+  });
 });
 
 // =====================================================

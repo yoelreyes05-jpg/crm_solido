@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
+import BusquedaGlobal from "@/components/BusquedaGlobal";
 
 const PERMISOS = {
   gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad","recepcion","taller","aprobacion"],
@@ -103,9 +104,53 @@ export default function ClientLayout({ children }) {
       </aside>
 
       {/* CONTENIDO */}
-      <main style={{ flex: 1 }}>
-        {children}
-      </main>
+      <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: "100vh" }}>
+
+        {/* HEADER con búsqueda global */}
+        <header style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          padding: "10px 24px",
+          background: "#0f172a",
+          borderBottom: "1px solid #1e293b",
+          position: "sticky",
+          top: 0,
+          zIndex: 100,
+          gap: 16,
+        }}>
+          <div style={{ flex: 1 }} />
+          <BusquedaGlobal />
+          {usuario && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              <span style={{ fontSize: 13, color: "#64748b" }}>
+                {(usuario as any).nombre}
+              </span>
+              <span style={{
+                fontSize: 10, fontWeight: 700, padding: "3px 8px", borderRadius: 6,
+                background: "#1e293b", color: "#94a3b8", textTransform: "uppercase",
+              }}>
+                {(usuario as any).rol}
+              </span>
+              <button
+                onClick={() => {
+                  localStorage.removeItem("usuario");
+                  document.cookie = "usuario=;path=/;max-age=0";
+                  window.location.href = "/login";
+                }}
+                style={{
+                  padding: "5px 12px", borderRadius: 7, border: "1px solid #334155",
+                  background: "transparent", color: "#64748b", cursor: "pointer", fontSize: 12,
+                }}
+              >Salir</button>
+            </div>
+          )}
+        </header>
+
+        <main style={{ flex: 1 }}>
+          {children}
+        </main>
+      </div>
     </div>
   );
 }

@@ -27,6 +27,24 @@ interface Avance {
   created_at: string;
 }
 
+interface Repuesto {
+  id: number;
+  nombre: string;
+  codigo?: string;
+  precio?: number;
+  stock: number;
+  unidad?: string;
+}
+
+interface RepuestoSeleccionado {
+  id: number;
+  nombre: string;
+  codigo?: string;
+  precio: number;
+  cantidad: number;
+  stock: number;
+}
+
 type MsgTipo = "ok" | "error" | "info";
 interface Msg { tipo: MsgTipo; texto: string }
 
@@ -84,6 +102,12 @@ export default function ReparacionPage() {
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const avancesEndRef = useRef<HTMLDivElement>(null);
 
+  // ── Inventario (C4) ───────────────────────────────────────────────────────
+  const [inventario, setInventario] = useState<Repuesto[]>([]);
+  const [busqInv, setBusqInv] = useState("");
+  const [repuestosSeleccionados, setRepuestosSeleccionados] = useState<RepuestoSeleccionado[]>([]);
+  const [mostrarInventario, setMostrarInventario] = useState(false);
+
   const usuario: Record<string, string> =
     typeof window !== "undefined"
       ? JSON.parse(localStorage.getItem("usuario") || "{}")
@@ -116,16 +140,68 @@ export default function ReparacionPage() {
     }
   }, [id]);
 
+  const cargarInventario = useCallback(async () => {
+    try {
+      const res = await fetch(`${API}/inventario`);
+      if (res.ok) {
+        const data = await res.json();
+        setInventario(Array.isArray(data) ? data : data.items || []);
+      }
+    } catch { /* silencioso */ }
+  }, []);
+
   useEffect(() => {
     cargar();
+    cargarInventario();
     intervalRef.current = setInterval(cargar, 20000);
     return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
-  }, [cargar]);
+  }, [cargar, cargarInventario]);
 
   // Scroll al último avance cuando se agregan nuevos
   useEffect(() => {
     avancesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [avances.length]);
+
+  // ── Inventario helpers (C4) ───────────────────────────────────────────────
+  const inventarioFiltrado = inventario.filter(item => {
+    if (!busqInv.trim()) return true;
+    const q = busqInv.toLowerCase();
+    return (
+      item.nombre.toLowerCase().includes(q) ||
+      (item.codigo || "").toLowerCase().includes(q)
+    );
+  }).filter(item => item.stock > 0); // solo con stock disponible
+
+  function agregarRepuesto(rep: Repuesto) {
+    setRepuestosSeleccionados(prev => {
+      const existe = prev.find(r => r.id === rep.id);
+      if (existe) return prev; // ya está seleccionado
+      return [...prev, {
+        id: rep.id,
+        nombre: rep.nombre,
+        codigo: rep.codigo,
+        precio: rep.precio || 0,
+        cantidad: 1,
+        stock: rep.stock,
+      }];
+    });
+    setBusqInv("");
+    setMostrarInventario(false);
+  }
+
+  function actualizarCantidad(repId: number, cantidad: number) {
+    setRepuestosSeleccionados(prev =>
+      prev.map(r => r.id === repId ? { ...r, cantidad: Math.max(1, Math.min(cantidad, r.stock)) } : r)
+    );
+  }
+
+  function quitarRepuesto(repId: number) {
+    setRepuestosSeleccionados(prev => prev.filter(r => r.id !== repId));
+  }
+
+  const totalRepuestos = repuestosSeleccionados.reduce(
+    (sum, r) => sum + r.precio * r.cantidad, 0
+  );
 
   // ── Agregar avance ────────────────────────────────────────────────────────
   async function agregarAvance(desc?: string) {
@@ -139,14 +215,23 @@ export default function ReparacionPage() {
     setMsg(null);
 
     try {
+      // Construir descripción completa incluyendo repuestos usados
+      let descripcionFinal = texto;
+      if (repuestosSeleccionados.length > 0) {
+        const listaRepuestos = repuestosSeleccionados
+          .map(r => `${r.nombre}${r.codigo ? ` (${r.codigo})` : ""} x${r.cantidad}`)
+          .join(", ");
+        descripcionFinal += `\n\n🔩 Repuestos utilizados: ${listaRepuestos}`;
+      }
+
       const res = await fetch(`${API}/avances`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          orden_id:      Number(id),
-          descripcion:   texto,
+          orden_id:       Number(id),
+          descripcion:    descripcionFinal,
           tecnico_nombre: nombreTecnico,
-          usuario_id:    usuario.id,
+          usuario_id:     usuario.id,
         }),
       });
 
@@ -159,6 +244,23 @@ export default function ReparacionPage() {
       const nuevo: Avance = data.avance || data;
       setAvances(prev => [...prev, nuevo]);
       setDescAvance("");
+
+      // Descontar stock de cada repuesto seleccionado (C4)
+      if (repuestosSeleccionados.length > 0) {
+        await Promise.all(
+          repuestosSeleccionados.map(r =>
+            fetch(`${API}/inventario/${r.id}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ stock_delta: -r.cantidad }),
+            }).catch(() => {}) // silencioso — el avance ya se guardó
+          )
+        );
+        // Refrescar inventario con stocks actualizados
+        cargarInventario();
+        setRepuestosSeleccionados([]);
+      }
+
       setMsg({ tipo: "ok", texto: "Avance agregado correctamente." });
     } catch (e: any) {
       setMsg({ tipo: "error", texto: e.message || "Error al agregar avance." });
@@ -192,7 +294,7 @@ export default function ReparacionPage() {
         setAvances(prev => [...prev, nuevo]);
       }
 
-      // 2. Transición de estado: intentar endpoint calidad-aprobada o cambio de estado
+      // 2. Transición de estado
       const resCalidad = await fetch(`${API}/ordenes/${id}/calidad-aprobada`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -200,7 +302,6 @@ export default function ReparacionPage() {
       });
 
       if (!resCalidad.ok) {
-        // fallback: intentar PATCH estado
         await fetch(`${API}/ordenes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -208,7 +309,6 @@ export default function ReparacionPage() {
         });
       }
 
-      // Recargar orden para ver nuevo estado
       const rOrden = await fetch(`${API}/ordenes/${id}`);
       if (rOrden.ok) {
         const data = await rOrden.json();
@@ -333,7 +433,7 @@ export default function ReparacionPage() {
         </div>
       )}
 
-      <div style={{ padding: 24, display: "grid", gridTemplateColumns: "1fr 400px", gap: 24, alignItems: "start" }}>
+      <div style={{ padding: 24, display: "grid", gridTemplateColumns: "1fr 420px", gap: 24, alignItems: "start" }}>
 
         {/* Panel izquierdo: avances */}
         <div>
@@ -418,7 +518,7 @@ export default function ReparacionPage() {
                         {fmtFecha(av.created_at)}
                       </span>
                     </div>
-                    <p style={{ margin: 0, fontSize: 13, color: C.muted, lineHeight: 1.5 }}>
+                    <p style={{ margin: 0, fontSize: 13, color: C.muted, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
                       {av.descripcion}
                     </p>
                   </div>
@@ -431,6 +531,164 @@ export default function ReparacionPage() {
 
         {/* Panel derecho: acciones */}
         <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+          {/* ── C4: Selector de repuestos ── */}
+          <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 18 }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+              <h3 style={{ margin: 0, fontSize: 14, fontWeight: 700, color: C.text }}>
+                🔩 Repuestos Utilizados
+              </h3>
+              <button
+                onClick={() => setMostrarInventario(v => !v)}
+                style={{
+                  background: C.cyan + "22",
+                  color: C.cyan,
+                  border: `1px solid ${C.cyan}44`,
+                  borderRadius: 7,
+                  padding: "5px 12px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: "pointer",
+                }}
+              >
+                {mostrarInventario ? "✕ Cerrar" : "+ Agregar repuesto"}
+              </button>
+            </div>
+
+            {/* Buscador de inventario */}
+            {mostrarInventario && (
+              <div style={{ marginBottom: 12 }}>
+                <input
+                  type="text"
+                  value={busqInv}
+                  onChange={e => setBusqInv(e.target.value)}
+                  placeholder="Buscar por nombre o código..."
+                  autoFocus
+                  style={{ ...inputStyle, marginBottom: 8 }}
+                />
+                {busqInv.trim().length > 0 && (
+                  <div style={{
+                    background: C.bg,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    maxHeight: 200,
+                    overflowY: "auto",
+                  }}>
+                    {inventarioFiltrado.length === 0 ? (
+                      <div style={{ padding: "12px 14px", fontSize: 13, color: C.muted, textAlign: "center" }}>
+                        Sin resultados
+                      </div>
+                    ) : (
+                      inventarioFiltrado.slice(0, 10).map(item => (
+                        <div
+                          key={item.id}
+                          onClick={() => agregarRepuesto(item)}
+                          style={{
+                            padding: "9px 14px",
+                            cursor: "pointer",
+                            borderBottom: `1px solid ${C.border}`,
+                            display: "flex",
+                            justifyContent: "space-between",
+                            alignItems: "center",
+                            fontSize: 13,
+                          }}
+                          onMouseEnter={e => (e.currentTarget.style.background = C.border + "44")}
+                          onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                        >
+                          <div>
+                            <span style={{ fontWeight: 600, color: C.text }}>{item.nombre}</span>
+                            {item.codigo && <span style={{ marginLeft: 6, fontSize: 11, color: C.muted }}>{item.codigo}</span>}
+                          </div>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                            {item.precio != null && item.precio > 0 && (
+                              <span style={{ fontSize: 12, color: C.green, fontWeight: 600 }}>
+                                ${item.precio.toFixed(2)}
+                              </span>
+                            )}
+                            <span style={{
+                              fontSize: 11,
+                              background: item.stock > 5 ? C.green + "22" : C.orange + "22",
+                              color: item.stock > 5 ? C.green : C.orange,
+                              border: `1px solid ${item.stock > 5 ? C.green : C.orange}44`,
+                              borderRadius: 5,
+                              padding: "1px 6px",
+                              fontWeight: 700,
+                            }}>
+                              Stock: {item.stock}
+                            </span>
+                          </div>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Lista de repuestos seleccionados */}
+            {repuestosSeleccionados.length === 0 ? (
+              <p style={{ margin: 0, fontSize: 12, color: C.muted, fontStyle: "italic" }}>
+                Ningún repuesto agregado. Los repuestos usados se descontarán del inventario al guardar el avance.
+              </p>
+            ) : (
+              <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                {repuestosSeleccionados.map(r => (
+                  <div key={r.id} style={{
+                    background: C.bg,
+                    border: `1px solid ${C.border}`,
+                    borderRadius: 8,
+                    padding: "8px 12px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                  }}>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 13, fontWeight: 600, color: C.text, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {r.nombre}
+                      </div>
+                      {r.codigo && <div style={{ fontSize: 11, color: C.muted }}>{r.codigo}</div>}
+                    </div>
+                    {/* Cantidad */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 4, flexShrink: 0 }}>
+                      <button
+                        onClick={() => actualizarCantidad(r.id, r.cantidad - 1)}
+                        style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${C.border}`, background: C.card, color: C.text, cursor: "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >−</button>
+                      <span style={{ minWidth: 28, textAlign: "center", fontSize: 13, fontWeight: 700, color: C.text }}>{r.cantidad}</span>
+                      <button
+                        onClick={() => actualizarCantidad(r.id, r.cantidad + 1)}
+                        disabled={r.cantidad >= r.stock}
+                        style={{ width: 24, height: 24, borderRadius: 6, border: `1px solid ${C.border}`, background: C.card, color: r.cantidad >= r.stock ? C.muted : C.text, cursor: r.cantidad >= r.stock ? "not-allowed" : "pointer", fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center" }}
+                      >+</button>
+                    </div>
+                    {r.precio > 0 && (
+                      <span style={{ fontSize: 12, color: C.green, fontWeight: 700, minWidth: 64, textAlign: "right", flexShrink: 0 }}>
+                        ${(r.precio * r.cantidad).toFixed(2)}
+                      </span>
+                    )}
+                    <button
+                      onClick={() => quitarRepuesto(r.id)}
+                      style={{ background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 16, padding: "0 2px", flexShrink: 0 }}
+                    >×</button>
+                  </div>
+                ))}
+                {/* Total */}
+                {totalRepuestos > 0 && (
+                  <div style={{
+                    textAlign: "right",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    color: C.green,
+                    paddingTop: 6,
+                    borderTop: `1px solid ${C.border}`,
+                    marginTop: 4,
+                  }}>
+                    Total repuestos: ${totalRepuestos.toFixed(2)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
 
           {/* Formulario agregar avance */}
           <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: 20 }}>
@@ -445,6 +703,21 @@ export default function ReparacionPage() {
               placeholder="Describe el trabajo que realizaste en este avance..."
               style={{ ...inputStyle, resize: "vertical", marginBottom: 12 }}
             />
+
+            {repuestosSeleccionados.length > 0 && (
+              <div style={{
+                background: C.cyan + "11",
+                border: `1px solid ${C.cyan}33`,
+                borderRadius: 7,
+                padding: "8px 12px",
+                marginBottom: 10,
+                fontSize: 12,
+                color: C.cyan,
+              }}>
+                🔩 Se descontarán <strong>{repuestosSeleccionados.length} repuesto(s)</strong> del inventario al guardar.
+              </div>
+            )}
+
             <button
               onClick={() => agregarAvance()}
               disabled={saving || !descAvance.trim()}

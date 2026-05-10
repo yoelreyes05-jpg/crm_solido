@@ -15,24 +15,108 @@ const FASES = [
 ];
 const MAX_VISIBLE = 3;
 
+// ─── Gráfica de barras SVG (inline, sin dependencias) ────────────────────────
+function BarChart({
+  data,
+  colorBar = "#3b82f6",
+  height = 100,
+  labelKey = "fecha",
+  valueKey = "total",
+  formatValue = (v: number) => String(v),
+  yPrefix = "",
+}: {
+  data: Record<string, any>[];
+  colorBar?: string;
+  height?: number;
+  labelKey?: string;
+  valueKey?: string;
+  formatValue?: (v: number) => string;
+  yPrefix?: string;
+}) {
+  if (!data || data.length === 0) return null;
+  const valores = data.map(d => Number(d[valueKey]) || 0);
+  const maxVal  = Math.max(...valores, 1);
+  const W       = 460;
+  const H       = height;
+  const barW    = Math.floor((W - 16) / data.length) - 2;
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H + 28}`} style={{ width: "100%", overflow: "visible" }}>
+      {data.map((d, i) => {
+        const v     = Number(d[valueKey]) || 0;
+        const barH  = maxVal > 0 ? Math.max(3, Math.round((v / maxVal) * H)) : 3;
+        const x     = 8 + i * (barW + 2);
+        const y     = H - barH;
+        const label = String(d[labelKey]).slice(5); // MM-DD
+        return (
+          <g key={i}>
+            <rect
+              x={x} y={y}
+              width={barW} height={barH}
+              rx={3}
+              fill={v > 0 ? colorBar : "#334155"}
+              opacity={0.85}
+            />
+            {v > 0 && (
+              <text
+                x={x + barW / 2} y={y - 3}
+                textAnchor="middle"
+                fontSize={9}
+                fill={colorBar}
+                fontWeight="700"
+              >
+                {yPrefix}{formatValue(v)}
+              </text>
+            )}
+            {/* Only show every other label to avoid crowding */}
+            {i % 2 === 0 && (
+              <text
+                x={x + barW / 2} y={H + 20}
+                textAnchor="middle"
+                fontSize={8}
+                fill="#64748b"
+              >
+                {label}
+              </text>
+            )}
+          </g>
+        );
+      })}
+    </svg>
+  );
+}
+
+// ─── Componente principal ─────────────────────────────────────────────────────
 export default function Dashboard() {
-  const [stats, setStats]     = useState<any>(null);
+  const [stats,   setStats]   = useState<any>(null);
   const [ordenes, setOrdenes] = useState<any[]>([]);
+  const [kpisGerente, setKpisGerente] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
 
+  // Rol del usuario logueado
+  const rolUsuario: string =
+    typeof window !== "undefined"
+      ? (JSON.parse(localStorage.getItem("usuario") || "{}").rol || "").toLowerCase()
+      : "";
+  const esGerente = ["gerente", "admin", "jefe"].includes(rolUsuario);
+
   const loadData = useCallback(async () => {
     try {
-      const [sRes, oRes] = await Promise.all([
+      const requests: Promise<any>[] = [
         fetch(`${API}/dashboard/stats`),
         fetch(`${API}/ordenes`),
-      ]);
+      ];
+      if (esGerente) requests.push(fetch(`${API}/dashboard/kpis-gerente`));
+
+      const [sRes, oRes, kRes] = await Promise.all(requests);
       setStats(await sRes.json());
       const o = await oRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
+      if (kRes) setKpisGerente(await kRes.json());
     } catch {}
     setLoading(false);
-  }, []);
+  }, [esGerente]);
 
   useEffect(() => {
     loadData();
@@ -46,7 +130,6 @@ export default function Dashboard() {
     if (!destination || source.droppableId === destination.droppableId) return;
     const ordenId  = Number(draggableId);
     const nuevoEst = destination.droppableId;
-    // Optimistic update
     setOrdenes(prev => prev.map(o => o.id === ordenId ? { ...o, estado: nuevoEst } : o));
     try {
       await fetch(`${API}/ordenes/${ordenId}`, {
@@ -61,8 +144,8 @@ export default function Dashboard() {
   const byFase: Record<string, any[]> = {};
   for (const f of FASES) byFase[f.key] = ordenes.filter(o => (o.estado || "RECIBIDO") === f.key);
 
-  const listos        = byFase["LISTO"]?.length || 0;
-  const enTaller      = ordenes.filter(o => o.estado !== "ENTREGADO").length;
+  const listos   = byFase["LISTO"]?.length || 0;
+  const enTaller = ordenes.filter(o => o.estado !== "ENTREGADO").length;
 
   if (loading) return (
     <div style={{ display:"flex", justifyContent:"center", alignItems:"center", height:"60vh", fontSize:18, color:"#888" }}>
@@ -105,7 +188,7 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* KPIs */}
+      {/* KPIs básicos */}
       <div style={S.kpiGrid}>
         {[
           { label:"🚗 En Taller",   valor: enTaller,                        color:"#3b82f6" },
@@ -113,7 +196,7 @@ export default function Dashboard() {
           { label:"🔍 Diagnóstico", valor: stats?.ordenes?.diagnostico||0,  color:"#f59e0b" },
           { label:"🔧 Reparación",  valor: stats?.ordenes?.reparacion||0,   color:"#ef4444" },
           { label:"👥 Clientes",    valor: stats?.clientes||0,              color:"#8b5cf6" },
-          { label:"⚠️ Stock Bajo",  valor: stats?.stockBajo||0,            color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
+          { label:"⚠️ Stock Bajo",  valor: stats?.stockBajo||0,             color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
         ].map(k => (
           <div key={k.label} style={{ background:"#fff", borderRadius:14, padding:"18px 16px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", borderLeft:`5px solid ${k.color}` }}>
             <div style={{ fontSize:13, color:"#888", marginBottom:8, fontWeight:600 }}>{k.label}</div>
@@ -121,6 +204,118 @@ export default function Dashboard() {
           </div>
         ))}
       </div>
+
+      {/* ── KPIs GERENTE (C7) ── */}
+      {esGerente && kpisGerente && (
+        <div style={{ ...S.section }}>
+          <h2 style={S.sectionTitle}>📈 Análisis Gerencial</h2>
+
+          {/* KPI cards financieros */}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
+            {[
+              {
+                label: "💵 Ingreso Hoy",
+                valor: `$${(kpisGerente.ingresoHoy || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`,
+                color: "#10b981",
+                sub: "ventas del día",
+              },
+              {
+                label: "📅 Ingreso Semana",
+                valor: `$${(kpisGerente.ingresoSemana || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`,
+                color: "#3b82f6",
+                sub: "semana en curso",
+              },
+              {
+                label: "🎯 Ticket Promedio",
+                valor: kpisGerente.ticketPromedio > 0
+                  ? `$${Number(kpisGerente.ticketPromedio).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`
+                  : "—",
+                color: "#8b5cf6",
+                sub: "últimas 2 semanas",
+              },
+              {
+                label: "✅ Tasa Aprobación",
+                valor: kpisGerente.tasaAprobacion != null ? `${kpisGerente.tasaAprobacion}%` : "—",
+                color: kpisGerente.tasaAprobacion >= 80 ? "#10b981" : kpisGerente.tasaAprobacion >= 60 ? "#f59e0b" : "#ef4444",
+                sub: "órdenes completadas",
+              },
+            ].map(k => (
+              <div key={k.label} style={{
+                background:"#fff", borderRadius:14, padding:"18px 16px",
+                boxShadow:"0 2px 12px rgba(0,0,0,0.06)",
+                borderTop:`4px solid ${k.color}`,
+              }}>
+                <div style={{ fontSize:12, color:"#888", marginBottom:4, fontWeight:600 }}>{k.label}</div>
+                <div style={{ fontSize:26, fontWeight:900, color:"#111", marginBottom:4 }}>{k.valor}</div>
+                <div style={{ fontSize:11, color:"#aaa" }}>{k.sub}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Gráficas */}
+          <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>
+            {/* Volumen de órdenes — 14 días */}
+            <div style={{ background:"#fff", borderRadius:14, padding:"18px 20px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#111", marginBottom:14 }}>
+                📦 Órdenes por día — últimas 2 semanas
+              </div>
+              <BarChart
+                data={kpisGerente.volumenDiario || []}
+                colorBar="#3b82f6"
+                height={90}
+                labelKey="fecha"
+                valueKey="total"
+              />
+              <div style={{ fontSize:11, color:"#aaa", marginTop:8, textAlign:"right" }}>
+                Total: <strong style={{ color:"#111" }}>{kpisGerente.ordenes14dias}</strong> órdenes
+              </div>
+            </div>
+
+            {/* Ingresos — 7 días */}
+            <div style={{ background:"#fff", borderRadius:14, padding:"18px 20px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#111", marginBottom:14 }}>
+                💰 Ingresos por día — última semana
+              </div>
+              <BarChart
+                data={kpisGerente.ingresosDiarios || []}
+                colorBar="#10b981"
+                height={90}
+                labelKey="fecha"
+                valueKey="total"
+                yPrefix="$"
+                formatValue={v => v >= 1000 ? `${(v/1000).toFixed(1)}k` : String(v)}
+              />
+              <div style={{ fontSize:11, color:"#aaa", marginTop:8, textAlign:"right" }}>
+                Semana: <strong style={{ color:"#111" }}>
+                  ${(kpisGerente.ingresoSemana || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}
+                </strong>
+              </div>
+            </div>
+          </div>
+
+          {/* Stock bajo */}
+          {kpisGerente.stockBajoItems?.length > 0 && (
+            <div style={{ background:"#fff", borderRadius:14, padding:"16px 20px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", marginTop:16, borderLeft:"4px solid #ef4444" }}>
+              <div style={{ fontSize:13, fontWeight:700, color:"#ef4444", marginBottom:10 }}>
+                ⚠️ Repuestos con stock bajo
+              </div>
+              <div style={{ display:"flex", flexWrap:"wrap", gap:8 }}>
+                {kpisGerente.stockBajoItems.map((item: any, i: number) => (
+                  <span key={i} style={{
+                    background:"#fef2f2", border:"1px solid #fca5a5", borderRadius:8,
+                    padding:"5px 12px", fontSize:12, color:"#dc2626",
+                  }}>
+                    {item.nombre} — <strong>{item.stock}</strong> / min {item.min}
+                  </span>
+                ))}
+                <Link href="/inventario" style={{ fontSize:12, color:"#3b82f6", fontWeight:600, textDecoration:"none", alignSelf:"center", marginLeft:6 }}>
+                  Ver inventario →
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* KANBAN */}
       <div style={S.section}>
@@ -140,14 +335,12 @@ export default function Dashboard() {
               const hayMas   = cards.length > MAX_VISIBLE;
               return (
                 <div key={fase.key} style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 12px rgba(0,0,0,0.06)", overflow:"hidden", border:`1px solid ${fase.color}22` }}>
-                  {/* Header */}
                   <div style={{ padding:"10px 12px", background:fase.light, borderBottom:`2px solid ${fase.color}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
                     <span style={{ fontSize:12, fontWeight:800, color:"#111" }}>{fase.icon} {fase.label}</span>
                     <span style={{ background:fase.color, color:"#fff", borderRadius:"50%", width:22, height:22, display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800 }}>
                       {cards.length}
                     </span>
                   </div>
-                  {/* Drop zone */}
                   <Droppable droppableId={fase.key}>
                     {(prov, snap) => (
                       <div ref={prov.innerRef} {...prov.droppableProps} style={{ padding:8, minHeight:60, background:snap.isDraggingOver ? `${fase.color}12` : "transparent", transition:"background 0.15s" }}>
@@ -256,7 +449,7 @@ export default function Dashboard() {
         <h2 style={S.sectionTitle}>⚡ Accesos Rápidos</h2>
         <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
           {[
-            { href:"/ordenes",      label:"➕ Nueva Orden",       color:"#3b82f6" },
+            { href:"/recepcion",    label:"🚗 Nueva Recepción",  color:"#3b82f6" },
             { href:"/diagnosticos", label:"🔬 Nuevo Diagnóstico", color:"#8b5cf6" },
             { href:"/facturacion",  label:"🧾 Facturar",          color:"#10b981" },
             { href:"/clientes",     label:"👤 Nuevo Cliente",     color:"#f59e0b" },
