@@ -22,24 +22,22 @@ interface OrdenDetalle {
 
 interface Inspeccion {
   id?: number;
-  km?: string | number;
-  nivel_combustible?: string;
+  km_entrada?: string | number;
+  nivel_combustible?: number | string;
   condicion_general?: string;
   observaciones?: string;
-  firma_url?: string;
-  // checklist
-  luces_delanteras?: boolean;
-  luces_traseras?: boolean;
-  espejos?: boolean;
-  neumaticos?: boolean;
-  frenos?: boolean;
-  aceite?: boolean;
-  agua?: boolean;
-  bateria?: boolean;
-  aire_acondicionado?: boolean;
-  radio?: boolean;
-  tapiceria?: boolean;
-  vidrios?: boolean;
+  firma_cliente?: string;
+  // checklist — nombres exactos de la tabla inspeccion_vehiculo
+  radio_pantalla?: boolean;
+  tapiceria_ok?: boolean;
+  alfombras_ok?: boolean;
+  luces_ok?: boolean;
+  bocina_ok?: boolean;
+  espejos_ok?: boolean;
+  gato_ok?: boolean;
+  llanta_repuesto_ok?: boolean;
+  documentos_ok?: boolean;
+  herramientas_ok?: boolean;
 }
 
 interface Diagnostico {
@@ -88,18 +86,16 @@ function fmtDinero(n: number): string {
 }
 
 const CHECKLIST_LABELS: { key: keyof Inspeccion; label: string }[] = [
-  { key: "luces_delanteras",  label: "Luces delanteras" },
-  { key: "luces_traseras",    label: "Luces traseras" },
-  { key: "espejos",           label: "Espejos" },
-  { key: "neumaticos",        label: "Neumáticos" },
-  { key: "frenos",            label: "Frenos" },
-  { key: "aceite",            label: "Aceite" },
-  { key: "agua",              label: "Agua" },
-  { key: "bateria",           label: "Batería" },
-  { key: "aire_acondicionado",label: "Aire acondicionado" },
-  { key: "radio",             label: "Radio" },
-  { key: "tapiceria",         label: "Tapicería" },
-  { key: "vidrios",           label: "Vidrios" },
+  { key: "luces_ok",          label: "💡 Luces" },
+  { key: "espejos_ok",        label: "🔍 Espejos" },
+  { key: "radio_pantalla",    label: "📻 Radio / Pantalla" },
+  { key: "tapiceria_ok",      label: "🪑 Tapicería" },
+  { key: "alfombras_ok",      label: "🧺 Alfombras" },
+  { key: "bocina_ok",         label: "📣 Bocina" },
+  { key: "gato_ok",           label: "🔩 Gato hidráulico" },
+  { key: "llanta_repuesto_ok",label: "🛞 Llanta repuesto" },
+  { key: "documentos_ok",     label: "📄 Documentos" },
+  { key: "herramientas_ok",   label: "🔧 Herramientas" },
 ];
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -142,12 +138,28 @@ export default function DiagnosticoPage() {
 
       if (rOrden.ok) {
         const data = await rOrden.json();
-        // El endpoint puede devolver { orden, cliente, vehiculo, diagnostico }
-        const o: OrdenDetalle = data.orden || data;
+        // GET /ordenes/:id retorna { orden, cliente, vehiculo, diagnostico, log, inspeccion }
+        // Armamos OrdenDetalle uniendo los tres objetos
+        const raw   = data.orden   || data;
+        const cli   = data.cliente  || {};
+        const veh   = data.vehiculo || {};
+        const o: OrdenDetalle = {
+          ...raw,
+          cliente_nombre:  cli.nombre  || raw.cliente_nombre  || "Sin cliente",
+          vehiculo_info:   veh.id
+            ? `${veh.marca} ${veh.modelo} (${veh.placa})`
+            : raw.vehiculo_info || "—",
+          vehiculo_marca:  veh.marca   || raw.vehiculo_marca,
+          vehiculo_modelo: veh.modelo  || raw.vehiculo_modelo,
+          vehiculo_placa:  veh.placa   || raw.vehiculo_placa,
+          vehiculo_ano:    veh.ano     || raw.vehiculo_ano,
+          cliente_id:      cli.id      || raw.cliente_id,
+          vehiculo_id:     veh.id      || raw.vehiculo_id,
+        };
         setOrden(o);
 
         // Diagnóstico existente desde la orden
-        const diag: Diagnostico | null = data.diagnostico || data.cotizacion || null;
+        const diag: Diagnostico | null = data.diagnostico || null;
         if (diag) {
           setDiagnostico(diag);
           setDesc(diag.descripcion || "");
@@ -157,11 +169,14 @@ export default function DiagnosticoPage() {
           setMoDetalle(diag.mano_de_obra_detalle || "");
           setNotas(diag.notas || "");
         }
+      } else {
+        setMsg({ tipo: "error", texto: `Orden #${id} no encontrada.` });
       }
 
       if (rInsp.ok) {
         const di = await rInsp.json();
-        setInspeccion(di.inspeccion || di);
+        // El endpoint retorna el objeto inspección directamente, o null si no existe
+        setInspeccion(di || null);
       }
     } catch {
       setMsg({ tipo: "error", texto: "Error cargando datos de la orden." });
@@ -329,8 +344,8 @@ export default function DiagnosticoPage() {
                   <>
                     {/* KM + combustible */}
                     <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-                      <CampoReadonly label="KM" value={String(inspeccion.km || "—")} />
-                      <CampoReadonly label="Combustible" value={inspeccion.nivel_combustible || "—"} />
+                      <CampoReadonly label="KM entrada" value={inspeccion.km_entrada ? `${Number(inspeccion.km_entrada).toLocaleString()} km` : "—"} />
+                      <CampoReadonly label="Combustible" value={inspeccion.nivel_combustible != null ? `${inspeccion.nivel_combustible}%` : "—"} />
                     </div>
                     <CampoReadonly label="Condición general" value={inspeccion.condicion_general || "—"} />
 
@@ -355,12 +370,12 @@ export default function DiagnosticoPage() {
                       <CampoReadonly label="Observaciones" value={inspeccion.observaciones} multiline />
                     )}
 
-                    {inspeccion.firma_url && (
+                    {inspeccion.firma_cliente && (
                       <div>
                         <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Firma del cliente</div>
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
-                          src={inspeccion.firma_url}
+                          src={inspeccion.firma_cliente}
                           alt="Firma"
                           style={{ maxWidth: "100%", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff" }}
                         />
