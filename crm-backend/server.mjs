@@ -218,22 +218,38 @@ app.patch("/vehiculos/:id", async (req, res) => {
 // =====================================================
 app.get("/ordenes", async (req, res) => {
   try {
-    const { data, error } = await supabase
+    // Query 1: órdenes sin join embebido
+    const { data: oData, error: oError } = await supabase
       .from("ordenes_trabajo")
-      .select("*, clientes(id, nombre, telefono), vehiculos(id, marca, modelo, placa, ano)")
+      .select("*")
       .order("id", { ascending: false });
-    if (error) throw new Error(error.message);
-    const fixed = (data || []).map(o => ({
-      ...o,
-      estado:           o.estado || "RECIBIDO",
-      numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-      cliente_nombre:   o.clientes?.nombre   || "Sin cliente",
-      cliente_telefono: o.clientes?.telefono || "",
-      vehiculo_info:    o.vehiculos
-        ? `${o.vehiculos.marca} ${o.vehiculos.modelo} (${o.vehiculos.placa})`
-        : "Sin vehículo",
-      vehiculo_placa:   o.vehiculos?.placa || "",
-    }));
+    if (oError) throw new Error(oError.message);
+
+    // Query 2 y 3: clientes y vehículos para armar los campos derivados
+    const [{ data: cData }, { data: vData }] = await Promise.all([
+      supabase.from("clientes").select("id, nombre, telefono"),
+      supabase.from("vehiculos").select("id, marca, modelo, placa, ano"),
+    ]);
+
+    const clienteMap = {};
+    (cData || []).forEach(c => { clienteMap[c.id] = c; });
+    const vehiculoMap = {};
+    (vData || []).forEach(v => { vehiculoMap[v.id] = v; });
+
+    const fixed = (oData || []).map(o => {
+      const cli = clienteMap[o.cliente_id];
+      const veh = vehiculoMap[o.vehiculo_id];
+      return {
+        ...o,
+        estado:           o.estado || "RECIBIDO",
+        numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+        cliente_nombre:   cli?.nombre   || "Sin cliente",
+        cliente_telefono: cli?.telefono || "",
+        vehiculo_info:    veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "Sin vehículo",
+        vehiculo_placa:   veh?.placa || "",
+      };
+    });
+
     res.json(fixed);
   } catch (err) {
     console.error("ERROR /ordenes:", err.message);
@@ -791,19 +807,34 @@ app.post("/cafeteria/cuadre", async (req, res) => {
 // 🔬 DIAGNÓSTICOS
 // =====================================================
 app.get("/diagnosticos", async (req, res) => {
-  const { data, error } = await supabase
-    .from("diagnosticos")
-    .select("*, clientes(id, nombre), vehiculos(id, marca, modelo, placa)")
-    .order("created_at", { ascending: false });
-  if (error) return res.json({ error: error.message });
-  const fixed = (data || []).map(d => ({
-    ...d,
-    cliente_nombre: d.clientes?.nombre || "Sin cliente",
-    vehiculo_info:  d.vehiculos
-      ? `${d.vehiculos.marca} ${d.vehiculos.modelo} (${d.vehiculos.placa})`
-      : "Sin vehículo",
-  }));
-  res.json(fixed);
+  try {
+    const { data: dData, error: dError } = await supabase
+      .from("diagnosticos")
+      .select("*")
+      .order("created_at", { ascending: false });
+    if (dError) return res.json({ error: dError.message });
+
+    const [{ data: cData }, { data: vData }] = await Promise.all([
+      supabase.from("clientes").select("id, nombre"),
+      supabase.from("vehiculos").select("id, marca, modelo, placa"),
+    ]);
+    const clienteMap = {};
+    (cData || []).forEach(c => { clienteMap[c.id] = c; });
+    const vehiculoMap = {};
+    (vData || []).forEach(v => { vehiculoMap[v.id] = v; });
+
+    const fixed = (dData || []).map(d => {
+      const veh = vehiculoMap[d.vehiculo_id];
+      return {
+        ...d,
+        cliente_nombre: clienteMap[d.cliente_id]?.nombre || "Sin cliente",
+        vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "Sin vehículo",
+      };
+    });
+    res.json(fixed);
+  } catch (err) {
+    res.json({ error: err.message });
+  }
 });
 
 app.get("/diagnosticos/:id", async (req, res) => {
@@ -3404,18 +3435,23 @@ app.get("/api/contabilidad/cuentas-pagar", async (req, res) => {
     const { estado } = req.query;
     let query = supabase
       .from("cuentas_pagar")
-      .select("*, suplidores(nombre)")
+      .select("*")
       .order("fecha_vencimiento", { ascending: true });
     if (estado && estado !== "TODOS") query = query.eq("estado", estado);
     const { data, error } = await query;
     if (error) return res.status(500).json({ error: error.message });
-    // Actualizar VENCIDO automáticamente
-    const hoy  = new Date().toISOString().slice(0, 10);
+
+    // Obtener nombres de suplidores por separado
+    const { data: sData } = await supabase.from("suplidores").select("id, nombre");
+    const supMap = {};
+    (sData || []).forEach(s => { supMap[s.id] = s.nombre; });
+
+    const hoy = new Date().toISOString().slice(0, 10);
     const rows = (data || []).map(c => {
       const saldo = Number(c.monto_original) - Number(c.monto_pagado);
       let est = c.estado;
       if (est === "PENDIENTE" && c.fecha_vencimiento < hoy) est = "VENCIDO";
-      return { ...c, saldo, estado: est, suplidor_display: c.suplidores?.nombre || c.suplidor_nombre || "—" };
+      return { ...c, saldo, estado: est, suplidor_display: supMap[c.suplidor_id] || c.suplidor_nombre || "—" };
     });
     res.json(rows);
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -3425,9 +3461,12 @@ app.get("/api/contabilidad/cuentas-pagar", async (req, res) => {
 app.get("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { data: cuenta } = await supabase.from("cuentas_pagar").select("*, suplidores(nombre)").eq("id", id).single();
+    const { data: cuenta } = await supabase.from("cuentas_pagar").select("*").eq("id", id).single();
     const { data: pagos  } = await supabase.from("pagos_pagar").select("*").eq("cuenta_id", id).order("fecha");
-    res.json({ cuenta: { ...cuenta, suplidor_display: cuenta?.suplidores?.nombre || cuenta?.suplidor_nombre || "—" }, pagos: pagos || [] });
+    const supNombre = cuenta?.suplidor_id
+      ? (await supabase.from("suplidores").select("nombre").eq("id", cuenta.suplidor_id).single()).data?.nombre
+      : null;
+    res.json({ cuenta: { ...cuenta, suplidor_display: supNombre || cuenta?.suplidor_nombre || "—" }, pagos: pagos || [] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -3802,39 +3841,54 @@ app.patch("/inspeccion/:id", async (req, res) => {
 // 🔍 BÚSQUEDA GLOBAL
 // =====================================================
 app.get("/busqueda", async (req, res) => {
-  const q = (req.query.q || "").trim();
-  if (q.length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
-  const term = `%${q}%`;
-  const [
-    { data: clientes },
-    { data: vehiculos },
-    { data: ordenes },
-  ] = await Promise.all([
-    supabase.from("clientes")
-      .select("id, nombre, telefono, cedula")
-      .or(`nombre.ilike.${term},telefono.ilike.${term},cedula.ilike.${term}`)
-      .or("activo.eq.true,activo.is.null")
-      .limit(5),
-    supabase.from("vehiculos")
-      .select("id, marca, modelo, ano, placa, clientes(nombre)")
-      .or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
-      .or("activo.eq.true,activo.is.null")
-      .limit(5),
-    supabase.from("ordenes_trabajo")
-      .select("id, numero_orden, estado, descripcion, clientes(nombre)")
-      .or(`numero_orden.ilike.${term},descripcion.ilike.${term}`)
-      .order("id", { ascending: false })
-      .limit(5),
-  ]);
-  res.json({
-    clientes: clientes || [],
-    vehiculos: (vehiculos || []).map(v => ({ ...v, cliente_nombre: v.clientes?.nombre || "" })),
-    ordenes:   (ordenes  || []).map(o => ({
-      ...o,
-      numero_orden:   o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-      cliente_nombre: o.clientes?.nombre || "",
-    })),
-  });
+  try {
+    const q = (req.query.q || "").trim();
+    if (q.length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
+    const term = `%${q}%`;
+
+    const [cRes, vRes, oRes] = await Promise.all([
+      supabase.from("clientes")
+        .select("id, nombre, telefono, cedula")
+        .or(`nombre.ilike.${term},telefono.ilike.${term},cedula.ilike.${term}`)
+        .limit(5),
+      supabase.from("vehiculos")
+        .select("id, marca, modelo, ano, placa, cliente_id")
+        .or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
+        .limit(5),
+      supabase.from("ordenes_trabajo")
+        .select("id, numero_orden, estado, descripcion, cliente_id")
+        .or(`numero_orden.ilike.${term},descripcion.ilike.${term}`)
+        .order("id", { ascending: false })
+        .limit(5),
+    ]);
+
+    // Mapa de clientes para armar nombres sin join
+    const clienteMap = {};
+    (cRes.data || []).forEach(c => { clienteMap[c.id] = c.nombre; });
+
+    // Completar con nombres de clientes que aparecen en vehiculos u ordenes pero no en la búsqueda de clientes
+    const extraIds = [
+      ...(vRes.data || []).map(v => v.cliente_id),
+      ...(oRes.data || []).map(o => o.cliente_id),
+    ].filter(id => id && !clienteMap[id]);
+
+    if (extraIds.length > 0) {
+      const { data: extras } = await supabase.from("clientes").select("id, nombre").in("id", [...new Set(extraIds)]);
+      (extras || []).forEach(c => { clienteMap[c.id] = c.nombre; });
+    }
+
+    res.json({
+      clientes: cRes.data || [],
+      vehiculos: (vRes.data || []).map(v => ({ ...v, cliente_nombre: clienteMap[v.cliente_id] || "" })),
+      ordenes:   (oRes.data || []).map(o => ({
+        ...o,
+        numero_orden:   o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+        cliente_nombre: clienteMap[o.cliente_id] || "",
+      })),
+    });
+  } catch (err) {
+    res.json({ clientes: [], vehiculos: [], ordenes: [] });
+  }
 });
 
 // =====================================================
