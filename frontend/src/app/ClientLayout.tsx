@@ -7,21 +7,24 @@ import Image from "next/image";
 import BusquedaGlobal from "@/components/BusquedaGlobal";
 
 const PERMISOS = {
-  gerente: ["dashboard","clientes","vehiculos","ordenes","diagnosticos","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad","recepcion","taller","aprobacion"],
-  secretaria: ["dashboard","clientes","vehiculos","ordenes","facturacion","mantenimiento","contabilidad","recepcion","aprobacion"],
-  tecnico: ["ordenes","diagnosticos","mantenimiento","taller"],
-  almacen: ["inventario","suplidores","ventas"],
+  gerente:   ["dashboard","recepcion","ordenes","taller","aprobacion","clientes","vehiculos","inspeccion","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
+  secretaria:["dashboard","recepcion","ordenes","aprobacion","clientes","vehiculos","inspeccion","facturacion","mantenimiento","contabilidad","inteligencia"],
+  tecnico:   ["ordenes","taller","inspeccion","mantenimiento"],
+  almacen:   ["inventario","suplidores","ventas"],
   cafeteria: ["cafeteria"],
 };
 
 const MENU = [
   { href: "/dashboard",     icon: "📊", label: "Dashboard",     key: "dashboard" },
-  { href: "/clientes",      icon: "👤", label: "Clientes",      key: "clientes" },
-  { href: "/vehiculos",     icon: "🚗", label: "Vehículos",     key: "vehiculos" },
-  { href: "/ordenes",       icon: "🔧", label: "Órdenes",       key: "ordenes" },
+  // ── Flujo de trabajo ─────────────────────────────────────────────────
   { href: "/recepcion",     icon: "🚗", label: "Recepción",     key: "recepcion" },
+  { href: "/ordenes",       icon: "🧾", label: "Órdenes",       key: "ordenes" },
   { href: "/taller",        icon: "🔧", label: "Taller",        key: "taller" },
   { href: "/aprobacion",    icon: "✅", label: "Aprobaciones",  key: "aprobacion" },
+  // ── Gestión ──────────────────────────────────────────────────────────
+  { href: "/clientes",      icon: "👤", label: "Clientes",      key: "clientes" },
+  { href: "/vehiculos",     icon: "🚙", label: "Vehículos",     key: "vehiculos" },
+  { href: "/inspeccion",    icon: "🔍", label: "Inspecciones",  key: "inspeccion" },
   { href: "/mantenimiento", icon: "🛠️", label: "Mantenimiento", key: "mantenimiento" },
   { href: "/inteligencia",  icon: "🔮", label: "Inteligencia",  key: "inteligencia" },
   { href: "/contabilidad",  icon: "💰", label: "Contabilidad",  key: "contabilidad" },

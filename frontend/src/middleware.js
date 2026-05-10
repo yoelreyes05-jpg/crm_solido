@@ -1,21 +1,30 @@
 import { NextResponse } from "next/server";
 
 const PERMISOS = {
+  // Gerente: acceso total
   gerente: [
-    "/dashboard", "/clientes", "/vehiculos", "/ordenes", "/diagnosticos",
+    "/dashboard", "/clientes", "/vehiculos",
+    "/recepcion", "/ordenes", "/taller", "/aprobacion",
+    "/inspeccion", "/diagnosticos",
     "/inventario", "/suplidores", "/ventas", "/facturacion", "/cafeteria",
     "/usuarios", "/configuracion", "/mantenimiento", "/inteligencia", "/contabilidad",
-    "/inspeccion", "/historial-vehiculo",
-    "/recepcion", "/taller", "/aprobacion",
+    "/historial-vehiculo",
   ],
+  // Secretaria: flujo completo de recepción y gestión
   secretaria: [
-    "/dashboard", "/clientes", "/vehiculos", "/ordenes",
+    "/dashboard", "/clientes", "/vehiculos",
+    "/recepcion", "/ordenes", "/aprobacion",
+    "/inspeccion", "/diagnosticos",
     "/facturacion", "/mantenimiento", "/contabilidad",
-    "/historial-vehiculo", "/inteligencia", "/inspeccion",
-    "/recepcion", "/aprobacion",
+    "/historial-vehiculo", "/inteligencia",
   ],
-  tecnico:   ["/ordenes", "/diagnosticos", "/mantenimiento", "/inspeccion", "/taller"],
-  almacen:   ["/inventario", "/suplidores", "/ventas"],
+  // Técnico: solo trabaja en el taller
+  tecnico: [
+    "/ordenes", "/taller", "/inspeccion", "/mantenimiento", "/diagnosticos",
+  ],
+  // Almacén: solo inventario
+  almacen: ["/inventario", "/suplidores", "/ventas"],
+  // Cafetería: solo su módulo
   cafeteria: ["/cafeteria"],
 };
 
