@@ -3644,11 +3644,25 @@ app.get("/ordenes/:id", async (req, res) => {
       supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
     ]);
 
+    // Avances de reparación (ligados al diagnóstico)
+    let avances = [];
+    if (diagnosticoRes.data?.id) {
+      const { data: av } = await supabase
+        .from("avances_reparacion")
+        .select("*")
+        .eq("diagnostico_id", diagnosticoRes.data.id)
+        .order("created_at", { ascending: true })
+        .catch(() => ({ data: [] }));
+      avances = av || [];
+    }
+
     res.json({
       orden,
       cliente:     clienteRes.data    || null,
       vehiculo:    vehiculoRes.data   || null,
-      diagnostico: diagnosticoRes.data || null,
+      diagnostico: diagnosticoRes.data
+        ? { ...diagnosticoRes.data, avances }
+        : null,
       log:         logRes.data        || [],
       inspeccion:  inspeccionRes.data || null,
     });

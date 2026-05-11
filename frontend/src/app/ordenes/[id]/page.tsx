@@ -16,19 +16,26 @@ const EST: Record<string, { color: string; bg: string; icon: string; label: stri
   CANCELADA:            { color:"#7f1d1d", bg:"#fee2e2",  icon:"❌", label:"Cancelada" },
 };
 
-// ── Función de impresión del diagnóstico ─────────────────────────────────────
+const ESTADO_LABEL: Record<string, string> = {
+  RECIBIDO:"Recibido", DIAGNOSTICO:"Diagnóstico",
+  ESPERANDO_APROBACION:"Esperando Aprobación", REPARACION:"En Reparación",
+  CONTROL_CALIDAD:"Control de Calidad", LISTO:"Listo para Entrega",
+  ENTREGADO:"Entregado", CANCELADA:"Cancelada",
+};
+
+// ── Imprimir diagnóstico / cotización ─────────────────────────────────────────
 function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any) {
-  const manoObra  = Number(diag.mano_obra  || diag.cotizacion?.mano_obra  || 0);
-  const repuestos = Number(diag.repuestos  || diag.cotizacion?.repuestos  || 0);
+  const manoObra  = Number(diag.mano_obra  || 0);
+  const repuestos = Number(diag.repuestos  || 0);
   const total     = manoObra + repuestos;
   const detalleLineas = (diag.mano_de_obra_detalle || diag.detalle || "")
     .split("\n").filter((l: string) => l.trim())
     .map((l: string) => `<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">✔ ${l.trim()}</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">—</td></tr>`)
     .join("") || `<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">Servicios Profesionales de Mano de Obra</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">RD$ ${manoObra.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`;
-
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
+
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Diagnóstico ${numeroOrden}</title>
-  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;color:#1a1a1a;line-height:1.6;max-width:760px;margin:auto}.header{text-align:center;border-bottom:3px solid #111;padding-bottom:20px;margin-bottom:25px}.logo{font-size:26px;font-weight:900}.sub{font-size:13px;color:#555;margin-top:6px}.titulo-doc{text-align:center;font-size:18px;font-weight:700;margin:20px 0;letter-spacing:1px;color:#1e40af;text-transform:uppercase;border:2px solid #1e40af;padding:8px;border-radius:8px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.info-box{border:1px solid #e2e8f0;padding:14px;border-radius:8px;background:#f8fafc}.box-title{font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;letter-spacing:1px}.info-row{font-size:13px;margin-bottom:4px}.sec-titulo{font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin:12px 0 6px;border-left:3px solid #334155}.sec-texto{font-size:13px;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap}.fallas-box{background:#fffbeb;border:1px solid #fde68a;padding:14px;border-radius:8px;margin:16px 0}.fallas-titulo{font-size:12px;font-weight:700;color:#92400e;text-transform:uppercase;margin-bottom:8px}table{width:100%;border-collapse:collapse;margin-bottom:16px}thead th{background:#111827;color:#fff;padding:12px;text-align:left;font-size:13px}.total-row{background:#1e40af;color:#fff}.total-row td{padding:14px 12px;font-size:18px;font-weight:900}.firma-area{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.firma-linea{border-top:1px solid #111;padding-top:8px;text-align:center;font-size:12px;color:#64748b}.footer{text-align:center;margin-top:40px;padding-top:16px;border-top:1px dashed #cbd5e1;color:#94a3b8;font-size:11px;line-height:2}@media print{body{padding:20px}}</style>
+  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;color:#1a1a1a;line-height:1.6;max-width:760px;margin:auto}.header{text-align:center;border-bottom:3px solid #111;padding-bottom:20px;margin-bottom:25px}.logo{font-size:26px;font-weight:900}.sub{font-size:13px;color:#555;margin-top:6px}.titulo-doc{text-align:center;font-size:18px;font-weight:700;margin:20px 0;letter-spacing:1px;color:#1e40af;text-transform:uppercase;border:2px solid #1e40af;padding:8px;border-radius:8px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.info-box{border:1px solid #e2e8f0;padding:14px;border-radius:8px;background:#f8fafc}.box-title{font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;letter-spacing:1px}.info-row{font-size:13px;margin-bottom:4px}.sec-titulo{font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin:12px 0 6px;border-left:3px solid #334155}.sec-texto{font-size:13px;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap}table{width:100%;border-collapse:collapse;margin-bottom:16px}thead th{background:#111827;color:#fff;padding:12px;text-align:left;font-size:13px}.total-row{background:#1e40af;color:#fff}.total-row td{padding:14px 12px;font-size:18px;font-weight:900}.firma-area{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.firma-linea{border-top:1px solid #111;padding-top:8px;text-align:center;font-size:12px;color:#64748b}.footer{text-align:center;margin-top:40px;padding-top:16px;border-top:1px dashed #cbd5e1;color:#94a3b8;font-size:11px;line-height:2}@media print{body{padding:20px}}</style>
   </head><body>
   <div class="header"><div class="logo">🔧 SÓLIDO AUTO SERVICIO</div><div class="sub">Expertos en Mecánica &amp; Detallado | Tel: 809-712-2027<br>Santo Domingo, República Dominicana</div></div>
   <div class="titulo-doc">Informe de Diagnóstico Técnico — ${numeroOrden}</div>
@@ -39,7 +46,7 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
       <div class="info-row"><strong>Vehículo:</strong> ${vehiculo?.marca||""} ${vehiculo?.modelo||""} ${vehiculo?.ano||""}</div>
       <div class="info-row"><strong>Placa:</strong> ${vehiculo?.placa||"N/A"}</div>
     </div>
-    <div class="info-box"><div class="box-title">📋 Detalles del Servicio</div>
+    <div class="info-box"><div class="box-title">📋 Detalles</div>
       <div class="info-row"><strong>Orden:</strong> ${numeroOrden}</div>
       <div class="info-row"><strong>Técnico:</strong> ${diag.tecnico_nombre||"—"}</div>
       <div class="info-row"><strong>Tipo:</strong> ${diag.tipo_servicio||orden.descripcion||"—"}</div>
@@ -48,8 +55,8 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
     </div>
   </div>
   ${diag.hallazgos||diag.descripcion?`<div class="sec-titulo">🔍 Hallazgos / Diagnóstico</div><div class="sec-texto">${diag.hallazgos||diag.descripcion}</div>`:""}
-  ${diag.notas?`<div class="fallas-box"><div class="fallas-titulo">📝 Notas adicionales</div><p style="font-size:13px">${diag.notas}</p></div>`:""}
-  ${total>0?`<div class="sec-titulo">💰 Cotización de Trabajos</div>
+  ${diag.notas?`<div class="sec-titulo" style="background:#fffbeb;border-left-color:#f59e0b;color:#92400e">📝 Notas</div><div class="sec-texto">${diag.notas}</div>`:""}
+  ${total>0?`<div class="sec-titulo">💰 Cotización</div>
   <table><thead><tr><th>Descripción</th><th style="text-align:right;width:200px">Monto (RD$)</th></tr></thead>
   <tbody>${detalleLineas}${repuestos>0?`<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">Repuestos e Insumos</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">RD$ ${repuestos.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`:""}</tbody>
   <tfoot><tr class="total-row"><td>TOTAL PRESUPUESTO</td><td style="text-align:right">RD$ ${total.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr></tfoot></table>`:""}
@@ -59,6 +66,243 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
   </body></html>`;
 
   const win = window.open("","_blank","width=820,height=1000");
+  if (win) { win.document.write(html); win.document.close(); }
+}
+
+// ── Imprimir resumen completo de la orden (entregable al cliente) ─────────────
+function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: any, log: any[], inspeccion: any) {
+  const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
+  const fmtDate = (d: string) => d ? new Date(d).toLocaleString("es-DO",{ year:"numeric", month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  const fmtMoney = (n: number) => n.toLocaleString("es-DO",{ minimumFractionDigits:2 });
+  const manoObra  = Number(diag?.mano_obra  || 0);
+  const repuestos = Number(diag?.repuestos  || 0);
+  const totalCot  = manoObra + repuestos || Number(diag?.total || 0);
+
+  // Timeline de estados
+  const timelineRows = (log || []).map((e: any) => {
+    const iconos: Record<string,string> = {
+      RECIBIDO:"📥", DIAGNOSTICO:"🔬", ESPERANDO_APROBACION:"⏳",
+      REPARACION:"🔧", CONTROL_CALIDAD:"✅", LISTO:"🎉", ENTREGADO:"🏁", CANCELADA:"❌",
+    };
+    const colores: Record<string,string> = {
+      RECIBIDO:"#1d4ed8", DIAGNOSTICO:"#92400e", ESPERANDO_APROBACION:"#c2410c",
+      REPARACION:"#991b1b", CONTROL_CALIDAD:"#5b21b6", LISTO:"#065f46",
+      ENTREGADO:"#374151", CANCELADA:"#7f1d1d",
+    };
+    const label = ESTADO_LABEL[e.estado_nuevo] || e.estado_nuevo;
+    const color = colores[e.estado_nuevo] || "#374151";
+    const icon  = iconos[e.estado_nuevo] || "🔄";
+    return `
+      <tr>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top;width:36px;text-align:center;font-size:18px">${icon}</td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top">
+          <span style="font-weight:700;color:${color};font-size:14px">${label}</span>
+          ${e.motivo ? `<br><span style="font-size:12px;color:#6b7280">📝 ${e.motivo}</span>` : ""}
+        </td>
+        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top;font-size:12px;color:#9ca3af;white-space:nowrap">
+          ${fmtDate(e.created_at)}<br>
+          <span style="color:#6b7280">👤 ${e.usuario_nombre||"Sistema"}</span>
+        </td>
+      </tr>`;
+  }).join("");
+
+  // Avances de reparación
+  const avancesRows = (diag?.avances || []).map((av: any) => `
+    <tr>
+      <td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:top">
+        <div style="font-weight:600">${av.descripcion || "—"}</div>
+        <div style="font-size:11px;color:#9ca3af;margin-top:2px">
+          👤 ${av.tecnico_nombre || "Técnico"} &nbsp;·&nbsp; ${fmtDate(av.created_at)}
+        </div>
+      </td>
+    </tr>`).join("");
+
+  // Inspección
+  const inspHtml = inspeccion ? `
+    <div style="margin-bottom:24px">
+      <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid #10b981">
+        📋 Inspección de Recepción
+      </div>
+      <table style="width:100%;border-collapse:collapse">
+        <tr>
+          <td style="padding:6px 12px;font-size:13px"><strong>KM entrada:</strong> ${inspeccion.km_entrada?.toLocaleString()||"N/A"}</td>
+          <td style="padding:6px 12px;font-size:13px"><strong>Combustible:</strong> ${inspeccion.nivel_combustible??"-"}%</td>
+          <td style="padding:6px 12px;font-size:13px"><strong>Condición:</strong> ${inspeccion.condicion_general||"—"}</td>
+        </tr>
+      </table>
+      ${inspeccion.observaciones?`<div style="margin-top:6px;font-size:13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">📝 ${inspeccion.observaciones}</div>`:""}
+    </div>` : "";
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Resumen de Servicio — ${numeroOrden}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',Arial,sans-serif; padding:36px; color:#1a1a1a; line-height:1.6; max-width:820px; margin:auto; }
+  .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111827; padding-bottom:18px; margin-bottom:24px; }
+  .logo { font-size:22px; font-weight:900; }
+  .logo-sub { font-size:12px; color:#6b7280; margin-top:4px; line-height:1.5; }
+  .orden-badge { text-align:right; }
+  .orden-num { font-size:20px; font-weight:900; color:#1e40af; }
+  .orden-fecha { font-size:12px; color:#6b7280; margin-top:3px; }
+  .estado-badge { display:inline-block; padding:4px 14px; border-radius:20px; font-size:12px; font-weight:700; border:1.5px solid currentColor; margin-top:6px; }
+  .section-title { font-size:12px; font-weight:700; text-transform:uppercase; color:#475569; background:#f1f5f9; padding:6px 10px; border-radius:6px; margin:20px 0 10px; border-left:3px solid #334155; letter-spacing:.5px; }
+  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
+  .info-box { border:1px solid #e2e8f0; padding:14px 16px; border-radius:10px; background:#f8fafc; }
+  .info-box-title { font-size:11px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; letter-spacing:.8px; }
+  .info-row { font-size:13px; margin-bottom:4px; }
+  .hallazgos { font-size:13px; padding:12px 16px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; white-space:pre-wrap; line-height:1.7; }
+  table.timeline { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; border:1px solid #f1f5f9; }
+  table.avances { width:100%; border-collapse:collapse; background:#fff; border:1px solid #f1f5f9; border-radius:8px; overflow:hidden; }
+  .cotizacion { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:14px 18px; margin-top:14px; }
+  .total-final { background:#111827; color:#fff; padding:14px 18px; border-radius:10px; margin-top:16px; display:flex; justify-content:space-between; align-items:center; }
+  .total-num { font-size:22px; font-weight:900; }
+  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:60px; margin-top:50px; }
+  .firma-line { border-top:1px solid #111; padding-top:8px; text-align:center; font-size:12px; color:#64748b; }
+  .footer { text-align:center; margin-top:40px; padding-top:14px; border-top:1px dashed #cbd5e1; color:#94a3b8; font-size:11px; line-height:2; }
+  @media print { body { padding:20px; } }
+</style>
+</head>
+<body>
+
+<!-- HEADER -->
+<div class="header">
+  <div>
+    <div class="logo">🔧 SÓLIDO AUTO SERVICIO</div>
+    <div class="logo-sub">
+      Expertos en Mecánica &amp; Detallado<br>
+      Tel: 809-712-2027 · Santo Domingo, República Dominicana
+    </div>
+  </div>
+  <div class="orden-badge">
+    <div class="orden-num">${numeroOrden}</div>
+    <div class="orden-fecha">Recibido: ${fmtDate(orden.created_at)}</div>
+    ${orden.fecha_entrega ? `<div class="orden-fecha">Entregado: ${fmtDate(orden.fecha_entrega)}</div>` : ""}
+    <span class="estado-badge" style="color:${EST[orden.estado]?.color||"#374151"};border-color:${EST[orden.estado]?.color||"#374151"}">
+      ${EST[orden.estado]?.icon||""} ${EST[orden.estado]?.label||orden.estado}
+    </span>
+  </div>
+</div>
+
+<!-- TITULO -->
+<div style="text-align:center;font-size:17px;font-weight:700;color:#1e40af;border:2px solid #1e40af;padding:8px;border-radius:8px;margin-bottom:24px;letter-spacing:1px;text-transform:uppercase">
+  Resumen Completo de Servicio
+</div>
+
+<!-- INFO CLIENTE + VEHÍCULO -->
+<div class="info-grid">
+  <div class="info-box">
+    <div class="info-box-title">👤 Cliente</div>
+    <div class="info-row"><strong>${cliente?.nombre||"Particular"}</strong></div>
+    <div class="info-row">📞 ${cliente?.telefono||"—"}</div>
+    <div class="info-row">✉️ ${cliente?.email||"—"}</div>
+    ${cliente?.cedula ? `<div class="info-row">🪪 ${cliente.cedula}</div>` : ""}
+  </div>
+  <div class="info-box">
+    <div class="info-box-title">🚗 Vehículo</div>
+    <div class="info-row"><strong>${vehiculo?.marca||""} ${vehiculo?.modelo||""} ${vehiculo?.ano||""}</strong></div>
+    <div class="info-row">🪪 Placa: <strong style="font-family:monospace">${vehiculo?.placa||"N/A"}</strong></div>
+    <div class="info-row">🎨 Color: ${vehiculo?.color||"—"}</div>
+    ${vehiculo?.vin ? `<div class="info-row">VIN: ${vehiculo.vin}</div>` : ""}
+  </div>
+</div>
+
+<!-- TRABAJO SOLICITADO -->
+<div class="section-title">📝 Trabajo Solicitado</div>
+<div class="hallazgos">${orden.descripcion||"Sin descripción"}</div>
+
+<!-- INSPECCIÓN -->
+${inspHtml}
+
+<!-- DIAGNÓSTICO TÉCNICO -->
+${diag ? `
+<div class="section-title">🔬 Diagnóstico Técnico</div>
+<div class="info-grid" style="margin-bottom:10px">
+  <div class="info-box">
+    <div class="info-box-title">Técnico responsable</div>
+    <div class="info-row"><strong>${diag.tecnico_nombre||"—"}</strong></div>
+    <div class="info-row">Tipo: ${diag.tipo_servicio||orden.descripcion||"—"}</div>
+    ${diag.tiempo_estimado ? `<div class="info-row">Tiempo estimado: ${diag.tiempo_estimado}</div>` : ""}
+  </div>
+  <div class="info-box">
+    <div class="info-box-title">Estado del diagnóstico</div>
+    <div class="info-row"><strong>${diag.estado||"—"}</strong></div>
+    <div class="info-row">Registrado: ${fmtDate(diag.created_at)}</div>
+  </div>
+</div>
+${diag.hallazgos||diag.descripcion ? `
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Hallazgos / Descripción</div>
+    <div class="hallazgos">${diag.hallazgos||diag.descripcion}</div>
+  </div>` : ""}
+${diag.notas ? `
+  <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px">📝 NOTAS</div>
+    <div style="font-size:13px">${diag.notas}</div>
+  </div>` : ""}
+
+<!-- COTIZACIÓN -->
+${totalCot > 0 ? `
+<div class="cotizacion">
+  <div style="font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:10px">💰 Cotización Aprobada</div>
+  <table style="width:100%;border-collapse:collapse">
+    <tr style="border-bottom:1px solid #d1fae5">
+      <td style="padding:6px 0;font-size:13px">Mano de obra</td>
+      <td style="padding:6px 0;font-size:13px;text-align:right;font-weight:700">RD$ ${fmtMoney(manoObra)}</td>
+    </tr>
+    ${repuestos > 0 ? `<tr style="border-bottom:1px solid #d1fae5">
+      <td style="padding:6px 0;font-size:13px">Repuestos e insumos</td>
+      <td style="padding:6px 0;font-size:13px;text-align:right;font-weight:700">RD$ ${fmtMoney(repuestos)}</td>
+    </tr>` : ""}
+    <tr>
+      <td style="padding:10px 0 0;font-size:15px;font-weight:900;color:#065f46">TOTAL</td>
+      <td style="padding:10px 0 0;font-size:15px;font-weight:900;color:#065f46;text-align:right">RD$ ${fmtMoney(totalCot)}</td>
+    </tr>
+  </table>
+</div>` : ""}
+` : `<div class="section-title">🔬 Diagnóstico Técnico</div>
+<div style="font-size:13px;color:#9ca3af;padding:10px">Sin diagnóstico registrado.</div>`}
+
+<!-- AVANCES DE REPARACIÓN -->
+${diag?.avances?.length > 0 ? `
+<div class="section-title">🔧 Avances de Reparación</div>
+<table class="avances">
+  ${avancesRows}
+</table>` : ""}
+
+<!-- TIMELINE DE ESTADOS -->
+<div class="section-title">📜 Historial Completo del Proceso</div>
+${log?.length > 0 ? `
+<table class="timeline">
+  <thead>
+    <tr style="background:#111827;color:#fff">
+      <th style="padding:10px 14px;font-size:12px;font-weight:700;width:36px"></th>
+      <th style="padding:10px 14px;font-size:12px;font-weight:700;text-align:left">Estado</th>
+      <th style="padding:10px 14px;font-size:12px;font-weight:700;text-align:left">Fecha y Usuario</th>
+    </tr>
+  </thead>
+  <tbody>${timelineRows}</tbody>
+</table>` : `<div style="font-size:13px;color:#9ca3af;padding:10px">Sin historial de estados registrado.</div>`}
+
+<!-- FIRMAS -->
+<div class="firmas">
+  <div><div class="firma-line">Técnico / Responsable del Servicio</div></div>
+  <div><div class="firma-line">Firma del Cliente — Conforme</div></div>
+</div>
+
+<div class="footer">
+  <p>Este documento certifica que el vehículo fue recibido, diagnosticado y devuelto conforme a lo indicado.</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
+  <p>Impreso el ${new Date().toLocaleDateString("es-DO",{ year:"numeric", month:"long", day:"numeric" })}</p>
+</div>
+
+<script>window.onload=function(){setTimeout(function(){window.print()},600)};window.onafterprint=function(){window.close()}</script>
+</body>
+</html>`;
+
+  const win = window.open("","_blank","width=900,height=1100");
   if (win) { win.document.write(html); win.document.close(); }
 }
 
@@ -72,20 +316,63 @@ export default function OrdenDetallePage() {
   const [usuario,  setUsuario]  = useState<any>(null);
   const [msg,      setMsg]      = useState<{ tipo:"ok"|"err"; texto:string } | null>(null);
 
-  // Acciones de flujo (aprobación, calidad, entrega)
   const [modalAccion,  setModalAccion]  = useState<"aprobar"|"rechazar"|"calidad"|"entregar"|null>(null);
   const [motivoModal,  setMotivoModal]  = useState("");
   const [procesando,   setProcesando]   = useState(false);
-
-  // Inspección desplegable
   const [mostrarInspFotos, setMostrarInspFotos] = useState(false);
 
+  // ── Carga con fallback robusto ─────────────────────────────────────────────
   const cargar = useCallback(async () => {
     try {
-      const res  = await fetch(`${API}/ordenes/${id}`);
-      const json = await res.json();
-      setData(json);
-    } catch (err) { console.error(err); }
+      // Intento 1: endpoint completo /ordenes/:id
+      const res = await fetch(`${API}/ordenes/${id}`);
+      if (res.ok) {
+        const json = await res.json();
+        if (json?.orden) { setData(json); setLoading(false); return; }
+      }
+
+      // Intento 2: construir desde el listado + llamadas paralelas
+      const [listRes, diagRes, logRes, inspRes, avRes] = await Promise.all([
+        fetch(`${API}/ordenes`).then(r => r.ok ? r.json() : []),
+        fetch(`${API}/diagnosticos?orden_id=${id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`${API}/ordenes/${id}/log`).then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${API}/inspeccion/orden/${id}`).then(r => r.ok ? r.json() : null).catch(() => null),
+        fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []),
+      ]);
+
+      const lista = Array.isArray(listRes) ? listRes : [];
+      const ordenBase = lista.find((o: any) => String(o.id) === String(id)) || null;
+
+      if (!ordenBase) { setData(null); setLoading(false); return; }
+
+      // Resolver cliente y vehículo si tenemos IDs
+      const [clienteRes, vehiculoRes] = await Promise.all([
+        ordenBase.cliente_id
+          ? fetch(`${API}/clientes/${ordenBase.cliente_id}`).then(r => r.ok ? r.json() : null).catch(() => null)
+          : Promise.resolve(null),
+        ordenBase.vehiculo_id
+          ? fetch(`${API}/vehiculos/${ordenBase.vehiculo_id}`).then(r => r.ok ? r.json() : null).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      // Normalizar diagnóstico (puede venir como array o como objeto)
+      let diag = null;
+      if (Array.isArray(diagRes) && diagRes.length > 0) diag = diagRes[0];
+      else if (diagRes && !Array.isArray(diagRes) && diagRes.id) diag = diagRes;
+      if (diag) diag = { ...diag, avances: Array.isArray(avRes) ? avRes : [] };
+
+      setData({
+        orden:       { ...ordenBase, numero_orden: ordenBase.numero_orden || `OT-${String(ordenBase.id).padStart(4,"0")}` },
+        cliente:     clienteRes,
+        vehiculo:    vehiculoRes,
+        diagnostico: diag,
+        log:         Array.isArray(logRes) ? logRes : [],
+        inspeccion:  inspRes,
+      });
+    } catch (err) {
+      console.error("Error cargando orden:", err);
+      setData(null);
+    }
     setLoading(false);
   }, [id]);
 
@@ -128,16 +415,27 @@ export default function OrdenDetallePage() {
   );
 
   if (!data?.orden) return (
-    <div style={{ padding:40, color:"#ef4444" }}>⚠️ Orden #{id} no encontrada.</div>
+    <div style={{ padding:40 }}>
+      <div style={{ color:"#ef4444", fontSize:15, marginBottom:16 }}>⚠️ No se pudo cargar la orden #{id}.</div>
+      <button
+        onClick={() => { setLoading(true); cargar(); }}
+        style={{ padding:"8px 18px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700, marginRight:10 }}
+      >
+        🔄 Reintentar
+      </button>
+      <button
+        onClick={() => router.push("/ordenes")}
+        style={{ padding:"8px 18px", background:"#f3f4f6", border:"none", borderRadius:8, cursor:"pointer", fontWeight:600 }}
+      >
+        ← Volver a Órdenes
+      </button>
+    </div>
   );
 
   const { orden, cliente, vehiculo, diagnostico, log, inspeccion } = data;
-  const estado   = orden.estado || "RECIBIDO";
-  const estCfg   = EST[estado] || EST.RECIBIDO;
-  const rol      = (usuario?.rol || "").toLowerCase();
-  const esGerente = ["gerente","admin","jefe"].includes(rol);
+  const estado  = orden.estado || "RECIBIDO";
+  const estCfg  = EST[estado] || EST.RECIBIDO;
 
-  // Botones de flujo según estado
   const accionesFlujo: { key: string; label: string; color: string }[] = [];
   if (estado === "ESPERANDO_APROBACION") {
     accionesFlujo.push(
@@ -149,10 +447,9 @@ export default function OrdenDetallePage() {
     accionesFlujo.push({ key:"calidad",  label:"✅ Aprobó Control de Calidad", color:"#7c3aed" });
   }
   if (estado === "LISTO") {
-    accionesFlujo.push({ key:"entregar", label:"🏁 Vehículo Entregado",        color:"#1d4ed8" });
+    accionesFlujo.push({ key:"entregar", label:"🏁 Vehículo Entregado", color:"#1d4ed8" });
   }
 
-  // Botones de navegación hacia el taller
   let botonTaller: { label: string; href: string; color: string } | null = null;
   if (["RECIBIDO","DIAGNOSTICO"].includes(estado)) {
     botonTaller = { label:"🔬 Ir al Taller — Diagnóstico", href:`/taller/diagnostico/${id}`, color:"#f59e0b" };
@@ -196,7 +493,7 @@ export default function OrdenDetallePage() {
         }}>
           {estCfg.icon} {estCfg.label}
         </span>
-        {/* Botón WhatsApp si hay teléfono */}
+        {/* WhatsApp */}
         {cliente?.telefono && (
           <a
             href={`https://wa.me/${cliente.telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${cliente.nombre}, le escribimos de Sólido Auto Servicio sobre su vehículo ${vehiculo?.placa || vehiculo?.marca || ""}.`)}`}
@@ -206,6 +503,13 @@ export default function OrdenDetallePage() {
             💬 WhatsApp
           </a>
         )}
+        {/* Botón imprimir resumen completo */}
+        <button
+          onClick={() => imprimirOrdenCompleta(orden, cliente, vehiculo, diagnostico, log, inspeccion)}
+          style={{ background:"#111827", color:"#fff", padding:"7px 16px", borderRadius:8, fontWeight:700, fontSize:13, border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}
+        >
+          🖨️ Imprimir Resumen
+        </button>
       </div>
 
       {/* Feedback */}
@@ -367,14 +671,13 @@ export default function OrdenDetallePage() {
                 display:"flex", alignItems:"center", gap:6,
               }}
             >
-              🖨️ Imprimir / Cotización
+              🖨️ Cotización
             </button>
           )}
         </div>
 
         {diagnostico ? (
           <div>
-            {/* Info básica */}
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14, fontSize:13 }}>
               <div>
                 <span style={{ color:"#6b7280", fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Técnico</span>
@@ -392,7 +695,6 @@ export default function OrdenDetallePage() {
               )}
             </div>
 
-            {/* Hallazgos */}
             {(diagnostico.hallazgos || diagnostico.descripcion) && (
               <div style={{ marginBottom:14 }}>
                 <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#6b7280", textTransform:"uppercase" }}>Hallazgos</p>
@@ -402,7 +704,6 @@ export default function OrdenDetallePage() {
               </div>
             )}
 
-            {/* Cotización */}
             {(diagnostico.mano_obra > 0 || diagnostico.repuestos > 0 || diagnostico.total > 0) && (
               <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"12px 16px" }}>
                 <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#065f46" }}>💰 Cotización</p>
@@ -423,7 +724,7 @@ export default function OrdenDetallePage() {
               </div>
             )}
 
-            {/* Avances */}
+            {/* Avances de reparación */}
             {diagnostico.avances?.length > 0 && (
               <div style={{ marginTop:16 }}>
                 <p style={{ margin:"0 0 10px", fontWeight:700, fontSize:13, color:"#374151" }}>📋 Avances de Reparación ({diagnostico.avances.length})</p>
@@ -457,7 +758,10 @@ export default function OrdenDetallePage() {
 
       {/* Historial de la orden */}
       <div style={{ ...card, marginTop:16 }}>
-        <div style={sTitle as any}>📜 Historial de la Orden</div>
+        <div style={sTitle as any}>
+          <span>📜 Historial Completo del Proceso</span>
+          <span style={{ fontSize:12, color:"#9ca3af", fontWeight:500 }}>{log?.length || 0} eventos</span>
+        </div>
         {(!log || log.length === 0) ? (
           <p style={{ color:"#9ca3af", fontSize:13, margin:0 }}>Sin registros de historial.</p>
         ) : (
