@@ -128,6 +128,11 @@ export default function TallerPage() {
       ? JSON.parse(localStorage.getItem("usuario") || "{}")
       : {};
   const nombreTecnico = usuario.nombre || usuario.name || "Técnico";
+  const rolUsuario    = (usuario.rol || usuario.role || "tecnico").toLowerCase();
+  const esTecnico     = rolUsuario === "tecnico";
+  const puedeAprobar  = ["gerente", "secretaria", "admin"].includes(rolUsuario);
+  const puedeCalidad  = ["gerente", "admin"].includes(rolUsuario);
+  const puedeEntregar = ["gerente", "secretaria", "admin"].includes(rolUsuario);
 
   const showToast = (msg: string, tipo: "ok" | "err" = "ok") => {
     setToast({ msg, tipo });
@@ -561,28 +566,33 @@ export default function TallerPage() {
                     {/* APROBACIÓN: ESPERANDO_APROBACION */}
                     {orden.estado === "ESPERANDO_APROBACION" && !isConfirming && (
                       <>
-                        <button
-                          onClick={() => confirmar(orden.id, "aprobar")}
-                          disabled={isLoading}
-                          style={{
-                            background: C.green, color: "#fff", border: "none", borderRadius: 8,
-                            padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-                            boxShadow: `0 2px 8px ${C.green}44`, opacity: isLoading ? 0.7 : 1,
-                          }}
-                        >
-                          ✅ Aprobar Reparación
-                        </button>
-                        <button
-                          onClick={() => confirmar(orden.id, "rechazar")}
-                          disabled={isLoading}
-                          style={{
-                            background: C.red + "22", color: C.red,
-                            border: `1px solid ${C.red}55`, borderRadius: 8,
-                            padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-                          }}
-                        >
-                          ✗ Rechazar
-                        </button>
+                        {puedeAprobar && (
+                          <button
+                            onClick={() => confirmar(orden.id, "aprobar")}
+                            disabled={isLoading}
+                            style={{
+                              background: C.green, color: "#fff", border: "none", borderRadius: 8,
+                              padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                              boxShadow: `0 2px 8px ${C.green}44`, opacity: isLoading ? 0.7 : 1,
+                            }}
+                          >
+                            ✅ Aprobar Reparación
+                          </button>
+                        )}
+                        {puedeAprobar && (
+                          <button
+                            onClick={() => confirmar(orden.id, "rechazar")}
+                            disabled={isLoading}
+                            style={{
+                              background: C.red + "22", color: C.red,
+                              border: `1px solid ${C.red}55`, borderRadius: 8,
+                              padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                            }}
+                          >
+                            ✗ Rechazar
+                          </button>
+                        )}
+                        {/* Técnico solo puede ver el diagnóstico */}
                         <button
                           onClick={() => router.push(`/taller/diagnostico/${orden.id}`)}
                           style={{
@@ -593,6 +603,11 @@ export default function TallerPage() {
                         >
                           📋 Ver diagnóstico
                         </button>
+                        {esTecnico && (
+                          <span style={{ color: C.orange, fontSize: 12, fontWeight: 600 }}>
+                            ⏳ Esperando aprobación del cliente
+                          </span>
+                        )}
                       </>
                     )}
 
@@ -613,44 +628,59 @@ export default function TallerPage() {
                     {/* CONTROL_CALIDAD */}
                     {orden.estado === "CONTROL_CALIDAD" && !isConfirming && (
                       <>
-                        <button
-                          onClick={() => confirmar(orden.id, "calidad")}
-                          disabled={isLoading}
-                          style={{
-                            background: C.purple, color: "#fff", border: "none", borderRadius: 8,
-                            padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-                            boxShadow: `0 2px 8px ${C.purple}44`, opacity: isLoading ? 0.7 : 1,
-                          }}
-                        >
-                          ✅ Aprobar Calidad → LISTO
-                        </button>
-                        <button
-                          onClick={() => router.push(`/taller/reparacion/${orden.id}`)}
-                          style={{
-                            background: "transparent", color: C.muted,
-                            border: `1px solid ${C.border}`, borderRadius: 8,
-                            padding: "10px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600,
-                          }}
-                        >
-                          🔧 Devolver a Reparación
-                        </button>
+                        {puedeCalidad ? (
+                          <>
+                            <button
+                              onClick={() => confirmar(orden.id, "calidad")}
+                              disabled={isLoading}
+                              style={{
+                                background: C.purple, color: "#fff", border: "none", borderRadius: 8,
+                                padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                                boxShadow: `0 2px 8px ${C.purple}44`, opacity: isLoading ? 0.7 : 1,
+                              }}
+                            >
+                              ✅ Aprobar Calidad → LISTO
+                            </button>
+                            <button
+                              onClick={() => router.push(`/taller/reparacion/${orden.id}`)}
+                              style={{
+                                background: "transparent", color: C.muted,
+                                border: `1px solid ${C.border}`, borderRadius: 8,
+                                padding: "10px 14px", cursor: "pointer", fontSize: 12, fontWeight: 600,
+                              }}
+                            >
+                              🔧 Devolver a Reparación
+                            </button>
+                          </>
+                        ) : (
+                          <span style={{ color: C.purple, fontSize: 12, fontWeight: 600 }}>
+                            🔍 En control de calidad — pendiente del gerente
+                          </span>
+                        )}
                       </>
                     )}
 
                     {/* LISTO */}
                     {orden.estado === "LISTO" && !isConfirming && (
                       <>
-                        <button
-                          onClick={() => confirmar(orden.id, "entregar")}
-                          disabled={isLoading}
-                          style={{
-                            background: C.green, color: "#fff", border: "none", borderRadius: 8,
-                            padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-                            boxShadow: `0 2px 8px ${C.green}44`, opacity: isLoading ? 0.7 : 1,
-                          }}
-                        >
-                          🏁 Entregar al Cliente
-                        </button>
+                        {puedeEntregar && (
+                          <button
+                            onClick={() => confirmar(orden.id, "entregar")}
+                            disabled={isLoading}
+                            style={{
+                              background: C.green, color: "#fff", border: "none", borderRadius: 8,
+                              padding: "10px 18px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                              boxShadow: `0 2px 8px ${C.green}44`, opacity: isLoading ? 0.7 : 1,
+                            }}
+                          >
+                            🏁 Entregar al Cliente
+                          </button>
+                        )}
+                        {esTecnico && (
+                          <span style={{ color: C.green, fontSize: 12, fontWeight: 600 }}>
+                            ✅ Listo para entrega — esperando secretaría
+                          </span>
+                        )}
                         <button
                           onClick={() => router.push(`/ordenes/${orden.id}`)}
                           style={{

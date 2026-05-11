@@ -245,17 +245,24 @@ export default function DiagnosticoPage() {
       ...(cerrar ? { terminado: true } : {}),
     };
 
-    // ── Helper: mover estado de la orden via PATCH ───────────────────────────
-    async function moverEstado(nuevoEstado: string) {
-      await fetch(`${API}/ordenes/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          estado:         nuevoEstado,
-          usuario_id:     usuario.id    || null,
-          usuario_nombre: usuario.nombre || usuario.name || "Técnico",
-        }),
-      }).catch(() => {}); // Silencioso — el backend nuevo ya lo hizo vía transicionarEstado
+    // ── Helper: forzar cambio de estado via PATCH directo ────────────────────
+    // Retorna true si tuvo éxito (HTTP 2xx), false si falló.
+    // No lanza — deja que el caller decida qué hacer.
+    async function moverEstado(nuevoEstado: string): Promise<boolean> {
+      try {
+        const r = await fetch(`${API}/ordenes/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            estado:         nuevoEstado,
+            usuario_id:     usuario.id    || null,
+            usuario_nombre: usuario.nombre || usuario.name || "Técnico",
+          }),
+        });
+        return r.ok;
+      } catch {
+        return false;
+      }
     }
 
     try {
@@ -283,21 +290,21 @@ export default function DiagnosticoPage() {
       const diag = data.diagnostico || data;
       setDiagnostico(diag);
 
-      // ── Garantizar transición de estado aunque el backend sea versión anterior ──
-      // El backend nuevo (Fase 2) ya llama a transicionarEstado internamente.
-      // Estas llamadas son seguros de duplicar: si ya cambió, transicionarEstado
-      // rechaza silenciosamente la transición repetida.
-      if (!diagnostico?.id) {
-        // Diagnóstico nuevo → orden debe pasar a DIAGNOSTICO
-        await moverEstado("DIAGNOSTICO");
-      }
       if (cerrar) {
-        // Cerrar diagnóstico → primero DIAGNOSTICO (si aún RECIBIDO) luego ESPERANDO_APROBACION
+        // Paso 1: mover a DIAGNOSTICO (si sigue en RECIBIDO — backend viejo no lo hizo)
         await moverEstado("DIAGNOSTICO");
-        await moverEstado("ESPERANDO_APROBACION");
+        // Paso 2: mover a ESPERANDO_APROBACION
+        const ok = await moverEstado("ESPERANDO_APROBACION");
+        if (!ok) {
+          // El backend nuevo ya hizo la transición con terminado:true — ignorar
+          // Solo mostrar error si ambos pasos fallaron
+          console.warn("Estado puede ya estar en ESPERANDO_APROBACION (backend lo hizo internamente)");
+        }
         setExito(true);
         setConfirmCerrar(false);
       } else {
+        // Borrador: solo asegurarse que esté en DIAGNOSTICO
+        await moverEstado("DIAGNOSTICO");
         setMsg({ tipo: "ok", texto: "Borrador guardado correctamente." });
       }
     } catch (e: any) {

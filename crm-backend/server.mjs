@@ -3553,14 +3553,18 @@ const TRANSICIONES_VALIDAS = {
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
 async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usuarioNombre = "Sistema", motivo = null, extra = {} } = {}) {
+  const idNum = parseInt(ordenId, 10);
+  if (isNaN(idNum)) return { ok: false, error: "ID de orden inválido" };
+
   // Leer orden actual
   const { data: orden, error: errLeer } = await supabase
     .from("ordenes_trabajo")
     .select("id, estado")
-    .eq("id", ordenId)
-    .single();
+    .eq("id", idNum)
+    .maybeSingle();
 
-  if (errLeer || !orden) return { ok: false, error: "Orden no encontrada" };
+  if (errLeer) return { ok: false, error: errLeer.message };
+  if (!orden)  return { ok: false, error: `Orden ${idNum} no encontrada` };
 
   const estadoActual = orden.estado || "RECIBIDO";
 
@@ -3588,19 +3592,19 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
   const { error: errUpdate } = await supabase
     .from("ordenes_trabajo")
     .update({ estado: nuevoEstado, ...extra })
-    .eq("id", ordenId);
+    .eq("id", idNum);
 
   if (errUpdate) return { ok: false, error: errUpdate.message };
 
   // Intentar guardar campo de fecha (silencioso si la columna no existe aún en Supabase)
   const fechaExtra = camposFecha[nuevoEstado];
   if (fechaExtra) {
-    await supabase.from("ordenes_trabajo").update(fechaExtra).eq("id", ordenId).catch(() => {});
+    await supabase.from("ordenes_trabajo").update(fechaExtra).eq("id", idNum).catch(() => {});
   }
 
   // Insertar en log de auditoría
   await supabase.from("orden_trabajo_log").insert([{
-    orden_id:       ordenId,
+    orden_id:       idNum,
     estado_anterior: estadoActual,
     estado_nuevo:    nuevoEstado,
     usuario_id:      usuarioId,
@@ -3930,6 +3934,45 @@ app.get("/busqueda", async (req, res) => {
     });
   } catch (err) {
     res.json({ clientes: [], vehiculos: [], ordenes: [] });
+  }
+});
+
+// =====================================================
+// ⚙️  PERMISOS RBAC
+// =====================================================
+
+// GET /permisos — cargar configuración de permisos guardada en Supabase
+app.get("/permisos", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("config_sistema")
+      .select("valor")
+      .eq("clave", "permisos_roles")
+      .maybeSingle();
+    // Devuelve el objeto guardado o null (el frontend usará PERMISOS_DEFAULT)
+    res.json(data?.valor ?? null);
+  } catch (err) {
+    res.json(null);
+  }
+});
+
+// POST /permisos — guardar configuración de permisos (solo gerente debe llamar esto)
+app.post("/permisos", async (req, res) => {
+  try {
+    const config = req.body;
+    if (!config || typeof config !== "object") {
+      return res.status(400).json({ error: "Payload inválido" });
+    }
+    const { error } = await supabase
+      .from("config_sistema")
+      .upsert(
+        { clave: "permisos_roles", valor: config, updated_at: new Date().toISOString() },
+        { onConflict: "clave" }
+      );
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
