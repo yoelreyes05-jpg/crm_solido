@@ -6,9 +6,9 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","inspeccion","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento"],
+  gerente:    ["dashboard","clientes","vehiculos","ordenes","inspeccion","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento","taller"],
   secretaria: ["dashboard","clientes","vehiculos","contabilidad","diagnosticos","ordenes","inspeccion","facturacion","historial-vehiculo","inteligencia","mantenimiento"],
-  tecnico:    ["ordenes","inspeccion","dashboard","diagnosticos","historial-vehiculo","mantenimiento"],
+  tecnico:    ["taller","ordenes","inspeccion","dashboard","diagnosticos","historial-vehiculo","mantenimiento"],
   almacen:    ["inventario","suplidores","ventas"],
   cafeteria:  ["cafeteria"],
 };
@@ -34,6 +34,7 @@ const MODULOS: Modulo[] = [
   {
     id: "taller", label: "Operaciones de Taller", icon: "🔧", color: "#f59e0b",
     items: [
+      { href: "/taller",             icon: "👨‍🔧", label: "Mi Taller",           key: "taller",             iconBg: "linear-gradient(145deg,#78350f,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.7),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/vehiculos",          icon: "🚗", label: "Vehículos",           key: "vehiculos",          iconBg: "linear-gradient(145deg,#312e81,#6366f1)", iconShadow: "0 4px 12px rgba(99,102,241,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/ordenes",            icon: "🔧", label: "Órdenes de Trabajo",  key: "ordenes",            iconBg: "linear-gradient(145deg,#92400e,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/inspeccion",         icon: "📋", label: "Inspección Vehículo", key: "inspeccion",         iconBg: "linear-gradient(145deg,#065f46,#059669)", iconShadow: "0 4px 12px rgba(5,150,105,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
