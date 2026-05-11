@@ -245,6 +245,19 @@ export default function DiagnosticoPage() {
       ...(cerrar ? { terminado: true } : {}),
     };
 
+    // ── Helper: mover estado de la orden via PATCH ───────────────────────────
+    async function moverEstado(nuevoEstado: string) {
+      await fetch(`${API}/ordenes/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          estado:         nuevoEstado,
+          usuario_id:     usuario.id    || null,
+          usuario_nombre: usuario.nombre || usuario.name || "Técnico",
+        }),
+      }).catch(() => {}); // Silencioso — el backend nuevo ya lo hizo vía transicionarEstado
+    }
+
     try {
       let res: Response;
       if (diagnostico?.id) {
@@ -270,7 +283,18 @@ export default function DiagnosticoPage() {
       const diag = data.diagnostico || data;
       setDiagnostico(diag);
 
+      // ── Garantizar transición de estado aunque el backend sea versión anterior ──
+      // El backend nuevo (Fase 2) ya llama a transicionarEstado internamente.
+      // Estas llamadas son seguros de duplicar: si ya cambió, transicionarEstado
+      // rechaza silenciosamente la transición repetida.
+      if (!diagnostico?.id) {
+        // Diagnóstico nuevo → orden debe pasar a DIAGNOSTICO
+        await moverEstado("DIAGNOSTICO");
+      }
       if (cerrar) {
+        // Cerrar diagnóstico → primero DIAGNOSTICO (si aún RECIBIDO) luego ESPERANDO_APROBACION
+        await moverEstado("DIAGNOSTICO");
+        await moverEstado("ESPERANDO_APROBACION");
         setExito(true);
         setConfirmCerrar(false);
       } else {

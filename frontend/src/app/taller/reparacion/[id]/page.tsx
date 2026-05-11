@@ -307,6 +307,7 @@ export default function ReparacionPage() {
       }
 
       // 2. Transición de estado: REPARACION → CONTROL_CALIDAD
+      // Intentar primero con el endpoint específico (backend nuevo), con fallback a PATCH directo
       const resCalidad = await fetch(`${API}/ordenes/${id}/completar-reparacion`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -318,14 +319,30 @@ export default function ReparacionPage() {
       });
 
       if (!resCalidad.ok) {
-        const err = await resCalidad.json().catch(() => ({}));
-        throw new Error(err.error || "No se pudo mover la orden a Control de Calidad");
+        // Fallback: usar PATCH directo (funciona con backend antiguo y nuevo)
+        const resPatch = await fetch(`${API}/ordenes/${id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            estado:         "CONTROL_CALIDAD",
+            usuario_id:     usuario.id    || null,
+            usuario_nombre: nombreTecnico,
+          }),
+        });
+        if (!resPatch.ok) {
+          const err = await resPatch.json().catch(() => ({}));
+          throw new Error(err.error || "No se pudo mover la orden a Control de Calidad");
+        }
       }
 
+      // Refrescar la orden (con fallback si GET /ordenes/:id no existe)
       const rOrden = await fetch(`${API}/ordenes/${id}`);
       if (rOrden.ok) {
         const data = await rOrden.json();
         setOrden(data.orden || data);
+      } else {
+        // Fallback: actualizar estado en memoria
+        setOrden(prev => prev ? { ...prev, estado: "CONTROL_CALIDAD" } : prev);
       }
 
       setMsg({ tipo: "ok", texto: "Reparación marcada como completa. La orden está en Control de Calidad." });
