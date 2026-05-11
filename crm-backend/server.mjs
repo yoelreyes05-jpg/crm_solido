@@ -977,11 +977,12 @@ app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
 // ⚙️ AVANCES
 // =====================================================
 app.get("/avances/:orden_id", async (req, res) => {
-  const { orden_id } = req.params;
+  const ordenId = parseInt(req.params.orden_id, 10);
+  if (isNaN(ordenId)) return res.json([]);
   // Buscar el diagnóstico de esta orden para obtener sus avances
   const { data: diag } = await supabase.from("diagnosticos")
     .select("id")
-    .eq("orden_id", orden_id)
+    .eq("orden_id", ordenId)
     .order("id", { ascending: false })
     .limit(1);
   if (!diag || diag.length === 0) return res.json([]);
@@ -3615,17 +3616,28 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
 // ── GET /ordenes/:id — detalle completo de una orden ────────────────────────
 app.get("/ordenes/:id", async (req, res) => {
   try {
-    const { id } = req.params;
-    const { data: orden } = await supabase.from("ordenes_trabajo").select("*").eq("id", id).single();
+    const idNum = parseInt(req.params.id, 10);
+    if (isNaN(idNum)) return res.status(400).json({ error: "ID de orden inválido" });
+
+    const { data: orden, error: ordenError } = await supabase
+      .from("ordenes_trabajo")
+      .select("*")
+      .eq("id", idNum)
+      .maybeSingle();
+
+    if (ordenError) {
+      console.error("❌ GET /ordenes/:id — error Supabase:", ordenError.message);
+      return res.status(500).json({ error: ordenError.message });
+    }
     if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
 
     // Cada query es independiente — si una tabla no existe todavía, devuelve null/[] sin romper todo
     const [clienteRes, vehiculoRes, diagnosticoRes, logRes, inspeccionRes] = await Promise.all([
-      supabase.from("clientes").select("*").eq("id", orden.cliente_id).single().catch(() => ({ data: null })),
-      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).single().catch(() => ({ data: null })),
-      supabase.from("diagnosticos").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
-      supabase.from("orden_trabajo_log").select("*").eq("orden_id", id).order("created_at", { ascending: true }).catch(() => ({ data: [] })),
-      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("clientes").select("*").eq("id", orden.cliente_id).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("diagnosticos").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("orden_trabajo_log").select("*").eq("orden_id", idNum).order("created_at", { ascending: true }).catch(() => ({ data: [] })),
+      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
     ]);
 
     res.json({
@@ -3637,6 +3649,7 @@ app.get("/ordenes/:id", async (req, res) => {
       inspeccion:  inspeccionRes.data || null,
     });
   } catch (err) {
+    console.error("❌ GET /ordenes/:id — catch:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
