@@ -128,6 +128,17 @@ export default function DiagnosticoPage() {
       ? JSON.parse(localStorage.getItem("usuario") || "{}")
       : {};
 
+  // ── Helpers de carga ─────────────────────────────────────────────────────
+  function aplicarDiagnostico(diag: Diagnostico) {
+    setDiagnostico(diag);
+    setDesc(diag.descripcion || "");
+    setManoObra(String(diag.mano_obra ?? "0"));
+    setRepuestos(String(diag.repuestos ?? "0"));
+    setTiempoEst(diag.tiempo_estimado || "");
+    setMoDetalle(diag.mano_de_obra_detalle || "");
+    setNotas(diag.notas || "");
+  }
+
   // ── Carga ─────────────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
     try {
@@ -139,10 +150,9 @@ export default function DiagnosticoPage() {
       if (rOrden.ok) {
         const data = await rOrden.json();
         // GET /ordenes/:id retorna { orden, cliente, vehiculo, diagnostico, log, inspeccion }
-        // Armamos OrdenDetalle uniendo los tres objetos
-        const raw   = data.orden   || data;
-        const cli   = data.cliente  || {};
-        const veh   = data.vehiculo || {};
+        const raw = data.orden  || data;
+        const cli = data.cliente || {};
+        const veh = data.vehiculo || {};
         const o: OrdenDetalle = {
           ...raw,
           cliente_nombre:  cli.nombre  || raw.cliente_nombre  || "Sin cliente",
@@ -157,25 +167,48 @@ export default function DiagnosticoPage() {
           vehiculo_id:     veh.id      || raw.vehiculo_id,
         };
         setOrden(o);
-
-        // Diagnóstico existente desde la orden
         const diag: Diagnostico | null = data.diagnostico || null;
-        if (diag) {
-          setDiagnostico(diag);
-          setDesc(diag.descripcion || "");
-          setManoObra(String(diag.mano_obra ?? "0"));
-          setRepuestos(String(diag.repuestos ?? "0"));
-          setTiempoEst(diag.tiempo_estimado || "");
-          setMoDetalle(diag.mano_de_obra_detalle || "");
-          setNotas(diag.notas || "");
-        }
+        if (diag) aplicarDiagnostico(diag);
+
       } else {
-        setMsg({ tipo: "error", texto: `Orden #${id} no encontrada.` });
+        // ── Fallback: el endpoint /ordenes/:id no existe en esta versión del backend
+        // Usamos GET /ordenes (lista) que siempre ha existido, filtramos por id
+        const [rLista, rDiags] = await Promise.all([
+          fetch(`${API}/ordenes`),
+          fetch(`${API}/diagnosticos`),
+        ]);
+
+        if (rLista.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lista: any[] = await rLista.json();
+          const found = (Array.isArray(lista) ? lista : []).find(
+            o => String(o.id) === String(id)
+          );
+          if (!found) {
+            setMsg({ tipo: "error", texto: `Orden #${id} no encontrada.` });
+            setLoading(false);
+            return;
+          }
+          // GET /ordenes ya trae cliente_nombre, vehiculo_info, vehiculo_placa
+          setOrden(found as OrdenDetalle);
+        } else {
+          setMsg({ tipo: "error", texto: `No se pudo cargar la orden #${id}.` });
+          setLoading(false);
+          return;
+        }
+
+        if (rDiags.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const diags: any[] = await rDiags.json();
+          const diag = (Array.isArray(diags) ? diags : []).find(
+            d => String(d.orden_id) === String(id)
+          ) as Diagnostico | undefined;
+          if (diag) aplicarDiagnostico(diag);
+        }
       }
 
       if (rInsp.ok) {
         const di = await rInsp.json();
-        // El endpoint retorna el objeto inspección directamente, o null si no existe
         setInspeccion(di || null);
       }
     } catch {

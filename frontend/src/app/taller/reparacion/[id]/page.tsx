@@ -127,6 +127,18 @@ export default function ReparacionPage() {
       if (rOrden.ok) {
         const data = await rOrden.json();
         setOrden(data.orden || data);
+      } else {
+        // Fallback: GET /ordenes/:id no existe en esta versión del backend
+        const rLista = await fetch(`${API}/ordenes`);
+        if (rLista.ok) {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const lista: any[] = await rLista.json();
+          const found = (Array.isArray(lista) ? lista : []).find(
+            o => String(o.id) === String(id)
+          );
+          if (found) setOrden(found as Orden);
+          else setMsg({ tipo: "error", texto: `Orden #${id} no encontrada.` });
+        }
       }
 
       if (rAvances.ok) {
