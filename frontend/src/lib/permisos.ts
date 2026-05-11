@@ -185,4 +185,4 @@ export function puede(
 }
 
 /** Lista de grupos únicos de módulos */
-export const GRUPOS_MODULOS = [...new Set(MODULOS_SISTEMA.map(m => m.grupo))];
+export const GRUPOS_MODULOS = Array.from(new Set(MODULOS_SISTEMA.map(m => m.grupo)));
