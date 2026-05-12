@@ -23,6 +23,33 @@ const ESTADO_LABEL: Record<string, string> = {
   ENTREGADO:"Entregado", CANCELADA:"Cancelada",
 };
 
+// ── Helper de impresión por iframe (evita bloqueo de popups) ────────────────
+function abrirImpresion(html: string) {
+  const prev = document.getElementById("__print_iframe__");
+  if (prev) prev.remove();
+  const iframe = document.createElement("iframe");
+  iframe.id = "__print_iframe__";
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:820px;height:1100px;border:none;opacity:0;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
+  if (!doc) {
+    // Fallback: si el iframe no está disponible, abrir ventana
+    const w = window.open("", "_blank", "width=860,height=1100");
+    if (w) { w.document.write(html); w.document.close(); }
+    return;
+  }
+  doc.open(); doc.write(html); doc.close();
+  iframe.onload = () => {
+    try {
+      (iframe.contentWindow as any)?.focus();
+      (iframe.contentWindow as any)?.print();
+    } catch {
+      const w = window.open("", "_blank", "width=860,height=1100");
+      if (w) { w.document.write(html); w.document.close(); }
+    }
+  };
+}
+
 // ── Imprimir diagnóstico / cotización ─────────────────────────────────────────
 function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any) {
   const manoObra  = Number(diag.mano_obra  || 0);
@@ -62,15 +89,13 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
   <tfoot><tr class="total-row"><td>TOTAL PRESUPUESTO</td><td style="text-align:right">RD$ ${total.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr></tfoot></table>`:""}
   <div class="firma-area"><div><div class="firma-linea">Técnico: ${diag.tecnico_nombre||"_______________"}</div></div><div><div class="firma-linea">Firma del Cliente</div></div></div>
   <div class="footer"><p>Este informe tiene validez de 15 días hábiles.</p><p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, RD</p></div>
-  <script>window.onload=function(){setTimeout(function(){window.print()},500)};window.onafterprint=function(){window.close()}</script>
   </body></html>`;
 
-  const win = window.open("","_blank","width=820,height=1000");
-  if (win) { win.document.write(html); win.document.close(); }
+  abrirImpresion(html);
 }
 
 // ── Imprimir resumen completo de la orden (entregable al cliente) ─────────────
-function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: any, log: any[], inspeccion: any) {
+function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: any, log: any[], inspeccion: any, historial: any[] = []) {
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
   const fmtDate = (d: string) => d ? new Date(d).toLocaleString("es-DO",{ year:"numeric", month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const fmtMoney = (n: number) => n.toLocaleString("es-DO",{ minimumFractionDigits:2 });
@@ -286,6 +311,29 @@ ${log?.length > 0 ? `
   <tbody>${timelineRows}</tbody>
 </table>` : `<div style="font-size:13px;color:#9ca3af;padding:10px">Sin historial de estados registrado.</div>`}
 
+<!-- HISTORIAL DEL VEHÍCULO (visitas anteriores) -->
+${historial.length > 0 ? `
+<div class="section-title" style="border-left-color:#6366f1;color:#4338ca">🔑 Historial del Vehículo — Visitas Anteriores</div>
+<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #f1f5f9;border-radius:10px;overflow:hidden;margin-bottom:20px">
+  <thead>
+    <tr style="background:#1e1b4b;color:#fff">
+      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Fecha</th>
+      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Tipo de servicio</th>
+      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Diagnóstico / Trabajo</th>
+      <th style="padding:9px 12px;font-size:11px;text-align:right;font-weight:700">Total</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${historial.slice(0, 10).map((h: any) => `
+    <tr style="border-bottom:1px solid #f1f5f9">
+      <td style="padding:7px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO") : "—"}</td>
+      <td style="padding:7px 12px;font-size:12px;font-weight:600">${h.tipo_servicio || "—"}</td>
+      <td style="padding:7px 12px;font-size:12px;color:#374151">${((h.diagnostico_general || h.descripcion || "—")).substring(0, 90)}${(h.diagnostico_general || h.descripcion || "").length > 90 ? "…" : ""}</td>
+      <td style="padding:7px 12px;font-size:12px;text-align:right;font-weight:700;color:#065f46">RD$ ${Number(h.total_cobrado || h.mano_obra || 0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+    </tr>`).join("")}
+  </tbody>
+</table>` : ""}
+
 <!-- FIRMAS -->
 <div class="firmas">
   <div><div class="firma-line">Técnico / Responsable del Servicio</div></div>
@@ -298,12 +346,10 @@ ${log?.length > 0 ? `
   <p>Impreso el ${new Date().toLocaleDateString("es-DO",{ year:"numeric", month:"long", day:"numeric" })}</p>
 </div>
 
-<script>window.onload=function(){setTimeout(function(){window.print()},600)};window.onafterprint=function(){window.close()}</script>
 </body>
 </html>`;
 
-  const win = window.open("","_blank","width=900,height=1100");
-  if (win) { win.document.write(html); win.document.close(); }
+  abrirImpresion(html);
 }
 
 // ── Componente principal ──────────────────────────────────────────────────────
@@ -311,10 +357,11 @@ export default function OrdenDetallePage() {
   const { id }  = useParams() as { id: string };
   const router  = useRouter();
 
-  const [data,     setData]     = useState<any>(null);
-  const [loading,  setLoading]  = useState(true);
-  const [usuario,  setUsuario]  = useState<any>(null);
-  const [msg,      setMsg]      = useState<{ tipo:"ok"|"err"; texto:string } | null>(null);
+  const [data,      setData]     = useState<any>(null);
+  const [loading,   setLoading]  = useState(true);
+  const [usuario,   setUsuario]  = useState<any>(null);
+  const [msg,       setMsg]      = useState<{ tipo:"ok"|"err"; texto:string } | null>(null);
+  const [historial, setHistorial]= useState<any[]>([]);
 
   const [modalAccion,  setModalAccion]  = useState<"aprobar"|"rechazar"|"calidad"|"entregar"|null>(null);
   const [motivoModal,  setMotivoModal]  = useState("");
@@ -328,7 +375,18 @@ export default function OrdenDetallePage() {
       const res = await fetch(`${API}/ordenes/${id}`);
       if (res.ok) {
         const json = await res.json();
-        if (json?.orden) { setData(json); setLoading(false); return; }
+        if (json?.orden) {
+          setData(json);
+          // Cargar historial de servicios anteriores del vehículo (silencioso)
+          if (json.vehiculo?.id) {
+            fetch(`${API}/vehiculo-historial/vehiculo/${json.vehiculo.id}`)
+              .then(r => r.ok ? r.json() : [])
+              .then(h => setHistorial(Array.isArray(h) ? h : []))
+              .catch(() => {});
+          }
+          setLoading(false);
+          return;
+        }
       }
 
       // Intento 2: construir desde el listado + llamadas paralelas
@@ -505,7 +563,7 @@ export default function OrdenDetallePage() {
         )}
         {/* Botón imprimir resumen completo */}
         <button
-          onClick={() => imprimirOrdenCompleta(orden, cliente, vehiculo, diagnostico, log, inspeccion)}
+          onClick={() => imprimirOrdenCompleta(orden, cliente, vehiculo, diagnostico, log, inspeccion, historial)}
           style={{ background:"#111827", color:"#fff", padding:"7px 16px", borderRadius:8, fontWeight:700, fontSize:13, border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}
         >
           🖨️ Imprimir Resumen

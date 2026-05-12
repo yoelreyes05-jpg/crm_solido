@@ -246,7 +246,10 @@ app.get("/ordenes", async (req, res) => {
         cliente_nombre:   cli?.nombre   || "Sin cliente",
         cliente_telefono: cli?.telefono || "",
         vehiculo_info:    veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "Sin vehículo",
-        vehiculo_placa:   veh?.placa || "",
+        vehiculo_placa:   veh?.placa    || "",
+        vehiculo_marca:   veh?.marca    || "",
+        vehiculo_modelo:  veh?.modelo   || "",
+        vehiculo_ano:     veh?.ano      ? String(veh.ano) : "",
       };
     });
 
@@ -808,10 +811,9 @@ app.post("/cafeteria/cuadre", async (req, res) => {
 // =====================================================
 app.get("/diagnosticos", async (req, res) => {
   try {
-    const { data: dData, error: dError } = await supabase
-      .from("diagnosticos")
-      .select("*")
-      .order("created_at", { ascending: false });
+    let qDiag = supabase.from("diagnosticos").select("*").order("created_at", { ascending: false });
+    if (req.query.orden_id) qDiag = qDiag.eq("orden_id", parseInt(req.query.orden_id, 10));
+    const { data: dData, error: dError } = await qDiag;
     if (dError) return res.json({ error: dError.message });
 
     const [{ data: cData }, { data: vData }] = await Promise.all([

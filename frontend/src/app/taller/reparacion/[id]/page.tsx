@@ -126,7 +126,27 @@ export default function ReparacionPage() {
 
       if (rOrden.ok) {
         const data = await rOrden.json();
-        setOrden(data.orden || data);
+        const ordenBase = data.orden || data;
+        // GET /ordenes/:id retorna { orden, cliente, vehiculo, ... }
+        // Enriquecer la orden con los campos derivados de cliente y vehículo
+        if (data.cliente || data.vehiculo) {
+          const cli = data.cliente || {};
+          const veh = data.vehiculo || {};
+          setOrden({
+            ...ordenBase,
+            cliente_nombre:   cli.nombre   || ordenBase.cliente_nombre   || "Sin cliente",
+            cliente_telefono: cli.telefono || ordenBase.cliente_telefono || "",
+            vehiculo_info:    veh.id
+              ? `${veh.marca} ${veh.modelo} (${veh.placa})`
+              : ordenBase.vehiculo_info || "—",
+            vehiculo_marca:   veh.marca    || ordenBase.vehiculo_marca   || "",
+            vehiculo_modelo:  veh.modelo   || ordenBase.vehiculo_modelo  || "",
+            vehiculo_placa:   veh.placa    || ordenBase.vehiculo_placa   || "",
+            vehiculo_ano:     String(veh.ano || ordenBase.vehiculo_ano   || ""),
+          });
+        } else {
+          setOrden(ordenBase);
+        }
       } else {
         // Fallback: GET /ordenes/:id no existe en esta versión del backend
         const rLista = await fetch(`${API}/ordenes`);
@@ -339,7 +359,25 @@ export default function ReparacionPage() {
       const rOrden = await fetch(`${API}/ordenes/${id}`);
       if (rOrden.ok) {
         const data = await rOrden.json();
-        setOrden(data.orden || data);
+        const ordenBase = data.orden || data;
+        if (data.cliente || data.vehiculo) {
+          const cli = data.cliente || {};
+          const veh = data.vehiculo || {};
+          setOrden({
+            ...ordenBase,
+            cliente_nombre:   cli.nombre   || ordenBase.cliente_nombre   || "Sin cliente",
+            cliente_telefono: cli.telefono || ordenBase.cliente_telefono || "",
+            vehiculo_info:    veh.id
+              ? `${veh.marca} ${veh.modelo} (${veh.placa})`
+              : ordenBase.vehiculo_info || "—",
+            vehiculo_marca:   veh.marca    || ordenBase.vehiculo_marca   || "",
+            vehiculo_modelo:  veh.modelo   || ordenBase.vehiculo_modelo  || "",
+            vehiculo_placa:   veh.placa    || ordenBase.vehiculo_placa   || "",
+            vehiculo_ano:     String(veh.ano || ordenBase.vehiculo_ano   || ""),
+          });
+        } else {
+          setOrden(ordenBase);
+        }
       } else {
         // Fallback: actualizar estado en memoria
         setOrden(prev => prev ? { ...prev, estado: "CONTROL_CALIDAD" } : prev);
