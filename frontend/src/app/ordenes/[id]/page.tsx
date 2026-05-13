@@ -94,8 +94,32 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
   abrirImpresion(html);
 }
 
+// ── Impresión contextual según etapa de la orden ─────────────────────────────
+// Incluye SOLO las secciones que corresponden al estado actual y las anteriores
+function imprimirSegunEstado(
+  orden: any, cliente: any, vehiculo: any,
+  diag: any, log: any[], inspeccion: any, historial: any[] = []
+) {
+  const estado = orden.estado || "RECIBIDO";
+  const ETAPAS = ["RECIBIDO","DIAGNOSTICO","ESPERANDO_APROBACION","REPARACION","CONTROL_CALIDAD","LISTO","ENTREGADO","CANCELADA"];
+  const idxActual = ETAPAS.indexOf(estado);
+
+  // Decidir qué secciones mostrar según estado
+  const mostrar = {
+    recepcion:    true,                              // siempre
+    inspeccion:   !!inspeccion,                      // si existe
+    diagnostico:  !!diag && idxActual >= 1,          // desde DIAGNOSTICO
+    cotizacion:   !!diag && idxActual >= 2,          // desde ESPERANDO_APROBACION
+    reparacion:   (diag?.avances?.length > 0) && idxActual >= 3,  // desde REPARACION
+    calidad:      idxActual >= 4,
+    entrega:      idxActual >= 6,
+  };
+
+  imprimirOrdenCompleta(orden, cliente, vehiculo, diag, log, inspeccion, historial, mostrar);
+}
+
 // ── Imprimir resumen completo de la orden (entregable al cliente) ─────────────
-function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: any, log: any[], inspeccion: any, historial: any[] = []) {
+function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: any, log: any[], inspeccion: any, historial: any[] = [], mostrar?: any) {
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
   const fmtDate = (d: string) => d ? new Date(d).toLocaleString("es-DO",{ year:"numeric", month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const fmtMoney = (n: number) => n.toLocaleString("es-DO",{ minimumFractionDigits:2 });
@@ -142,7 +166,40 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
       </td>
     </tr>`).join("");
 
-  // Inspección
+  // Inspección con fotos y zonas de daño
+  const inspZonas = (inspeccion?.zonas_danio || []).map((z: any) =>
+    `<span style="background:#fef9c3;border:1px solid #fde68a;color:#92400e;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600;margin:2px">
+      ${(z.zona||"").replace(/_/g," ")}: ${z.tipo?.replace(/_/g," ")||""}
+    </span>`
+  ).join("");
+
+  const inspFotos = (() => {
+    const slots = inspeccion?.fotos_slots;
+    if (!slots) return "";
+    const labels: Record<string,string> = { frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der." };
+    const imgs = ["frente","trasero","lateral_izq","lateral_der"]
+      .filter(k => slots[k])
+      .map(k => `<div style="text-align:center"><img src="${slots[k]}" style="width:160px;height:120px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0"/><div style="font-size:10px;color:#6b7280;margin-top:3px">${labels[k]}</div></div>`)
+      .join("");
+    return imgs ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">${imgs}</div>` : "";
+  })();
+
+  const checklist = (() => {
+    if (!inspeccion) return "";
+    const items = [
+      ["luces_ok","💡 Luces"],["espejos_ok","🔍 Espejos"],["radio_pantalla","📻 Radio"],
+      ["tapiceria_ok","🪑 Tapicería"],["alfombras_ok","🧺 Alfombras"],["bocina_ok","📣 Bocina"],
+      ["gato_ok","🔩 Gato"],["llanta_repuesto_ok","🛞 Llanta rep."],
+      ["documentos_ok","📄 Documentos"],["herramientas_ok","🔧 Herramientas"],
+    ];
+    return `<div style="display:grid;grid-template-columns:repeat(5,1fr);gap:4px;margin-top:8px">
+      ${items.map(([k,l]) => {
+        const ok = inspeccion[k] === true || inspeccion[k] === 1;
+        return `<span style="font-size:11px"><span style="color:${ok?"#16a34a":"#dc2626"}">${ok?"✓":"✗"}</span> ${l}</span>`;
+      }).join("")}
+    </div>`;
+  })();
+
   const inspHtml = inspeccion ? `
     <div style="margin-bottom:24px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid #10b981">
@@ -150,12 +207,41 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
       </div>
       <table style="width:100%;border-collapse:collapse">
         <tr>
-          <td style="padding:6px 12px;font-size:13px"><strong>KM entrada:</strong> ${inspeccion.km_entrada?.toLocaleString()||"N/A"}</td>
+          <td style="padding:6px 12px;font-size:13px"><strong>KM entrada:</strong> ${Number(inspeccion.km_entrada||0).toLocaleString()||"N/A"}</td>
           <td style="padding:6px 12px;font-size:13px"><strong>Combustible:</strong> ${inspeccion.nivel_combustible??"-"}%</td>
           <td style="padding:6px 12px;font-size:13px"><strong>Condición:</strong> ${inspeccion.condicion_general||"—"}</td>
         </tr>
       </table>
-      ${inspeccion.observaciones?`<div style="margin-top:6px;font-size:13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">📝 ${inspeccion.observaciones}</div>`:""}
+      ${inspZonas ? `<div style="margin-top:8px"><div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px">DAÑOS AL INGRESO:</div>${inspZonas}</div>` : ""}
+      ${checklist}
+      ${inspeccion.observaciones?`<div style="margin-top:8px;font-size:13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">📝 ${inspeccion.observaciones}</div>`:""}
+      ${inspFotos}
+    </div>` : "";
+
+  // Repuestos estructurados (si existen en el diagnóstico)
+  const repuestosItems: any[] = diag?.repuestos_items || [];
+  const repuestosTabla = repuestosItems.length > 0 ? `
+    <div style="margin-top:10px">
+      <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px">REPUESTOS Y MATERIALES:</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead>
+          <tr style="background:#f1f5f9">
+            <th style="padding:6px 10px;text-align:left;font-weight:700">Repuesto</th>
+            <th style="padding:6px 10px;text-align:center;font-weight:700">Cant.</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:700">P/U</th>
+            <th style="padding:6px 10px;text-align:right;font-weight:700">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${repuestosItems.map((r: any) => `
+            <tr style="border-bottom:1px solid #f1f5f9">
+              <td style="padding:5px 10px">${r.nombre||"—"}</td>
+              <td style="padding:5px 10px;text-align:center">${r.cantidad||1}</td>
+              <td style="padding:5px 10px;text-align:right">RD$ ${Number(r.precio_unitario||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+              <td style="padding:5px 10px;text-align:right;font-weight:700">RD$ ${Number(r.subtotal||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
     </div>` : "";
 
   const html = `<!DOCTYPE html>
@@ -213,7 +299,11 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 
 <!-- TITULO -->
 <div style="text-align:center;font-size:17px;font-weight:700;color:#1e40af;border:2px solid #1e40af;padding:8px;border-radius:8px;margin-bottom:24px;letter-spacing:1px;text-transform:uppercase">
-  Resumen Completo de Servicio
+  ${mostrar?.entrega ? "Resumen Completo de Servicio" :
+    mostrar?.calidad ? "Informe hasta Control de Calidad" :
+    mostrar?.reparacion ? "Informe de Reparación" :
+    mostrar?.cotizacion ? "Diagnóstico y Cotización" :
+    "Orden de Trabajo — Recepción"}
 </div>
 
 <!-- INFO CLIENTE + VEHÍCULO -->
@@ -242,7 +332,7 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 ${inspHtml}
 
 <!-- DIAGNÓSTICO TÉCNICO -->
-${diag ? `
+${(mostrar ? mostrar.diagnostico : !!diag) ? `
 <div class="section-title">🔬 Diagnóstico Técnico</div>
 <div class="info-grid" style="margin-bottom:10px">
   <div class="info-box">
@@ -262,6 +352,14 @@ ${diag.hallazgos||diag.descripcion ? `
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Hallazgos / Descripción</div>
     <div class="hallazgos">${diag.hallazgos||diag.descripcion}</div>
   </div>` : ""}
+${diag.mano_de_obra_detalle ? `
+  <div style="margin-bottom:12px">
+    <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Trabajos a realizar</div>
+    <div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px">
+      ${(diag.mano_de_obra_detalle||"").split("\n").filter((l:string)=>l.trim()).map((l:string)=>`<div style="font-size:13px;margin-bottom:3px">✓ ${l.trim()}</div>`).join("")}
+    </div>
+  </div>` : ""}
+${repuestosTabla}
 ${diag.notas ? `
   <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:12px">
     <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px">📝 NOTAS</div>
@@ -269,9 +367,9 @@ ${diag.notas ? `
   </div>` : ""}
 
 <!-- COTIZACIÓN -->
-${totalCot > 0 ? `
+${(mostrar ? mostrar.cotizacion : totalCot > 0) ? `
 <div class="cotizacion">
-  <div style="font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:10px">💰 Cotización Aprobada</div>
+  <div style="font-size:12px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:10px">💰 Resumen de Costos</div>
   <table style="width:100%;border-collapse:collapse">
     <tr style="border-bottom:1px solid #d1fae5">
       <td style="padding:6px 0;font-size:13px">Mano de obra</td>
@@ -291,14 +389,14 @@ ${totalCot > 0 ? `
 <div style="font-size:13px;color:#9ca3af;padding:10px">Sin diagnóstico registrado.</div>`}
 
 <!-- AVANCES DE REPARACIÓN -->
-${diag?.avances?.length > 0 ? `
+${(mostrar ? mostrar.reparacion : !!diag?.avances?.length) ? `
 <div class="section-title">🔧 Avances de Reparación</div>
 <table class="avances">
   ${avancesRows}
 </table>` : ""}
 
 <!-- TIMELINE DE ESTADOS -->
-<div class="section-title">📜 Historial Completo del Proceso</div>
+<div class="section-title">📜 Historial del Proceso</div>
 ${log?.length > 0 ? `
 <table class="timeline">
   <thead>
@@ -561,12 +659,13 @@ export default function OrdenDetallePage() {
             💬 WhatsApp
           </a>
         )}
-        {/* Botón imprimir resumen completo */}
+        {/* Botón imprimir — contextual según estado */}
         <button
-          onClick={() => imprimirOrdenCompleta(orden, cliente, vehiculo, diagnostico, log, inspeccion, historial)}
+          onClick={() => imprimirSegunEstado(orden, cliente, vehiculo, diagnostico, log, inspeccion, historial)}
           style={{ background:"#111827", color:"#fff", padding:"7px 16px", borderRadius:8, fontWeight:700, fontSize:13, border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}
+          title={`Imprimir todo el proceso hasta el estado actual (${estado})`}
         >
-          🖨️ Imprimir Resumen
+          🖨️ Imprimir {estado === "RECIBIDO" ? "Recepción" : estado === "ESPERANDO_APROBACION" ? "Cotización" : estado === "REPARACION" ? "Reparación" : estado === "ENTREGADO" ? "Resumen Final" : "Resumen"}
         </button>
       </div>
 
@@ -685,7 +784,33 @@ export default function OrdenDetallePage() {
               📝 {inspeccion.observaciones}
             </p>
           )}
-          {inspeccion.fotos?.length > 0 && (
+          {/* Fotos slots (nuevo formato) */}
+          {inspeccion.fotos_slots && Object.values(inspeccion.fotos_slots).some(Boolean) && (
+            <>
+              <button
+                onClick={() => setMostrarInspFotos(v => !v)}
+                style={{ background:"transparent", border:"none", color:"#059669", fontWeight:600, fontSize:12, cursor:"pointer", padding:0, marginBottom:6 }}
+              >
+                {mostrarInspFotos ? "▲ Ocultar fotos" : "▼ Ver 4 fotos del vehículo"}
+              </button>
+              {mostrarInspFotos && (
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(4, 1fr)", gap:8, marginTop:6 }}>
+                  {(["frente","trasero","lateral_izq","lateral_der"] as const).map(k => {
+                    const img = inspeccion.fotos_slots?.[k];
+                    const lbl: Record<string,string> = { frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der." };
+                    return img ? (
+                      <div key={k} style={{ textAlign:"center" }}>
+                        <img src={img} alt={lbl[k]} style={{ width:"100%", aspectRatio:"4/3", objectFit:"cover", borderRadius:8, border:"1px solid #e5e7eb" }} />
+                        <p style={{ margin:"3px 0 0", fontSize:10, color:"#9ca3af" }}>{lbl[k]}</p>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              )}
+            </>
+          )}
+          {/* Fotos legacy */}
+          {!inspeccion.fotos_slots && inspeccion.fotos?.length > 0 && (
             <>
               <button
                 onClick={() => setMostrarInspFotos(v => !v)}
@@ -762,9 +887,35 @@ export default function OrdenDetallePage() {
               </div>
             )}
 
+            {/* Repuestos estructurados del inventario */}
+            {diagnostico.repuestos_items?.length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <p style={{ margin:"0 0 8px", fontSize:11, fontWeight:700, color:"#6b7280", textTransform:"uppercase" }}>🔩 Repuestos del Inventario</p>
+                <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12, border:"1px solid #f1f5f9", borderRadius:8, overflow:"hidden" }}>
+                  <thead>
+                    <tr style={{ background:"#f8fafc" }}>
+                      {["Repuesto","Cant.","P/U","Subtotal"].map(h => (
+                        <th key={h} style={{ padding:"6px 10px", textAlign:"left", fontWeight:700, color:"#6b7280", fontSize:11 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {diagnostico.repuestos_items.map((r: any, i: number) => (
+                      <tr key={i} style={{ borderTop:"1px solid #f1f5f9" }}>
+                        <td style={{ padding:"7px 10px", fontWeight:600 }}>{r.nombre}</td>
+                        <td style={{ padding:"7px 10px", color:"#374151" }}>{r.cantidad}</td>
+                        <td style={{ padding:"7px 10px", color:"#6b7280" }}>RD$ {Number(r.precio_unitario||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+                        <td style={{ padding:"7px 10px", fontWeight:700, color:"#1d4ed8" }}>RD$ {Number(r.subtotal||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+
             {(diagnostico.mano_obra > 0 || diagnostico.repuestos > 0 || diagnostico.total > 0) && (
               <div style={{ background:"#f0fdf4", border:"1px solid #bbf7d0", borderRadius:10, padding:"12px 16px" }}>
-                <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#065f46" }}>💰 Cotización</p>
+                <p style={{ margin:"0 0 8px", fontWeight:700, fontSize:13, color:"#065f46" }}>💰 Resumen de Costos</p>
                 <div style={{ display:"flex", gap:24, fontSize:13, flexWrap:"wrap" }}>
                   {diagnostico.mano_obra > 0 && (
                     <div><span style={{ color:"#6b7280" }}>Mano de obra:</span> <strong>RD$ {Number(diagnostico.mano_obra).toLocaleString("es-DO",{minimumFractionDigits:2})}</strong></div>

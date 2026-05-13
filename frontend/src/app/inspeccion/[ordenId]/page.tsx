@@ -100,11 +100,42 @@ export default function InspeccionPage() {
           fetch(`${API}/ordenes/${ordenId}`),
           fetch(`${API}/inspeccion/orden/${ordenId}`),
         ]);
-        if (oRes.ok) setOrden(await oRes.json());
+
+        // ── Cargar orden con fallback robusto ──────────────────────────────
+        if (oRes.ok) {
+          try {
+            const json = await oRes.json();
+            // El endpoint /ordenes/:id devuelve { orden, cliente, vehiculo, ... }
+            if (json?.orden) {
+              setOrden(json); // ya tiene la estructura esperada
+            } else if (json?.id) {
+              // respuesta directa sin wrapper
+              setOrden({ orden: json, cliente: null, vehiculo: null, diagnostico: null, log: [], inspeccion: null });
+            }
+          } catch { /* JSON parse error */ }
+        }
+
+        // Fallback: si el endpoint directo falla, buscar en la lista
+        if (!oRes.ok || oRes.status === 404) {
+          try {
+            const lista = await fetch(`${API}/ordenes`).then(r => r.ok ? r.json() : []);
+            const found = (Array.isArray(lista) ? lista : []).find((o: any) => String(o.id) === String(ordenId));
+            if (found) {
+              // Intentar obtener cliente y vehículo si tenemos IDs
+              const [cliRes, vehRes] = await Promise.all([
+                found.cliente_id ? fetch(`${API}/clientes/${found.cliente_id}`).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null),
+                found.vehiculo_id ? fetch(`${API}/vehiculos/${found.vehiculo_id}`).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null),
+              ]);
+              setOrden({ orden: found, cliente: cliRes, vehiculo: vehRes, diagnostico: null, log: [], inspeccion: null });
+            }
+          } catch { /* fallback silencioso */ }
+        }
+
         if (iRes.ok) {
-          const ins = await iRes.json();
-          if (ins) {
-            setInspeccionExistente(ins);
+          try {
+            const ins = await iRes.json();
+            if (ins) {
+              setInspeccionExistente(ins);
             // Pre-rellenar si ya existe
             setKmEntrada(ins.km_entrada?.toString() || "");
             setCombustible(ins.nivel_combustible ?? 50);
@@ -145,6 +176,7 @@ export default function InspeccionPage() {
                 herramientas_ok:   ins.herramientas_ok,
               });
             }
+          } catch { /* JSON parse error inspeccion */ }
           }
         }
       } catch (err) { console.error(err); }
@@ -278,9 +310,20 @@ export default function InspeccionPage() {
   };
 
   if (loading) return <div style={{ padding: 40, color: "#6b7280" }}>Cargando inspección...</div>;
-  if (!orden)  return <div style={{ padding: 40, color: "#ef4444" }}>Orden #{ordenId} no encontrada.</div>;
+  if (!orden)  return (
+    <div style={{ padding: 40 }}>
+      <div style={{ color: "#ef4444", marginBottom: 16 }}>⚠️ No se encontró la orden #{ordenId}.</div>
+      <button onClick={() => router.back()}
+        style={{ padding: "8px 18px", background: "#f3f4f6", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}>
+        ← Volver
+      </button>
+    </div>
+  );
 
-  const { orden: o, cliente, vehiculo } = orden;
+  // Soportar tanto { orden, cliente, vehiculo } como respuesta plana
+  const o       = orden.orden    || orden;
+  const cliente = orden.cliente  || null;
+  const vehiculo= orden.vehiculo || null;
 
   return (
     <div style={{ padding: "24px 28px", maxWidth: 900, margin: "0 auto" }}>

@@ -971,6 +971,19 @@ app.post("/cotizaciones/diagnostico", async (req, res) => {
   res.json(result);
 });
 
+// GET /cotizaciones/por-diagnostico/:diagnostico_id — obtener cotización por diagnóstico
+// ⚠️ DEBE ir ANTES de /cotizaciones/:id para que Express no confunda "por-diagnostico" con un :id
+app.get("/cotizaciones/por-diagnostico/:diagnostico_id", async (req, res) => {
+  try {
+    const { diagnostico_id } = req.params;
+    const { data: cot, error } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnostico_id).single();
+    if (error || !cot) return res.json(null);
+    res.json(cot);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /cotizaciones/:id — obtener cotización completa con diagnóstico, inspección, cliente y vehículo
 app.get("/cotizaciones/:id", async (req, res) => {
   try {
@@ -1002,18 +1015,6 @@ app.get("/cotizaciones/:id", async (req, res) => {
     }
 
     res.json({ cotizacion: cot, diagnostico: diag, cliente, vehiculo, inspeccion });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// GET /cotizaciones/por-diagnostico/:diagnostico_id — obtener cotización por diagnóstico
-app.get("/cotizaciones/por-diagnostico/:diagnostico_id", async (req, res) => {
-  try {
-    const { diagnostico_id } = req.params;
-    const { data: cot, error } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnostico_id).single();
-    if (error || !cot) return res.json(null);
-    res.json(cot);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
