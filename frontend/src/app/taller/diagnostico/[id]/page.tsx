@@ -4,6 +4,27 @@ import { useParams, useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
+
+interface InventarioItem {
+  id: number;
+  name: string;
+  code?: string;
+  price: number;
+  stock: number;
+  categoria?: string;
+  descripcion?: string;
+}
+
+interface RepuestoSeleccionado {
+  inventario_id: number;
+  nombre: string;
+  codigo?: string;
+  cantidad: number;
+  precio_unitario: number;
+  subtotal: number;
+  stock_disponible: number;
+}
+
 interface OrdenDetalle {
   id: number;
   numero_orden: string;
@@ -116,12 +137,20 @@ export default function DiagnosticoPage() {
   // Campos del formulario
   const [desc,        setDesc]      = useState("");
   const [manoObra,    setManoObra]  = useState("0");
-  const [repuestos,   setRepuestos] = useState("0");
   const [tiempoEst,   setTiempoEst] = useState("");
   const [moDetalle,   setMoDetalle] = useState("");
   const [notas,       setNotas]     = useState("");
 
-  const total = (parseFloat(manoObra) || 0) + (parseFloat(repuestos) || 0);
+  // Repuestos del inventario
+  const [repuestosItems, setRepuestosItems] = useState<RepuestoSeleccionado[]>([]);
+  const [inventario,     setInventario]     = useState<InventarioItem[]>([]);
+  const [busqInv,        setBusqInv]        = useState("");
+  const [showInvPanel,   setShowInvPanel]   = useState(false);
+  const [loadingInv,     setLoadingInv]     = useState(false);
+
+  // Total calculado
+  const totalRepuestos = repuestosItems.reduce((s, r) => s + r.subtotal, 0);
+  const total = (parseFloat(manoObra) || 0) + totalRepuestos;
 
   const usuario: Record<string, string> =
     typeof window !== "undefined"
@@ -133,11 +162,70 @@ export default function DiagnosticoPage() {
     setDiagnostico(diag);
     setDesc(diag.descripcion || "");
     setManoObra(String(diag.mano_obra ?? "0"));
-    setRepuestos(String(diag.repuestos ?? "0"));
     setTiempoEst(diag.tiempo_estimado || "");
     setMoDetalle(diag.mano_de_obra_detalle || "");
     setNotas(diag.notas || "");
+    // Cargar repuestos estructurados si existen
+    if (Array.isArray((diag as any).repuestos_items) && (diag as any).repuestos_items.length > 0) {
+      setRepuestosItems((diag as any).repuestos_items);
+    }
   }
+
+  // Cargar inventario cuando se abre el panel
+  const cargarInventario = async () => {
+    if (inventario.length > 0) return; // ya cargado
+    setLoadingInv(true);
+    try {
+      const res = await fetch(`${API}/inventario`);
+      const data = await res.json();
+      setInventario(Array.isArray(data) ? data : []);
+    } catch { /* silencioso */ }
+    setLoadingInv(false);
+  };
+
+  const abrirPanelInventario = () => {
+    setShowInvPanel(true);
+    cargarInventario();
+  };
+
+  const agregarRepuesto = (item: InventarioItem) => {
+    setRepuestosItems(prev => {
+      const existe = prev.find(r => r.inventario_id === item.id);
+      if (existe) {
+        // Incrementar cantidad si hay stock
+        return prev.map(r => r.inventario_id === item.id
+          ? { ...r, cantidad: Math.min(r.cantidad + 1, item.stock), subtotal: (r.cantidad + 1) * r.precio_unitario }
+          : r
+        );
+      }
+      return [...prev, {
+        inventario_id:    item.id,
+        nombre:           item.name,
+        codigo:           item.code,
+        cantidad:         1,
+        precio_unitario:  item.price,
+        subtotal:         item.price,
+        stock_disponible: item.stock,
+      }];
+    });
+  };
+
+  const actualizarCantidad = (inventarioId: number, nuevaCantidad: number) => {
+    if (nuevaCantidad <= 0) {
+      setRepuestosItems(prev => prev.filter(r => r.inventario_id !== inventarioId));
+      return;
+    }
+    setRepuestosItems(prev => prev.map(r =>
+      r.inventario_id === inventarioId
+        ? { ...r, cantidad: nuevaCantidad, subtotal: nuevaCantidad * r.precio_unitario }
+        : r
+    ));
+  };
+
+  const inventarioFiltrado = inventario.filter(item => {
+    const q = busqInv.toLowerCase();
+    return !q || item.name?.toLowerCase().includes(q) || item.code?.toLowerCase().includes(q) || item.categoria?.toLowerCase().includes(q);
+  }).slice(0, 40);
 
   // ── Carga ─────────────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
@@ -235,7 +323,8 @@ export default function DiagnosticoPage() {
       cliente_id:           orden?.cliente_id,
       descripcion:          desc,
       mano_obra:            parseFloat(manoObra) || 0,
-      repuestos:            parseFloat(repuestos) || 0,
+      repuestos:            totalRepuestos,           // total calculado de repuestos del inventario
+      repuestos_items:      repuestosItems,           // lista estructurada de partes
       total:                total,
       tiempo_estimado:      tiempoEst,
       mano_de_obra_detalle: moDetalle,
@@ -504,8 +593,8 @@ export default function DiagnosticoPage() {
               />
             </div>
 
-            {/* Mano de obra + Repuestos + Total */}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 14, marginBottom: 18 }}>
+            {/* Mano de obra + Total */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
               <div>
                 <label style={labelStyle}>Mano de obra (RD$)</label>
                 <input
@@ -519,19 +608,7 @@ export default function DiagnosticoPage() {
                 />
               </div>
               <div>
-                <label style={labelStyle}>Repuestos / materiales (RD$)</label>
-                <input
-                  type="number"
-                  min={0}
-                  step={0.01}
-                  value={repuestos}
-                  onChange={e => setRepuestos(e.target.value)}
-                  disabled={!!diagnostico?.terminado}
-                  style={inputStyle}
-                />
-              </div>
-              <div>
-                <label style={labelStyle}>Total (calculado)</label>
+                <label style={labelStyle}>Total estimado (calculado)</label>
                 <input
                   type="text"
                   readOnly
@@ -540,6 +617,192 @@ export default function DiagnosticoPage() {
                 />
               </div>
             </div>
+
+            {/* ── Repuestos del inventario ────────────────────────── */}
+            <div style={{
+              background: "#162032", border: `1px solid ${C.border}`,
+              borderRadius: 10, padding: 16, marginBottom: 18,
+            }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>🔩 Repuestos del Inventario</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                    Total repuestos: <strong style={{ color: C.yellow }}>{fmtDinero(totalRepuestos)}</strong>
+                  </div>
+                </div>
+                {!diagnostico?.terminado && (
+                  <button
+                    onClick={abrirPanelInventario}
+                    style={{
+                      background: C.blue, color: "#fff", border: "none", borderRadius: 8,
+                      padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                    }}
+                  >
+                    + Agregar repuesto
+                  </button>
+                )}
+              </div>
+
+              {/* Lista de repuestos seleccionados */}
+              {repuestosItems.length === 0 ? (
+                <p style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: "12px 0" }}>
+                  Sin repuestos agregados. Haz clic en &quot;+ Agregar repuesto&quot; para buscar en el inventario.
+                </p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      {["Repuesto","Código","Cant.","Precio Unit.","Subtotal",""].map(h => (
+                        <th key={h} style={{ padding: "6px 8px", textAlign: "left", color: C.muted, fontSize: 11, fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repuestosItems.map(r => (
+                      <tr key={r.inventario_id} style={{ borderBottom: `1px solid ${C.border}22` }}>
+                        <td style={{ padding: "8px 8px", color: C.text, fontWeight: 600 }}>{r.nombre}</td>
+                        <td style={{ padding: "8px 8px", color: C.muted, fontFamily: "monospace", fontSize: 11 }}>{r.codigo || "—"}</td>
+                        <td style={{ padding: "8px 8px" }}>
+                          {diagnostico?.terminado ? (
+                            <span style={{ color: C.text }}>{r.cantidad}</span>
+                          ) : (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <button onClick={() => actualizarCantidad(r.inventario_id, r.cantidad - 1)}
+                                style={{ background: C.border, color: C.text, border: "none", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontWeight: 700 }}>−</button>
+                              <span style={{ color: C.text, minWidth: 24, textAlign: "center" }}>{r.cantidad}</span>
+                              <button onClick={() => actualizarCantidad(r.inventario_id, Math.min(r.cantidad + 1, r.stock_disponible))}
+                                disabled={r.cantidad >= r.stock_disponible}
+                                style={{ background: C.border, color: r.cantidad >= r.stock_disponible ? C.muted : C.text,
+                                  border: "none", borderRadius: 4, width: 24, height: 24,
+                                  cursor: r.cantidad >= r.stock_disponible ? "not-allowed" : "pointer", fontWeight: 700 }}>+</button>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: "8px 8px", color: C.muted }}>{fmtDinero(r.precio_unitario)}</td>
+                        <td style={{ padding: "8px 8px", color: C.yellow, fontWeight: 700 }}>{fmtDinero(r.subtotal)}</td>
+                        <td style={{ padding: "8px 8px" }}>
+                          {!diagnostico?.terminado && (
+                            <button onClick={() => actualizarCantidad(r.inventario_id, 0)}
+                              style={{ background: "none", border: "none", color: C.red, cursor: "pointer", fontSize: 14 }}>🗑️</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                  <tfoot>
+                    <tr style={{ borderTop: `2px solid ${C.border}` }}>
+                      <td colSpan={4} style={{ padding: "8px 8px", textAlign: "right", color: C.muted, fontWeight: 600, fontSize: 12 }}>
+                        Total repuestos:
+                      </td>
+                      <td style={{ padding: "8px 8px", color: C.yellow, fontWeight: 800, fontSize: 15 }}>
+                        {fmtDinero(totalRepuestos)}
+                      </td>
+                      <td />
+                    </tr>
+                  </tfoot>
+                </table>
+              )}
+            </div>
+
+            {/* Modal: búsqueda de inventario */}
+            {showInvPanel && (
+              <div style={{
+                position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)",
+                display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000,
+              }}>
+                <div style={{
+                  background: C.card, borderRadius: 14, padding: 24,
+                  width: "min(680px, 95vw)", maxHeight: "80vh",
+                  display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.5)",
+                }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                    <h3 style={{ margin: 0, color: C.text, fontSize: 16, fontWeight: 800 }}>🔩 Buscar repuesto en inventario</h3>
+                    <button onClick={() => setShowInvPanel(false)}
+                      style={{ background: "none", border: "none", color: C.muted, fontSize: 20, cursor: "pointer" }}>✕</button>
+                  </div>
+
+                  <input
+                    autoFocus
+                    type="text"
+                    value={busqInv}
+                    onChange={e => setBusqInv(e.target.value)}
+                    placeholder="Buscar por nombre, código o categoría..."
+                    style={{ ...inputStyle, marginBottom: 12, fontSize: 14 }}
+                  />
+
+                  <div style={{ overflowY: "auto", flex: 1 }}>
+                    {loadingInv ? (
+                      <p style={{ color: C.muted, textAlign: "center", padding: 20 }}>Cargando inventario...</p>
+                    ) : inventarioFiltrado.length === 0 ? (
+                      <p style={{ color: C.muted, textAlign: "center", padding: 20 }}>Sin resultados</p>
+                    ) : (
+                      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                        <thead>
+                          <tr style={{ background: "#0f172a" }}>
+                            {["Repuesto","Código","Categoría","Stock","Precio",""].map(h => (
+                              <th key={h} style={{ padding: "8px 10px", textAlign: "left", color: C.muted, fontSize: 11, fontWeight: 600 }}>{h}</th>
+                            ))}
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {inventarioFiltrado.map(item => {
+                            const yaAgregado = repuestosItems.find(r => r.inventario_id === item.id);
+                            const sinStock   = item.stock <= 0;
+                            return (
+                              <tr key={item.id}
+                                style={{ borderBottom: `1px solid ${C.border}22`,
+                                  background: yaAgregado ? C.blue + "11" : "transparent" }}
+                              >
+                                <td style={{ padding: "9px 10px", color: C.text, fontWeight: 600 }}>{item.name}</td>
+                                <td style={{ padding: "9px 10px", color: C.muted, fontFamily: "monospace", fontSize: 11 }}>{item.code || "—"}</td>
+                                <td style={{ padding: "9px 10px", color: C.muted }}>{item.categoria || "—"}</td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  <span style={{
+                                    color: sinStock ? C.red : item.stock <= 5 ? C.yellow : C.green,
+                                    fontWeight: 700,
+                                  }}>
+                                    {sinStock ? "Sin stock" : `${item.stock} uds`}
+                                  </span>
+                                </td>
+                                <td style={{ padding: "9px 10px", color: C.yellow }}>{fmtDinero(item.price)}</td>
+                                <td style={{ padding: "9px 10px" }}>
+                                  <button
+                                    onClick={() => { agregarRepuesto(item); }}
+                                    disabled={sinStock}
+                                    style={{
+                                      background: yaAgregado ? C.green + "22" : C.blue,
+                                      color: yaAgregado ? C.green : "#fff",
+                                      border: yaAgregado ? `1px solid ${C.green}` : "none",
+                                      borderRadius: 6, padding: "5px 10px",
+                                      fontWeight: 700, fontSize: 12,
+                                      cursor: sinStock ? "not-allowed" : "pointer",
+                                      opacity: sinStock ? 0.5 : 1,
+                                    }}
+                                  >
+                                    {yaAgregado ? "✓ Agregado (+1)" : sinStock ? "Sin stock" : "+ Agregar"}
+                                  </button>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
+
+                  <div style={{ paddingTop: 12, borderTop: `1px solid ${C.border}`, marginTop: 12, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 13, color: C.muted }}>
+                      {repuestosItems.length} repuesto(s) seleccionado(s) — Total: <strong style={{ color: C.yellow }}>{fmtDinero(totalRepuestos)}</strong>
+                    </span>
+                    <button onClick={() => setShowInvPanel(false)}
+                      style={{ background: C.green, color: "#fff", border: "none", borderRadius: 8,
+                        padding: "9px 20px", fontWeight: 700, fontSize: 14, cursor: "pointer" }}>
+                      ✅ Confirmar selección
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Tiempo estimado */}
             <div style={{ marginBottom: 18 }}>
@@ -623,8 +886,56 @@ export default function DiagnosticoPage() {
             )}
 
             {diagnostico?.terminado && (
-              <div style={{ background: C.purple + "22", border: `1px solid ${C.purple}55`, borderRadius: 8, padding: "12px 16px", color: C.purple, fontSize: 13, fontWeight: 600 }}>
+              <div style={{ background: C.purple + "22", border: `1px solid ${C.purple}55`, borderRadius: 8, padding: "12px 16px", color: C.purple, fontSize: 13, fontWeight: 600, marginBottom: 12 }}>
                 ✅ Este diagnóstico ya fue cerrado y enviado para aprobación.
+              </div>
+            )}
+
+            {/* Botón Generar Cotización (disponible cuando hay diagnóstico guardado) */}
+            {diagnostico?.id && (
+              <div style={{ marginTop: 12 }}>
+                <button
+                  onClick={async () => {
+                    // Generar/actualizar cotización con los datos actuales y navegar
+                    try {
+                      const res = await fetch(`${API}/cotizaciones/diagnostico`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({
+                          diagnostico_id:      diagnostico.id,
+                          mano_obra:           parseFloat(manoObra) || 0,
+                          repuestos:           totalRepuestos,
+                          total:               total,
+                          tiempo_estimado:     tiempoEst,
+                          mano_de_obra_detalle: moDetalle,
+                          notas:               notas,
+                          items_detalle:       repuestosItems,
+                          usuario_id:          usuario.id,
+                          usuario_nombre:      usuario.nombre || usuario.name,
+                        }),
+                      });
+                      const data = await res.json();
+                      if (data?.id) {
+                        router.push(`/cotizacion/${data.id}`);
+                      } else {
+                        alert("Error al generar cotización: " + (data?.error || "Sin ID"));
+                      }
+                    } catch (e: any) {
+                      alert("Error: " + e.message);
+                    }
+                  }}
+                  style={{
+                    background: "linear-gradient(135deg, #7c3aed, #a855f7)",
+                    color: "#fff", border: "none", borderRadius: 8,
+                    padding: "11px 22px", fontWeight: 800, fontSize: 14,
+                    cursor: "pointer", boxShadow: "0 4px 14px rgba(124,58,237,0.4)",
+                  }}
+                >
+                  📄 Ver / Generar Cotización
+                </button>
+                <p style={{ margin: "6px 0 0", fontSize: 11, color: C.muted }}>
+                  Genera una cotización formal con el diagnóstico, repuestos e inspección del vehículo.
+                </p>
               </div>
             )}
 

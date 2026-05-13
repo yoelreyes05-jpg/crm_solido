@@ -7,6 +7,16 @@ import { API_URL as API } from "@/config";
 interface ZonaDanio { zona: string; tipo: string; }
 interface Foto      { data: string; label: string; }
 
+// Slots fijos de fotos del vehículo
+const FOTO_SLOTS = [
+  { key: "frente",         label: "📷 Frente",           icon: "🚗" },
+  { key: "trasero",        label: "📷 Trasero",           icon: "🔙" },
+  { key: "lateral_izq",   label: "📷 Lateral Izquierdo", icon: "◀️" },
+  { key: "lateral_der",   label: "📷 Lateral Derecho",   icon: "▶️" },
+] as const;
+type FotoSlotKey = typeof FOTO_SLOTS[number]["key"];
+type FotosSlots = Record<FotoSlotKey, string | null>;
+
 const CONDICION_OPTIONS = ["Excelente", "Buena", "Regular", "Mala"];
 const NIVEL_LABELS = ["Vacío", "¼", "½", "¾", "Lleno"];
 
@@ -60,7 +70,12 @@ export default function InspeccionPage() {
   const [vidrios, setVidrios]         = useState("");
   const [llantas, setLlantas]         = useState("");
   const [pintura, setPintura]         = useState("");
-  const [fotos, setFotos]             = useState<Foto[]>([]);
+  // 4 slots fijos de fotos
+  const [fotosSlots, setFotosSlots]   = useState<FotosSlots>({
+    frente: null, trasero: null, lateral_izq: null, lateral_der: null,
+  });
+  // compatibilidad legacy: fotos adicionales libres
+  const [fotosExtra, setFotosExtra]   = useState<Foto[]>([]);
   const [observaciones, setObservaciones] = useState("");
 
   // Checklist
@@ -100,7 +115,20 @@ export default function InspeccionPage() {
             setVidrios(ins.estado_vidrios || "");
             setLlantas(ins.estado_llantas || "");
             setPintura(ins.estado_pintura || "");
-            setFotos(ins.fotos || []);
+            // Cargar fotos: si tiene fotos_slots (nuevo formato) úsalas, si no recuperar del array legacy
+            if (ins.fotos_slots) {
+              setFotosSlots(ins.fotos_slots);
+            } else if (Array.isArray(ins.fotos) && ins.fotos.length > 0) {
+              // Mapear fotos legacy al nuevo formato de slots por posición
+              const slotKeys: FotoSlotKey[] = ["frente","trasero","lateral_izq","lateral_der"];
+              const newSlots: FotosSlots = { frente: null, trasero: null, lateral_izq: null, lateral_der: null };
+              ins.fotos.forEach((f: Foto, i: number) => {
+                if (i < slotKeys.length) newSlots[slotKeys[i]] = f.data;
+              });
+              setFotosSlots(newSlots);
+              // fotos extra si había más de 4
+              if (ins.fotos.length > 4) setFotosExtra(ins.fotos.slice(4));
+            }
             setObservaciones(ins.observaciones || "");
             setOtrosAccesorios(ins.otros_accesorios || "");
             if (ins.radio_pantalla !== undefined) {
@@ -149,14 +177,25 @@ export default function InspeccionPage() {
     setFirmada(false);
   };
 
-  // ── Fotos ────────────────────────────────────────────────────────────────
-  const handleFoto = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // ── Fotos (4 slots fijos) ─────────────────────────────────────────────────
+  const handleFotoSlot = (slotKey: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      setFotosSlots(prev => ({ ...prev, [slotKey]: ev.target!.result as string }));
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ""; // reset para poder volver a seleccionar el mismo archivo
+  };
+
+  const handleFotoExtra = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
     files.forEach(file => {
       const reader = new FileReader();
       reader.onload = (ev) => {
-        const label = file.name.replace(/\.[^/.]+$/, "") || "Foto";
-        setFotos(prev => [...prev, { data: ev.target!.result as string, label }]);
+        const label = file.name.replace(/\.[^/.]+$/, "") || "Foto adicional";
+        setFotosExtra(prev => [...prev, { data: ev.target!.result as string, label }]);
       };
       reader.readAsDataURL(file);
     });
@@ -196,7 +235,8 @@ export default function InspeccionPage() {
         estado_vidrios:     vidrios,
         estado_llantas:     llantas,
         estado_pintura:     pintura,
-        fotos, firma_cliente: firma, observaciones,
+        fotos_slots:        fotosSlots,
+        fotos:              fotosExtra, firma_cliente: firma, observaciones,
         otros_accesorios:   otrosAccesorios,
         ...checks,
         creado_por_id:      usuario.id   || null,
@@ -418,41 +458,103 @@ export default function InspeccionPage() {
         </div>
       </div>
 
-      {/* SECCIÓN 4: Fotos */}
+      {/* SECCIÓN 4: Fotos — 4 slots fijos */}
       <div style={sty.card}>
-        <div style={sty.sectionTitle}>📷 Evidencia Fotográfica</div>
-        <div style={{ marginBottom: 12 }}>
-          <label style={{
-            display: "inline-block", padding: "9px 18px",
-            background: "linear-gradient(135deg,#1d4ed8,#3b82f6)",
-            color: "#fff", borderRadius: 9, cursor: "pointer", fontSize: 13, fontWeight: 700
-          }}>
-            + Agregar fotos
-            <input type="file" accept="image/*" multiple onChange={handleFoto} style={{ display: "none" }} />
-          </label>
-          <span style={{ marginLeft: 12, fontSize: 12, color: "#9ca3af" }}>
-            Toma fotos del frente, atrás, laterales y daños específicos
-          </span>
-        </div>
-        {fotos.length > 0 && (
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-            {fotos.map((f, i) => (
-              <div key={i} style={{ position: "relative", width: 120, height: 90 }}>
-                <img src={f.data} alt={f.label}
-                  style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
-                <button onClick={() => setFotos(prev => prev.filter((_, j) => j !== i))}
-                  style={{ position: "absolute", top: 3, right: 3, background: "#ef4444", border: "none", color: "#fff",
-                    width: 20, height: 20, borderRadius: "50%", cursor: "pointer", fontSize: 11, lineHeight: 1 }}>✕</button>
-                <div style={{ fontSize: 10, color: "#6b7280", marginTop: 3, textAlign: "center", overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                  {f.label}
+        <div style={sty.sectionTitle}>📷 Evidencia Fotográfica del Vehículo</div>
+        <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 14 }}>
+          Toma una foto por cada ángulo del vehículo. Haz clic en el slot o en la imagen para reemplazarla.
+        </p>
+
+        {/* 4 slots fijos */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 16 }}>
+          {FOTO_SLOTS.map(slot => {
+            const img = fotosSlots[slot.key];
+            return (
+              <div key={slot.key} style={{ position: "relative" }}>
+                <label style={{ cursor: "pointer", display: "block" }}>
+                  <div style={{
+                    width: "100%", aspectRatio: "4/3",
+                    border: img ? "2px solid #22c55e" : "2px dashed #d1d5db",
+                    borderRadius: 10, overflow: "hidden",
+                    background: img ? "#000" : "#f9fafb",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    position: "relative",
+                  }}>
+                    {img ? (
+                      <>
+                        <img src={img} alt={slot.label}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                        <div style={{
+                          position: "absolute", inset: 0, background: "rgba(0,0,0,0)",
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          opacity: 0, transition: "opacity 0.2s",
+                        }}
+                          onMouseEnter={e => (e.currentTarget.style.opacity = "1")}
+                          onMouseLeave={e => (e.currentTarget.style.opacity = "0")}
+                        >
+                          <span style={{ background: "rgba(0,0,0,0.7)", color: "#fff", padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
+                            🔄 Cambiar foto
+                          </span>
+                        </div>
+                      </>
+                    ) : (
+                      <div style={{ textAlign: "center", color: "#9ca3af" }}>
+                        <div style={{ fontSize: 28, marginBottom: 6 }}>{slot.icon}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>+ Agregar foto</div>
+                      </div>
+                    )}
+                  </div>
+                  <input type="file" accept="image/*"
+                    onChange={e => handleFotoSlot(slot.key, e)}
+                    style={{ display: "none" }} />
+                </label>
+                {/* Etiqueta y botón eliminar */}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 5 }}>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: img ? "#16a34a" : "#6b7280" }}>
+                    {img ? "✅ " : ""}{slot.label}
+                  </span>
+                  {img && (
+                    <button onClick={() => setFotosSlots(prev => ({ ...prev, [slot.key]: null }))}
+                      style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, padding: 0 }}>
+                      🗑️ Quitar
+                    </button>
+                  )}
                 </div>
               </div>
-            ))}
+            );
+          })}
+        </div>
+
+        {/* Fotos adicionales opcionales */}
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 12 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+            <span style={{ fontSize: 13, fontWeight: 600, color: "#6b7280" }}>📎 Fotos adicionales (daños específicos)</span>
+            <label style={{
+              padding: "5px 12px", background: "#f3f4f6", borderRadius: 7,
+              cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#374151"
+            }}>
+              + Agregar
+              <input type="file" accept="image/*" multiple onChange={handleFotoExtra} style={{ display: "none" }} />
+            </label>
           </div>
-        )}
-        {fotos.length === 0 && (
-          <p style={{ fontSize: 13, color: "#9ca3af" }}>Sin fotos agregadas aún.</p>
-        )}
+          {fotosExtra.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+              {fotosExtra.map((f, i) => (
+                <div key={i} style={{ position: "relative", width: 100, height: 75 }}>
+                  <img src={f.data} alt={f.label}
+                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 7, border: "1px solid #e5e7eb" }} />
+                  <button onClick={() => setFotosExtra(prev => prev.filter((_, j) => j !== i))}
+                    style={{ position: "absolute", top: 2, right: 2, background: "#ef4444", border: "none",
+                      color: "#fff", width: 18, height: 18, borderRadius: "50%", cursor: "pointer", fontSize: 10 }}>✕</button>
+                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, textAlign: "center",
+                    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
+                    {f.label}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       </div>
 
       {/* SECCIÓN 5: Observaciones */}

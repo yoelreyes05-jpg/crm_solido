@@ -924,20 +924,25 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 // 💰 COTIZACIONES (internas de diagnóstico)
 // =====================================================
 app.post("/cotizaciones/diagnostico", async (req, res) => {
-  const { diagnostico_id, mano_obra, repuestos, total, tiempo_estimado, mano_de_obra_detalle, notas, usuario_id, usuario_nombre } = req.body;
+  const {
+    diagnostico_id, mano_obra, repuestos, total, tiempo_estimado,
+    mano_de_obra_detalle, notas, usuario_id, usuario_nombre,
+    items_detalle,   // ← array de repuestos estructurados [{inventario_id, nombre, cantidad, precio_unitario, subtotal}]
+  } = req.body;
 
   const totalCalculado = Number(mano_obra || 0) + Number(repuestos || 0);
+  const itemsJSON = Array.isArray(items_detalle) ? items_detalle : [];
 
   const { data: exist } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).single();
   let result;
   if (exist) {
     const { data } = await supabase.from("cotizaciones")
-      .update({ mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas })
+      .update({ mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas, items_detalle: itemsJSON })
       .eq("diagnostico_id", diagnostico_id).select();
     result = data?.[0];
   } else {
     const { data } = await supabase.from("cotizaciones")
-      .insert([{ diagnostico_id, mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas }])
+      .insert([{ diagnostico_id, mano_obra, repuestos, total: totalCalculado, tiempo_estimado, notas, items_detalle: itemsJSON }])
       .select();
     result = data?.[0];
   }
@@ -946,7 +951,8 @@ app.post("/cotizaciones/diagnostico", async (req, res) => {
     .from("diagnosticos")
     .update({
       mano_de_obra_detalle: mano_de_obra_detalle || null,
-      costo_estimado: totalCalculado
+      costo_estimado: totalCalculado,
+      repuestos_items: itemsJSON,   // ← guardar también en el diagnóstico
     })
     .eq("id", diagnostico_id);
 
@@ -963,6 +969,54 @@ app.post("/cotizaciones/diagnostico", async (req, res) => {
   }
 
   res.json(result);
+});
+
+// GET /cotizaciones/:id — obtener cotización completa con diagnóstico, inspección, cliente y vehículo
+app.get("/cotizaciones/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: cot, error } = await supabase.from("cotizaciones").select("*").eq("id", id).single();
+    if (error || !cot) return res.status(404).json({ error: "Cotización no encontrada" });
+
+    // Cargar diagnóstico, cliente, vehículo e inspección en paralelo
+    const [{ data: diag }, { data: orden }] = await Promise.all([
+      supabase.from("diagnosticos").select("*").eq("id", cot.diagnostico_id).single(),
+      cot.diagnostico_id
+        ? supabase.from("diagnosticos").select("orden_id").eq("id", cot.diagnostico_id).single()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    let cliente = null, vehiculo = null, inspeccion = null;
+    if (diag) {
+      const [{ data: cli }, { data: veh }] = await Promise.all([
+        supabase.from("clientes").select("*").eq("id", diag.cliente_id).single(),
+        supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).single(),
+      ]);
+      cliente  = cli;
+      vehiculo = veh;
+
+      if (diag.orden_id) {
+        const { data: ins } = await supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", diag.orden_id).single();
+        inspeccion = ins || null;
+      }
+    }
+
+    res.json({ cotizacion: cot, diagnostico: diag, cliente, vehiculo, inspeccion });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /cotizaciones/por-diagnostico/:diagnostico_id — obtener cotización por diagnóstico
+app.get("/cotizaciones/por-diagnostico/:diagnostico_id", async (req, res) => {
+  try {
+    const { diagnostico_id } = req.params;
+    const { data: cot, error } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnostico_id).single();
+    if (error || !cot) return res.json(null);
+    res.json(cot);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 app.patch("/cotizaciones/:id/aprobar", async (req, res) => {
