@@ -48,7 +48,6 @@ interface Inspeccion {
   condicion_general?: string;
   observaciones?: string;
   firma_cliente?: string;
-  // checklist — nombres exactos de la tabla inspeccion_vehiculo
   radio_pantalla?: boolean;
   tapiceria_ok?: boolean;
   alfombras_ok?: boolean;
@@ -107,27 +106,41 @@ function fmtDinero(n: number): string {
 }
 
 const CHECKLIST_LABELS: { key: keyof Inspeccion; label: string }[] = [
-  { key: "luces_ok",          label: "Luces" },
-  { key: "espejos_ok",        label: "Espejos" },
-  { key: "radio_pantalla",    label: "Radio / Pantalla" },
-  { key: "tapiceria_ok",      label: "Tapiceria" },
-  { key: "alfombras_ok",      label: "Alfombras" },
-  { key: "bocina_ok",         label: "Bocina" },
-  { key: "gato_ok",           label: "Gato hidraulico" },
-  { key: "llanta_repuesto_ok",label: "Llanta repuesto" },
-  { key: "documentos_ok",     label: "Documentos" },
-  { key: "herramientas_ok",   label: "Herramientas" },
+  { key: "luces_ok",           label: "Luces" },
+  { key: "espejos_ok",         label: "Espejos" },
+  { key: "radio_pantalla",     label: "Radio / Pantalla" },
+  { key: "tapiceria_ok",       label: "Tapiceria" },
+  { key: "alfombras_ok",       label: "Alfombras" },
+  { key: "bocina_ok",          label: "Bocina" },
+  { key: "gato_ok",            label: "Gato hidraulico" },
+  { key: "llanta_repuesto_ok", label: "Llanta repuesto" },
+  { key: "documentos_ok",      label: "Documentos" },
+  { key: "herramientas_ok",    label: "Herramientas" },
 ];
 
-// ── Sub-componente: Campo de solo lectura ─────────────────────────────────────
-function CampoReadonly({ label, value, multiline }: { label: string; value?: string | number | null; multiline?: boolean }) {
+// ── Sub-componente ────────────────────────────────────────────────────────────
+function CampoReadonly({
+  label,
+  value,
+  multiline,
+}: {
+  label: string;
+  value?: string | number | null;
+  multiline?: boolean;
+}) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>{label}</div>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+        {label}
+      </div>
       {multiline ? (
-        <div style={{ fontSize: 12, color: "#e2e8f0", background: "#0f172a", borderRadius: 6, padding: "6px 10px", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>{value || "—"}</div>
+        <div style={{ fontSize: 12, color: "#e2e8f0", background: "#0f172a", borderRadius: 6, padding: "6px 10px", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+          {value || "—"}
+        </div>
       ) : (
-        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{value ?? "—"}</div>
+        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>
+          {value ?? "—"}
+        </div>
       )}
     </div>
   );
@@ -138,22 +151,22 @@ export default function DiagnosticoPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
 
-  const [orden,      setOrden]      = useState<OrdenDetalle | null>(null);
-  const [inspeccion, setInspeccion] = useState<Inspeccion | null>(null);
-  const [diagnostico,setDiagnostico]= useState<Diagnostico | null>(null);
-  const [loading,    setLoading]    = useState(true);
-  const [saving,     setSaving]     = useState(false);
-  const [msg,        setMsg]        = useState<Msg | null>(null);
-  const [inspecOpen, setInspecOpen] = useState(false);
+  const [orden,         setOrden]         = useState<OrdenDetalle | null>(null);
+  const [inspeccion,    setInspeccion]    = useState<Inspeccion | null>(null);
+  const [diagnostico,   setDiagnostico]   = useState<Diagnostico | null>(null);
+  const [loading,       setLoading]       = useState(true);
+  const [saving,        setSaving]        = useState(false);
+  const [msg,           setMsg]           = useState<Msg | null>(null);
+  const [inspecOpen,    setInspecOpen]    = useState(false);
   const [confirmCerrar, setConfirmCerrar] = useState(false);
-  const [exito,      setExito]      = useState(false);
+  const [exito,         setExito]         = useState(false);
 
   // Campos del formulario
-  const [desc,        setDesc]      = useState("");
-  const [manoObra,    setManoObra]  = useState("0");
-  const [tiempoEst,   setTiempoEst] = useState("");
-  const [moDetalle,   setMoDetalle] = useState("");
-  const [notas,       setNotas]     = useState("");
+  const [desc,      setDesc]      = useState("");
+  const [manoObra,  setManoObra]  = useState("0");
+  const [tiempoEst, setTiempoEst] = useState("");
+  const [moDetalle, setMoDetalle] = useState("");
+  const [notas,     setNotas]     = useState("");
 
   // Repuestos del inventario
   const [repuestosItems, setRepuestosItems] = useState<RepuestoSeleccionado[]>([]);
@@ -162,29 +175,22 @@ export default function DiagnosticoPage() {
   const [showInvPanel,   setShowInvPanel]   = useState(false);
   const [loadingInv,     setLoadingInv]     = useState(false);
 
- 
-// Total calculado
-const totalRepuestos = repuestosItems.reduce((s, r) => s + r.subtotal, 0);
-const total = (parseFloat(manoObra) || 0) + totalRepuestos;
+  // Total calculado
+  const totalRepuestos = repuestosItems.reduce((s, r) => s + r.subtotal, 0);
+  const total = (parseFloat(manoObra) || 0) + totalRepuestos;
 
-// Usuario logueado
-const [usuario, setUsuario] = useState<Record<string, any>>({});
-
-useEffect(() => {
-  if (typeof window !== "undefined") {
-    const data = localStorage.getItem("usuario");
-
-    if (data) {
-      setUsuario(JSON.parse(data));
+  // Usuario logueado (sin SSR mismatch)
+  const [usuario, setUsuario] = useState<Record<string, any>>({});
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      try {
+        const d = localStorage.getItem("usuario");
+        if (d) setUsuario(JSON.parse(d));
+      } catch (_e) {}
     }
-  }
-}, []);
+  }, []);
 
-
-
-
-
-  // ── Helpers de carga ─────────────────────────────────────────────────────
+  // ── Helpers ──────────────────────────────────────────────────────────────
   const aplicarDiagnostico = (diag: Diagnostico) => {
     setDiagnostico(diag);
     setDesc(diag.descripcion || "");
@@ -192,21 +198,19 @@ useEffect(() => {
     setTiempoEst(diag.tiempo_estimado || "");
     setMoDetalle(diag.mano_de_obra_detalle || "");
     setNotas(diag.notas || "");
-    // Cargar repuestos estructurados si existen
     if (Array.isArray((diag as any).repuestos_items) && (diag as any).repuestos_items.length > 0) {
       setRepuestosItems((diag as any).repuestos_items);
     }
   };
 
-  // Cargar inventario cuando se abre el panel
   const cargarInventario = async () => {
-    if (inventario.length > 0) return; // ya cargado
+    if (inventario.length > 0) return;
     setLoadingInv(true);
     try {
-      const res = await fetch(`${API}/inventario`);
+      const res  = await fetch(`${API}/inventario`);
       const data = await res.json();
       setInventario(Array.isArray(data) ? data : []);
-    } catch (_e) { /* silencioso */ }
+    } catch (_e) {}
     setLoadingInv(false);
   };
 
@@ -219,10 +223,10 @@ useEffect(() => {
     setRepuestosItems(prev => {
       const existe = prev.find(r => r.inventario_id === item.id);
       if (existe) {
-        // Incrementar cantidad si hay stock
-        return prev.map(r => r.inventario_id === item.id
-          ? { ...r, cantidad: Math.min(r.cantidad + 1, item.stock), subtotal: (r.cantidad + 1) * r.precio_unitario }
-          : r
+        return prev.map(r =>
+          r.inventario_id === item.id
+            ? { ...r, cantidad: Math.min(r.cantidad + 1, item.stock), subtotal: (r.cantidad + 1) * r.precio_unitario }
+            : r
         );
       }
       return [...prev, {
@@ -251,7 +255,12 @@ useEffect(() => {
 
   const inventarioFiltrado = inventario.filter(item => {
     const q = busqInv.toLowerCase();
-    return !q || item.name?.toLowerCase().includes(q) || item.code?.toLowerCase().includes(q) || item.categoria?.toLowerCase().includes(q);
+    return (
+      !q ||
+      item.name?.toLowerCase().includes(q) ||
+      item.code?.toLowerCase().includes(q) ||
+      item.categoria?.toLowerCase().includes(q)
+    );
   }).slice(0, 40);
 
   // ── Carga ─────────────────────────────────────────────────────────────────
@@ -264,10 +273,9 @@ useEffect(() => {
 
       if (rOrden.ok) {
         const data = await rOrden.json();
-        // GET /ordenes/:id retorna { orden, cliente, vehiculo, diagnostico, log, inspeccion }
-        const raw = data.orden  || data;
-        const cli = data.cliente || {};
-        const veh = data.vehiculo || {};
+        const raw  = data.orden    || data;
+        const cli  = data.cliente  || {};
+        const veh  = data.vehiculo || {};
         const o: OrdenDetalle = {
           ...raw,
           cliente_nombre:  cli.nombre  || raw.cliente_nombre  || "Sin cliente",
@@ -284,39 +292,31 @@ useEffect(() => {
         setOrden(o);
         const diag: Diagnostico | null = data.diagnostico || null;
         if (diag) aplicarDiagnostico(diag);
-
       } else {
-        // ── Fallback: el endpoint /ordenes/:id no existe en esta version del backend
-        // Usamos GET /ordenes (lista) que siempre ha existido, filtramos por id
         const [rLista, rDiags] = await Promise.all([
           fetch(`${API}/ordenes`),
           fetch(`${API}/diagnosticos`),
         ]);
-
         if (rLista.ok) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const lista: any[] = await rLista.json();
           const found = (Array.isArray(lista) ? lista : []).find(
-            o => String(o.id) === String(id)
+            (o: any) => String(o.id) === String(id)
           );
           if (!found) {
             setMsg({ tipo: "error", texto: `Orden #${id} no encontrada.` });
             setLoading(false);
             return;
           }
-          // GET /ordenes ya trae cliente_nombre, vehiculo_info, vehiculo_placa
           setOrden(found as OrdenDetalle);
         } else {
           setMsg({ tipo: "error", texto: `No se pudo cargar la orden #${id}.` });
           setLoading(false);
           return;
         }
-
         if (rDiags.ok) {
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
           const diags: any[] = await rDiags.json();
           const diag = (Array.isArray(diags) ? diags : []).find(
-            d => String(d.orden_id) === String(id)
+            (d: any) => String(d.orden_id) === String(id)
           ) as Diagnostico | undefined;
           if (diag) aplicarDiagnostico(diag);
         }
@@ -335,7 +335,7 @@ useEffect(() => {
 
   useEffect(() => { cargar(); }, [cargar]);
 
-  // ── Guardar borrador ──────────────────────────────────────────────────────
+  // ── Guardar ───────────────────────────────────────────────────────────────
   const guardar = async (cerrar = false) => {
     if (!desc.trim()) {
       setMsg({ tipo: "error", texto: "La descripcion de hallazgos es requerida." });
@@ -361,7 +361,6 @@ useEffect(() => {
       ...(cerrar ? { terminado: true } : {}),
     };
 
-    // Helper: forzar cambio de estado via PATCH directo
     const moverEstado = async (nuevoEstado: string) => {
       try {
         const r = await fetch(`${API}/ordenes/${id}`, {
@@ -369,7 +368,7 @@ useEffect(() => {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             estado:         nuevoEstado,
-            usuario_id:     usuario.id    || null,
+            usuario_id:     usuario.id     || null,
             usuario_nombre: usuario.nombre || usuario.name || "Tecnico",
           }),
         });
@@ -416,22 +415,14 @@ useEffect(() => {
         await moverEstado("DIAGNOSTICO");
         setMsg({ tipo: "ok", texto: "Borrador guardado correctamente." });
       }
-  } catch (e) {
-  const errorMessage =
-    e instanceof Error
-      ? e.message
-      : "Error al guardar diagnostico.";
-
-  setMsg({
-    tipo: "error",
-    texto: errorMessage,
-  });
+    } catch (e: any) {
+      setMsg({ tipo: "error", texto: e.message || "Error al guardar diagnostico." });
     } finally {
       setSaving(false);
     }
   };
 
-  // ── Estilos de inputs ─────────────────────────────────────────────────────
+  // ── Estilos ───────────────────────────────────────────────────────────────
   const labelStyle: React.CSSProperties = {
     display: "block", fontSize: 11, fontWeight: 700, color: C.muted,
     textTransform: "uppercase", marginBottom: 6, letterSpacing: 0.5,
@@ -459,21 +450,497 @@ useEffect(() => {
     );
   }
 
-  const tituloOrden = numero(orden.id, orden.numero_orden);
-  const vehiculoParts = [orden.vehiculo_marca, orden.vehiculo_modelo, orden.vehiculo_ano].filter(Boolean).join(" ");
-  const vehiculoStr = vehiculoParts || orden.vehiculo_info || "sin info";
+  const tituloOrden  = numero(orden.id, orden.numero_orden);
+  const partsArr     = [orden.vehiculo_marca, orden.vehiculo_modelo, orden.vehiculo_ano].filter(Boolean);
+  const vehiculoStr  = partsArr.length > 0 ? partsArr.join(" ") : (orden.vehiculo_info || "—");
 
-  // STUB: diagnostico minimo para depuracion
   return (
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, sans-serif" }}>
-      <div style={{ padding: 24 }}>
-        <h1 style={{ fontSize: 20, fontWeight: 800 }}>Diagnostico {tituloOrden}</h1>
-        <p style={{ color: C.muted }}>{orden.cliente_nombre} - {vehiculoStr}</p>
-        <p style={{ color: C.muted, fontSize: 12 }}>ID: {id}</p>
-        <button onClick={() => router.push("/taller")} style={{ marginTop: 16, padding: "8px 16px", background: C.blue, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer" }}>
-          Volver al taller
+
+      {/* Header */}
+      <div style={{ background: "#1e293b", borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+        <button
+          onClick={() => router.push("/taller")}
+          style={{ background: "transparent", color: C.muted, border: "none", cursor: "pointer", fontSize: 20, padding: 0 }}
+        >
+          {"←"}
         </button>
+        <div>
+          <h1 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>
+            Diagnostico — {tituloOrden}
+          </h1>
+          <p style={{ margin: "2px 0 0", fontSize: 12, color: C.muted }}>
+            {orden.cliente_nombre} {vehiculoStr !== "—" ? `· ${vehiculoStr}` : ""}
+            {orden.vehiculo_placa ? ` · ${orden.vehiculo_placa}` : ""}
+          </p>
+        </div>
       </div>
+
+      {/* Pantalla de exito */}
+      {exito && (
+        <div style={{ padding: 40, maxWidth: 600, margin: "60px auto", textAlign: "center" }}>
+          <div style={{ fontSize: 56, marginBottom: 16 }}>{"✅"}</div>
+          <h2 style={{ fontSize: 22, fontWeight: 800, color: C.green, margin: "0 0 12px" }}>
+            Diagnostico enviado para aprobacion
+          </h2>
+          <p style={{ color: C.muted, marginBottom: 24 }}>
+            El diagnostico de <strong>{tituloOrden}</strong> ha sido completado y esta esperando aprobacion del cliente.
+          </p>
+          <button
+            onClick={() => router.push("/taller")}
+            style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 10, padding: "12px 28px", fontSize: 15, fontWeight: 700, cursor: "pointer" }}
+          >
+            {"←"} Volver al taller
+          </button>
+        </div>
+      )}
+
+      {!exito && (
+        <div style={{ display: "grid", gridTemplateColumns: "360px 1fr", gap: 0, maxWidth: 1280, margin: "0 auto", minHeight: "calc(100vh - 65px)" }}>
+
+          {/* Panel izquierdo: inspeccion */}
+          <div style={{ borderRight: `1px solid ${C.border}`, padding: 20, overflowY: "auto" }}>
+            <button
+              onClick={() => setInspecOpen(p => !p)}
+              style={{
+                width: "100%", background: C.card, border: `1px solid ${C.border}`,
+                borderRadius: 8, padding: "10px 14px", color: C.text, fontWeight: 700,
+                fontSize: 14, cursor: "pointer", display: "flex", alignItems: "center",
+                justifyContent: "space-between", marginBottom: 12,
+              }}
+            >
+              <span>Inspeccion de Entrada</span>
+              <span style={{ color: C.muted }}>{inspecOpen ? "▲" : "▼"}</span>
+            </button>
+
+            {inspecOpen && (
+              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: 16, display: "flex", flexDirection: "column", gap: 12 }}>
+                {!inspeccion ? (
+                  <p style={{ color: C.muted, fontSize: 13, textAlign: "center" }}>Sin inspeccion registrada</p>
+                ) : (
+                  <React.Fragment>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                      <CampoReadonly
+                        label="KM entrada"
+                        value={inspeccion.km_entrada ? `${Number(inspeccion.km_entrada).toLocaleString()} km` : "—"}
+                      />
+                      <CampoReadonly
+                        label="Combustible"
+                        value={inspeccion.nivel_combustible != null ? `${inspeccion.nivel_combustible}%` : "—"}
+                      />
+                    </div>
+                    <CampoReadonly label="Condicion general" value={inspeccion.condicion_general || "—"} />
+
+                    <div>
+                      <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 8 }}>Checklist</div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                        {CHECKLIST_LABELS.map(({ key, label }) => {
+                          const val = inspeccion[key];
+                          const ok  = val === true || val === 1;
+                          return (
+                            <div key={String(key)} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
+                              <span style={{ color: ok ? C.green : C.red }}>{ok ? "✓" : "✗"}</span>
+                              <span style={{ color: C.muted }}>{label}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {inspeccion.observaciones && (
+                      <CampoReadonly label="Observaciones" value={inspeccion.observaciones} multiline />
+                    )}
+
+                    {inspeccion.firma_cliente && (
+                      <div>
+                        <div style={{ fontSize: 11, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>Firma del cliente</div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={inspeccion.firma_cliente}
+                          alt="Firma"
+                          style={{ maxWidth: "100%", borderRadius: 6, border: `1px solid ${C.border}`, background: "#fff" }}
+                        />
+                      </div>
+                    )}
+                  </React.Fragment>
+                )}
+              </div>
+            )}
+
+            {!inspecOpen && (
+              <p style={{ fontSize: 12, color: C.muted, textAlign: "center" }}>
+                Haz clic en el acordeon para ver la inspeccion
+              </p>
+            )}
+          </div>
+
+          {/* Panel derecho: formulario */}
+          <div style={{ padding: 24, overflowY: "auto" }}>
+            <h2 style={{ fontSize: 16, fontWeight: 700, margin: "0 0 20px", color: C.text }}>
+              Formulario de Diagnostico
+              {diagnostico && !diagnostico.terminado && (
+                <span style={{ marginLeft: 10, fontSize: 11, color: C.yellow, fontWeight: 600 }}>(borrador guardado)</span>
+              )}
+              {diagnostico?.terminado && (
+                <span style={{ marginLeft: 10, fontSize: 11, color: C.purple, fontWeight: 600 }}>(diagnostico cerrado)</span>
+              )}
+            </h2>
+
+            {/* Mensaje */}
+            {msg && (
+              <div style={{
+                background: msg.tipo === "ok" ? C.green + "22" : msg.tipo === "error" ? C.red + "22" : C.blue + "22",
+                border: `1px solid ${msg.tipo === "ok" ? C.green : msg.tipo === "error" ? C.red : C.blue}55`,
+                color: msg.tipo === "ok" ? C.green : msg.tipo === "error" ? C.red : C.blue,
+                borderRadius: 8, padding: "10px 14px", fontSize: 13, marginBottom: 16,
+              }}>
+                {msg.tipo === "ok" ? "OK: " : msg.tipo === "error" ? "Error: " : "Info: "}
+                {msg.texto}
+              </div>
+            )}
+
+            {/* Descripcion */}
+            <div style={{ marginBottom: 18 }}>
+              <label style={labelStyle}>
+                Descripcion de hallazgos tecnicos <span style={{ color: C.red }}>*</span>
+              </label>
+              <textarea
+                value={desc}
+                onChange={e => setDesc(e.target.value)}
+                disabled={!!diagnostico?.terminado}
+                rows={5}
+                placeholder="Describe detalladamente los hallazgos tecnicos encontrados..."
+                style={{ ...inputStyle, resize: "vertical", height: 120 }}
+              />
+            </div>
+
+            {/* Mano de obra + Total */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+              <div>
+                <label style={labelStyle}>Mano de obra (RD$)</label>
+                <input
+                  type="number"
+                  min={0}
+                  step={0.01}
+                  value={manoObra}
+                  onChange={e => setManoObra(e.target.value)}
+                  disabled={!!diagnostico?.terminado}
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Total estimado (calculado)</label>
+                <input
+                  type="text"
+                  readOnly
+                  value={fmtDinero(total)}
+                  style={{ ...inputStyle, background: "#0f172a", color: C.green, fontWeight: 700, cursor: "default" }}
+                />
+              </div>
+            </div>
+
+            {/* Repuestos del inventario */}
+            <div style={{ background: "#162032", border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 18 }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Repuestos del Inventario</div>
+                  <div style={{ fontSize: 12, color: C.muted, marginTop: 2 }}>
+                    Total repuestos: <strong style={{ color: C.yellow }}>{fmtDinero(totalRepuestos)}</strong>
+                  </div>
+                </div>
+                {!diagnostico?.terminado && (
+                  <button
+                    onClick={abrirPanelInventario}
+                    style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 8, padding: "8px 14px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                  >
+                    + Agregar repuesto
+                  </button>
+                )}
+              </div>
+
+              {repuestosItems.length === 0 ? (
+                <p style={{ fontSize: 13, color: C.muted, textAlign: "center", padding: "12px 0" }}>
+                  Sin repuestos agregados. Haz clic en "+ Agregar repuesto" para buscar en el inventario.
+                </p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      {["Repuesto", "Codigo", "Cant.", "Precio Unit.", "Subtotal", ""].map(h => (
+                        <th key={h} style={{ padding: "6px 8px", textAlign: "left", color: C.muted, fontSize: 11, fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {repuestosItems.map(r => (
+                      <tr key={r.inventario_id} style={{ borderBottom: `1px solid ${C.border}22` }}>
+                        <td style={{ padding: "8px 8px", color: C.text, fontWeight: 600 }}>{r.nombre}</td>
+                        <td style={{ padding: "8px 8px", color: C.muted, fontFamily: "monospace", fontSize: 11 }}>{r.codigo || "—"}</td>
+                        <td style={{ padding: "8px 8px" }}>
+                          {diagnostico?.terminado ? (
+                            <span style={{ color: C.text }}>{r.cantidad}</span>
+                          ) : (
+                            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                              <button
+                                onClick={() => actualizarCantidad(r.inventario_id, r.cantidad - 1)}
+                                style={{ background: C.border, color: C.text, border: "none", borderRadius: 4, width: 24, height: 24, cursor: "pointer", fontWeight: 700 }}
+                              >
+                                {"-"}
+                              </button>
+                              <span style={{ color: C.text, minWidth: 24, textAlign: "center" }}>{r.cantidad}</span>
+                              <button
+                                onClick={() => actualizarCantidad(r.inventario_id, Math.min(r.cantidad + 1, r.stock_disponible))}
+                                disabled={r.cantidad >= r.stock_disponible}
+                                style={{ background: C.border, color: r.cantidad >= r.stock_disponible ? C.muted : C.text, border: "none", borderRadius: 4, width: 24, height: 24, cursor: r.cantidad >= r.stock_disponible ? "not-allowed" : "pointer", fontWeight: 700 }}
+                              >
+                                {"+"}
+                              </button>
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ padding: "8px 8px", color: C.muted }}>{fmtDinero(r.precio_unitario)}</td>
+                        <td style={{ padding: "8px 8px", color: C.yellow, fontWeight: 700 }}>{fmtDinero(r.subtotal)}</td>
+                        <td style={{ padding: "8px 8px" }}>
+                          {!diagnostico?.terminado && (
+                            <button
+                              onClick={() => actualizarCantidad(r.inventario_id, 0)}
+                              style={{ background: "transparent", color: C.red, border: "none", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}
+                            >
+                              {"✕"}
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            {/* Trabajos a realizar */}
+            <div style={{ marginBottom: 18 }}>
+              <label style={labelStyle}>Trabajos a realizar (uno por linea)</label>
+              <textarea
+                value={moDetalle}
+                onChange={e => setMoDetalle(e.target.value)}
+                disabled={!!diagnostico?.terminado}
+                rows={4}
+                placeholder={"Cambio de aceite y filtro\nAlineacion y balanceo\nRevision de frenos"}
+                style={{ ...inputStyle, resize: "vertical" }}
+              />
+            </div>
+
+            {/* Tiempo + Notas */}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>
+              <div>
+                <label style={labelStyle}>Tiempo estimado</label>
+                <input
+                  type="text"
+                  value={tiempoEst}
+                  onChange={e => setTiempoEst(e.target.value)}
+                  disabled={!!diagnostico?.terminado}
+                  placeholder="Ej: 2-3 horas"
+                  style={inputStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Notas internas</label>
+                <input
+                  type="text"
+                  value={notas}
+                  onChange={e => setNotas(e.target.value)}
+                  disabled={!!diagnostico?.terminado}
+                  placeholder="Observaciones adicionales..."
+                  style={inputStyle}
+                />
+              </div>
+            </div>
+
+            {/* Botones de accion */}
+            {!diagnostico?.terminado && (
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <button
+                  onClick={() => guardar(false)}
+                  disabled={saving}
+                  style={{
+                    flex: 1, minWidth: 140, padding: "12px 20px",
+                    background: C.card, border: `1px solid ${C.border}`,
+                    borderRadius: 10, color: C.text, fontWeight: 700,
+                    fontSize: 14, cursor: saving ? "not-allowed" : "pointer",
+                    opacity: saving ? 0.7 : 1,
+                  }}
+                >
+                  {saving ? "Guardando..." : "Guardar borrador"}
+                </button>
+                <button
+                  onClick={() => setConfirmCerrar(true)}
+                  disabled={saving || !desc.trim()}
+                  style={{
+                    flex: 1, minWidth: 180, padding: "12px 20px",
+                    background: saving || !desc.trim() ? C.muted : C.blue,
+                    border: "none", borderRadius: 10, color: "#fff",
+                    fontWeight: 800, fontSize: 14,
+                    cursor: saving || !desc.trim() ? "not-allowed" : "pointer",
+                  }}
+                >
+                  Cerrar diagnostico
+                </button>
+              </div>
+            )}
+
+            {/* Boton cotizacion */}
+            {diagnostico?.id && (
+              <div style={{ marginTop: 16, textAlign: "right" }}>
+                <button
+                  onClick={async () => {
+                    try {
+                      const r = await fetch(`${API}/cotizaciones/por-diagnostico/${diagnostico.id}`);
+                      const existing = await r.json();
+                      if (existing?.id) { router.push(`/cotizacion/${existing.id}`); return; }
+                      const bodyObj = {
+                        diagnostico_id: diagnostico.id,
+                        mano_obra:      parseFloat(manoObra) || 0,
+                        repuestos:      totalRepuestos,
+                        total,
+                        tiempo_estimado: tiempoEst,
+                        notas,
+                        items_detalle:  repuestosItems,
+                      };
+                      const res2  = await fetch(`${API}/cotizaciones/diagnostico`, {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify(bodyObj),
+                      });
+                      const data2 = await res2.json();
+                      if (data2?.cotizacion?.id) router.push(`/cotizacion/${data2.cotizacion.id}`);
+                      else if (data2?.id) router.push(`/cotizacion/${data2.id}`);
+                    } catch (_e) {
+                      setMsg({ tipo: "error", texto: "No se pudo generar la cotizacion." });
+                    }
+                  }}
+                  style={{
+                    background: "#0f172a", color: C.blue,
+                    border: `1px solid ${C.blue}`, borderRadius: 8,
+                    padding: "8px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer",
+                  }}
+                >
+                  Ver / Generar Cotizacion
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Modal: buscar en inventario */}
+      {showInvPanel && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ background: C.card, borderRadius: 14, padding: 24, width: "min(600px, 95vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.text }}>Buscar en Inventario</h3>
+              <button
+                onClick={() => setShowInvPanel(false)}
+                style={{ background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer", lineHeight: 1 }}
+              >
+                {"✕"}
+              </button>
+            </div>
+            <input
+              type="text"
+              value={busqInv}
+              onChange={e => setBusqInv(e.target.value)}
+              placeholder="Buscar por nombre, codigo o categoria..."
+              style={{ width: "100%", padding: "10px 12px", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, color: C.text, fontSize: 13, marginBottom: 14, boxSizing: "border-box" }}
+              autoFocus
+            />
+            <div style={{ overflowY: "auto", flex: 1 }}>
+              {loadingInv ? (
+                <p style={{ color: C.muted, textAlign: "center", padding: 20 }}>Cargando inventario...</p>
+              ) : inventarioFiltrado.length === 0 ? (
+                <p style={{ color: C.muted, textAlign: "center", padding: 20 }}>Sin resultados</p>
+              ) : (
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ borderBottom: `1px solid ${C.border}` }}>
+                      {["Nombre", "Codigo", "Stock", "Precio", ""].map(h => (
+                        <th key={h} style={{ padding: "6px 8px", textAlign: "left", color: C.muted, fontSize: 11, fontWeight: 600 }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {inventarioFiltrado.map(item => {
+                      const stock       = item.stock ?? 0;
+                      const stockColor  = stock === 0 ? C.red : stock <= 3 ? C.yellow : C.green;
+                      const yaAgregado  = repuestosItems.find(r => r.inventario_id === item.id);
+                      return (
+                        <tr key={item.id} style={{ borderBottom: `1px solid ${C.border}22` }}>
+                          <td style={{ padding: "8px 8px", color: C.text, fontWeight: 600 }}>{item.name}</td>
+                          <td style={{ padding: "8px 8px", color: C.muted, fontSize: 11 }}>{item.code || "—"}</td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <span style={{ color: stockColor, fontWeight: 700 }}>{stock}</span>
+                          </td>
+                          <td style={{ padding: "8px 8px", color: C.yellow }}>{fmtDinero(item.price)}</td>
+                          <td style={{ padding: "8px 8px" }}>
+                            <button
+                              onClick={() => agregarRepuesto(item)}
+                              disabled={stock === 0}
+                              style={{
+                                background: stock === 0 ? C.muted : yaAgregado ? C.green : C.blue,
+                                color: "#fff", border: "none", borderRadius: 6,
+                                padding: "5px 12px", fontSize: 12, fontWeight: 700,
+                                cursor: stock === 0 ? "not-allowed" : "pointer",
+                              }}
+                            >
+                              {stock === 0 ? "Sin stock" : yaAgregado ? `Agregado (${yaAgregado.cantidad})` : "+ Agregar"}
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            <div style={{ marginTop: 16, textAlign: "right" }}>
+              <button
+                onClick={() => setShowInvPanel(false)}
+                style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 700, cursor: "pointer" }}
+              >
+                Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: confirmar cerrar diagnostico */}
+      {confirmCerrar && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ background: C.card, borderRadius: 14, padding: 28, width: "min(420px, 95vw)", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 18, color: C.text }}>Cerrar diagnostico</h3>
+            <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>
+              Al cerrar el diagnostico se enviara para aprobacion del cliente y no podras editarlo mas.
+              Confirmas que el diagnostico esta completo?
+            </p>
+            <div style={{ display: "flex", gap: 12 }}>
+              <button
+                onClick={() => setConfirmCerrar(false)}
+                style={{ flex: 1, padding: "11px 0", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.text, fontWeight: 700, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => guardar(true)}
+                disabled={saving}
+                style={{ flex: 1, padding: "11px 0", background: C.blue, border: "none", borderRadius: 10, color: "#fff", fontWeight: 800, cursor: saving ? "not-allowed" : "pointer", opacity: saving ? 0.7 : 1 }}
+              >
+                {saving ? "Guardando..." : "Si, cerrar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }

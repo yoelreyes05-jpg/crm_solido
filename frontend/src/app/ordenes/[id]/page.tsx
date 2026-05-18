@@ -740,6 +740,8 @@ export default function OrdenDetallePage() {
               <p style={{ margin:"0 0 3px", color:"#6b7280", fontSize:13 }}>✉️  {cliente.email || "—"}</p>
               {cliente.cedula && <p style={{ margin:0, color:"#6b7280", fontSize:13 }}>🪪 {cliente.cedula}</p>}
             </>
+          ) : orden.cliente_nombre ? (
+            <p style={{ margin:0, fontWeight:700, fontSize:15 }}>{orden.cliente_nombre}</p>
           ) : <p style={{ color:"#9ca3af", margin:0 }}>Sin cliente registrado</p>}
         </div>
         <div style={card}>
@@ -752,6 +754,15 @@ export default function OrdenDetallePage() {
               </p>
               <p style={{ margin:"0 0 3px", color:"#6b7280", fontSize:13 }}>🎨 Color: {vehiculo.color || "—"}</p>
               {vehiculo.vin && <p style={{ margin:0, color:"#6b7280", fontSize:13 }}>VIN: {vehiculo.vin}</p>}
+            </>
+          ) : (orden.vehiculo_info && orden.vehiculo_info !== "—") ? (
+            <>
+              <p style={{ margin:"0 0 4px", fontWeight:700, fontSize:15 }}>{orden.vehiculo_info}</p>
+              {orden.vehiculo_placa && (
+                <p style={{ margin:0, color:"#6b7280", fontSize:13 }}>
+                  Placa: <strong style={{ color:"#111", fontFamily:"monospace" }}>{orden.vehiculo_placa}</strong>
+                </p>
+              )}
             </>
           ) : <p style={{ color:"#9ca3af", margin:0 }}>Sin vehículo</p>}
         </div>
