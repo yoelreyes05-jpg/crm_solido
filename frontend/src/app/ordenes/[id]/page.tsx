@@ -244,6 +244,18 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
       </table>
     </div>` : "";
 
+  // ── Fallbacks: si cliente/vehiculo no vino como objeto, usar campos planos de la orden
+  const clienteNombre  = cliente?.nombre   || orden.cliente_nombre  || "Sin nombre";
+  const clienteTel     = cliente?.telefono || orden.cliente_telefono || "—";
+  const clienteEmail   = cliente?.email    || orden.cliente_email    || "—";
+  const clienteCedula  = cliente?.cedula   || orden.cliente_cedula   || null;
+  const vMarca  = vehiculo?.marca  || orden.vehiculo_marca  || "";
+  const vModelo = vehiculo?.modelo || orden.vehiculo_modelo || "";
+  const vAno    = vehiculo?.ano    || orden.vehiculo_ano    || "";
+  const vPlaca  = vehiculo?.placa  || orden.vehiculo_placa  || "N/A";
+  const vColor  = vehiculo?.color  || orden.vehiculo_color  || "—";
+  const vVin    = vehiculo?.vin    || orden.vehiculo_vin    || null;
+
   const html = `<!DOCTYPE html>
 <html lang="es">
 <head>
@@ -310,17 +322,17 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 <div class="info-grid">
   <div class="info-box">
     <div class="info-box-title">👤 Cliente</div>
-    <div class="info-row"><strong>${cliente?.nombre||"Particular"}</strong></div>
-    <div class="info-row">📞 ${cliente?.telefono||"—"}</div>
-    <div class="info-row">✉️ ${cliente?.email||"—"}</div>
-    ${cliente?.cedula ? `<div class="info-row">🪪 ${cliente.cedula}</div>` : ""}
+    <div class="info-row"><strong>${clienteNombre}</strong></div>
+    <div class="info-row">📞 ${clienteTel}</div>
+    <div class="info-row">✉️ ${clienteEmail}</div>
+    ${clienteCedula ? `<div class="info-row">🪪 ${clienteCedula}</div>` : ""}
   </div>
   <div class="info-box">
     <div class="info-box-title">🚗 Vehículo</div>
-    <div class="info-row"><strong>${vehiculo?.marca||""} ${vehiculo?.modelo||""} ${vehiculo?.ano||""}</strong></div>
-    <div class="info-row">🪪 Placa: <strong style="font-family:monospace">${vehiculo?.placa||"N/A"}</strong></div>
-    <div class="info-row">🎨 Color: ${vehiculo?.color||"—"}</div>
-    ${vehiculo?.vin ? `<div class="info-row">VIN: ${vehiculo.vin}</div>` : ""}
+    <div class="info-row"><strong>${vMarca} ${vModelo} ${vAno}</strong></div>
+    <div class="info-row">🪪 Placa: <strong style="font-family:monospace">${vPlaca}</strong></div>
+    <div class="info-row">🎨 Color: ${vColor}</div>
+    ${vVin ? `<div class="info-row">VIN: ${vVin}</div>` : ""}
   </div>
 </div>
 
@@ -474,7 +486,21 @@ export default function OrdenDetallePage() {
       if (res.ok) {
         const json = await res.json();
         if (json?.orden) {
-          setData(json);
+          let finalData: any = { ...json };
+          // Si el diagnóstico no vino en la respuesta principal, buscarlo por separado
+          if (!json.diagnostico) {
+            try {
+              const diagRes = await fetch(`${API}/diagnosticos?orden_id=${id}`).then(r => r.ok ? r.json() : null).catch(() => null);
+              let diag: any = null;
+              if (Array.isArray(diagRes) && diagRes.length > 0) {
+                diag = diagRes.find((d: any) => String(d.orden_id) === String(id)) || diagRes[0];
+              } else if (diagRes && !Array.isArray(diagRes) && diagRes.id) {
+                diag = diagRes;
+              }
+              if (diag) finalData = { ...finalData, diagnostico: diag };
+            } catch (_e) {}
+          }
+          setData(finalData);
           // Cargar historial de servicios anteriores del vehículo (silencioso)
           if (json.vehiculo?.id) {
             fetch(`${API}/vehiculo-historial/vehiculo/${json.vehiculo.id}`)
