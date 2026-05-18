@@ -7,27 +7,29 @@ import Image from "next/image";
 import BusquedaGlobal from "@/components/BusquedaGlobal";
 
 const PERMISOS = {
-  gerente:   ["dashboard","recepcion","ordenes","taller","aprobacion","clientes","vehiculos","inspeccion","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
-  secretaria:["dashboard","recepcion","ordenes","aprobacion","clientes","vehiculos","inspeccion","facturacion","mantenimiento","contabilidad","inteligencia"],
-  tecnico:   ["ordenes","taller","inspeccion","mantenimiento"],
+  gerente:   ["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
+  secretaria:["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","facturacion","mantenimiento","contabilidad","inteligencia"],
+  tecnico:   ["taller","inspeccion","mantenimiento"],
   almacen:   ["inventario","suplidores","ventas"],
   cafeteria: ["cafeteria"],
 };
 
 const MENU = [
-  { href: "/dashboard",     icon: "📊", label: "Dashboard",     key: "dashboard" },
-  // ── Flujo de trabajo ─────────────────────────────────────────────────
-  { href: "/recepcion",     icon: "🚗", label: "Recepción",     key: "recepcion" },
-  { href: "/ordenes",       icon: "🧾", label: "Órdenes",       key: "ordenes" },
-  { href: "/taller",        icon: "🔧", label: "Taller",        key: "taller" },
-  { href: "/aprobacion",    icon: "✅", label: "Aprobaciones",  key: "aprobacion" },
-  // ── Gestión ──────────────────────────────────────────────────────────
-  { href: "/clientes",      icon: "👤", label: "Clientes",      key: "clientes" },
-  { href: "/vehiculos",     icon: "🚙", label: "Vehículos",     key: "vehiculos" },
-  { href: "/inspeccion",    icon: "🔍", label: "Inspecciones",  key: "inspeccion" },
-  { href: "/mantenimiento", icon: "🛠️", label: "Mantenimiento", key: "mantenimiento" },
-  { href: "/inteligencia",  icon: "🔮", label: "Inteligencia",  key: "inteligencia" },
-  { href: "/contabilidad",  icon: "💰", label: "Contabilidad",  key: "contabilidad" },
+  { href: "/dashboard",     icon: "📊", label: "Dashboard",    key: "dashboard"     },
+  // ── Centro operativo ────────────────────────────────────────────────
+  { href: "/taller",        icon: "🔧", label: "Mi Taller",    key: "taller"        },
+  // ── Gestión de clientes ─────────────────────────────────────────────
+  { href: "/clientes",      icon: "👤", label: "Clientes",     key: "clientes"      },
+  { href: "/vehiculos",     icon: "🚙", label: "Vehículos",    key: "vehiculos"     },
+  // ── Operaciones ─────────────────────────────────────────────────────
+  { href: "/inventario",    icon: "📦", label: "Inventario",   key: "inventario"    },
+  { href: "/facturacion",   icon: "🧾", label: "Facturas",     key: "facturacion"   },
+  // ── Acceso rápido interno (solo roles con permiso) ───────────────────
+  { href: "/recepcion",     icon: "🚗", label: "Recepción",    key: "recepcion"     },
+  { href: "/aprobacion",    icon: "✅", label: "Aprobaciones", key: "aprobacion"    },
+  { href: "/usuarios",      icon: "👥", label: "Usuarios",     key: "usuarios"      },
+  { href: "/contabilidad",  icon: "💰", label: "Contabilidad", key: "contabilidad"  },
+  { href: "/configuracion", icon: "⚙️", label: "Configuración",key: "configuracion" },
 ];
 
 const RUTAS_PUBLICAS = ["/login", "/cliente"];

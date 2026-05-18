@@ -52,20 +52,58 @@ function abrirImpresion(html: string) {
 
 // ── Imprimir diagnóstico / cotización ─────────────────────────────────────────
 function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any) {
-  const manoObra  = Number(diag.mano_obra  || 0);
-  const repuestos = Number(diag.repuestos  || 0);
-  const total     = manoObra + repuestos;
+  const manoObra    = Number(diag.mano_obra  || 0);
+  const repuestos   = Number(diag.repuestos  || 0);
+  const total       = manoObra + repuestos || Number(diag.total || diag.costo_estimado || 0);
+  // Leer técnico de cualquier campo disponible (usuario_nombre es el guardado en DB)
+  const tecnicoNombre = diag.tecnico_nombre || diag.usuario_nombre || "—";
   const detalleLineas = (diag.mano_de_obra_detalle || diag.detalle || "")
     .split("\n").filter((l: string) => l.trim())
     .map((l: string) => `<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">✔ ${l.trim()}</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">—</td></tr>`)
     .join("") || `<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">Servicios Profesionales de Mano de Obra</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">RD$ ${manoObra.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`;
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
+  const logoUrl     = typeof window !== "undefined" ? window.location.origin + "/logo.png" : "/logo.png";
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"><title>Diagnóstico ${numeroOrden}</title>
-  <style>*{margin:0;padding:0;box-sizing:border-box}body{font-family:'Segoe UI',Arial,sans-serif;padding:40px;color:#1a1a1a;line-height:1.6;max-width:760px;margin:auto}.header{text-align:center;border-bottom:3px solid #111;padding-bottom:20px;margin-bottom:25px}.logo{font-size:26px;font-weight:900}.sub{font-size:13px;color:#555;margin-top:6px}.titulo-doc{text-align:center;font-size:18px;font-weight:700;margin:20px 0;letter-spacing:1px;color:#1e40af;text-transform:uppercase;border:2px solid #1e40af;padding:8px;border-radius:8px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px}.info-box{border:1px solid #e2e8f0;padding:14px;border-radius:8px;background:#f8fafc}.box-title{font-size:11px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid #e2e8f0;letter-spacing:1px}.info-row{font-size:13px;margin-bottom:4px}.sec-titulo{font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin:12px 0 6px;border-left:3px solid #334155}.sec-texto{font-size:13px;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap}table{width:100%;border-collapse:collapse;margin-bottom:16px}thead th{background:#111827;color:#fff;padding:12px;text-align:left;font-size:13px}.total-row{background:#1e40af;color:#fff}.total-row td{padding:14px 12px;font-size:18px;font-weight:900}.firma-area{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}.firma-linea{border-top:1px solid #111;padding-top:8px;text-align:center;font-size:12px;color:#64748b}.footer{text-align:center;margin-top:40px;padding-top:16px;border-top:1px dashed #cbd5e1;color:#94a3b8;font-size:11px;line-height:2}@media print{body{padding:20px}}</style>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+    body{font-family:'Segoe UI',Arial,sans-serif;padding:36px;color:#1a1a1a;line-height:1.6;max-width:780px;margin:auto}
+    .header{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #111827;padding-bottom:18px;margin-bottom:22px;gap:20px}
+    .logo-block{display:flex;align-items:center;gap:14px}
+    .logo-block img{height:58px;max-width:160px;object-fit:contain;border-radius:6px}
+    .empresa-nombre{font-size:18px;font-weight:900;letter-spacing:-.3px;line-height:1.1}
+    .empresa-meta{font-size:11px;color:#555;margin-top:4px;line-height:1.7}
+    .titulo-doc{text-align:center;font-size:16px;font-weight:700;margin:0 0 18px;letter-spacing:1px;color:#1e40af;text-transform:uppercase;border:2px solid #1e40af;padding:7px;border-radius:8px}
+    .info-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+    .info-box{border:1px solid #e2e8f0;padding:14px;border-radius:8px;background:#f8fafc}
+    .box-title{font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid #e2e8f0;letter-spacing:1px}
+    .info-row{font-size:13px;margin-bottom:4px}
+    .sec-titulo{font-size:11px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin:12px 0 6px;border-left:3px solid #334155}
+    .sec-texto{font-size:13px;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap}
+    table{width:100%;border-collapse:collapse;margin-bottom:14px}
+    thead th{background:#111827;color:#fff;padding:11px 12px;text-align:left;font-size:12px}
+    .total-row{background:#1e40af;color:#fff}
+    .total-row td{padding:13px 12px;font-size:17px;font-weight:900}
+    .firma-area{margin-top:40px;display:grid;grid-template-columns:1fr 1fr;gap:40px}
+    .firma-linea{border-top:1px solid #111;padding-top:8px;text-align:center;font-size:12px;color:#64748b}
+    .footer{text-align:center;margin-top:36px;padding-top:14px;border-top:1px dashed #cbd5e1;color:#94a3b8;font-size:11px;line-height:2}
+    @media print{body{padding:18px}@page{margin:8mm 10mm}}
+  </style>
   </head><body>
-  <div class="header"><div class="logo">🔧 SÓLIDO AUTO SERVICIO</div><div class="sub">Expertos en Mecánica &amp; Detallado | Tel: 809-712-2027<br>Santo Domingo, República Dominicana</div></div>
-  <div class="titulo-doc">Informe de Diagnóstico Técnico — ${numeroOrden}</div>
+  <div class="header">
+    <div class="logo-block">
+      <img src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/>
+      <div>
+        <div class="empresa-nombre">SÓLIDO AUTO SERVICIO</div>
+        <div class="empresa-meta">Expertos en Mecánica &amp; Detallado<br>Tel: 809-712-2027 · Santo Domingo, Rep. Dom.</div>
+      </div>
+    </div>
+    <div style="text-align:right">
+      <div style="font-size:22px;font-weight:900;color:#1e40af">${numeroOrden}</div>
+      <div style="font-size:11px;color:#64748b;margin-top:3px">${new Date(diag.created_at||orden.created_at).toLocaleString("es-DO")}</div>
+    </div>
+  </div>
+  <div class="titulo-doc">Informe de Diagnóstico Técnico</div>
   <div class="info-grid">
     <div class="info-box"><div class="box-title">👤 Cliente y Vehículo</div>
       <div class="info-row"><strong>Cliente:</strong> ${cliente?.nombre||"Particular"}</div>
@@ -73,11 +111,10 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
       <div class="info-row"><strong>Vehículo:</strong> ${vehiculo?.marca||""} ${vehiculo?.modelo||""} ${vehiculo?.ano||""}</div>
       <div class="info-row"><strong>Placa:</strong> ${vehiculo?.placa||"N/A"}</div>
     </div>
-    <div class="info-box"><div class="box-title">📋 Detalles</div>
+    <div class="info-box"><div class="box-title">📋 Detalles del Servicio</div>
       <div class="info-row"><strong>Orden:</strong> ${numeroOrden}</div>
-      <div class="info-row"><strong>Técnico:</strong> ${diag.tecnico_nombre||"—"}</div>
+      <div class="info-row"><strong>Técnico:</strong> ${tecnicoNombre}</div>
       <div class="info-row"><strong>Tipo:</strong> ${diag.tipo_servicio||orden.descripcion||"—"}</div>
-      <div class="info-row"><strong>Fecha:</strong> ${new Date(diag.created_at||orden.created_at).toLocaleString("es-DO")}</div>
       ${diag.tiempo_estimado?`<div class="info-row"><strong>Tiempo estimado:</strong> ${diag.tiempo_estimado}</div>`:""}
     </div>
   </div>
@@ -87,7 +124,10 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
   <table><thead><tr><th>Descripción</th><th style="text-align:right;width:200px">Monto (RD$)</th></tr></thead>
   <tbody>${detalleLineas}${repuestos>0?`<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">Repuestos e Insumos</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">RD$ ${repuestos.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`:""}</tbody>
   <tfoot><tr class="total-row"><td>TOTAL PRESUPUESTO</td><td style="text-align:right">RD$ ${total.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr></tfoot></table>`:""}
-  <div class="firma-area"><div><div class="firma-linea">Técnico: ${diag.tecnico_nombre||"_______________"}</div></div><div><div class="firma-linea">Firma del Cliente</div></div></div>
+  <div class="firma-area">
+    <div><div style="height:36px"></div><div class="firma-linea">Técnico Responsable: ${tecnicoNombre}</div></div>
+    <div><div style="height:36px"></div><div class="firma-linea">Firma del Cliente — Conforme</div></div>
+  </div>
   <div class="footer"><p>Este informe tiene validez de 15 días hábiles.</p><p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, RD</p></div>
   </body></html>`;
 
@@ -298,24 +338,9 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 <!-- HEADER -->
 <div class="header">
   <div class="logo-block">
-    <!-- Logo SVG -->
-    <svg class="logo-svg" width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
-      <rect width="54" height="54" rx="10" fill="#111827"/>
-      <!-- cuerpo del carro -->
-      <rect x="8" y="28" width="38" height="10" rx="2" fill="#fff"/>
-      <path d="M13 28 L17 20 L37 20 L41 28Z" fill="#e5e7eb"/>
-      <path d="M13 28 L17 20 L37 20 L41 28Z" fill="#d1d5db"/>
-      <!-- ventanas -->
-      <path d="M18 27 L20 22 L27 22 L27 27Z" fill="#1e40af" opacity=".85"/>
-      <path d="M28 27 L28 22 L35 22 L37 27Z" fill="#1e40af" opacity=".85"/>
-      <!-- ruedas -->
-      <circle cx="16" cy="38" r="5" fill="#374151"/>
-      <circle cx="16" cy="38" r="2.2" fill="#9ca3af"/>
-      <circle cx="38" cy="38" r="5" fill="#374151"/>
-      <circle cx="38" cy="38" r="2.2" fill="#9ca3af"/>
-      <!-- llave inglesa pequeña -->
-      <path d="M38 13 Q43 11 43 15 Q43 17 41 17.5 L35 23 L33 21 L38 16 Q37 14.5 38 13Z" fill="#f59e0b"/>
-    </svg>
+    <img src="${window.location.origin}/logo.png" alt="Sólido Auto Servicio"
+         style="height:60px;max-width:180px;object-fit:contain;border-radius:6px;"
+         onerror="this.style.display='none'"/>
     <div>
       <div class="logo-text">SÓLIDO AUTO SERVICIO</div>
       <div class="logo-sub">Expertos en Mecánica &amp; Detallado<br>Tel: 809-712-2027 · Santo Domingo, Rep. Dom.</div>
@@ -371,7 +396,7 @@ ${(mostrar ? mostrar.diagnostico : !!diag) ? `
 <div class="info-grid" style="margin-bottom:10px">
   <div class="info-box">
     <div class="info-box-title">Técnico responsable</div>
-    <div class="info-row"><strong>${diag.tecnico_nombre||"—"}</strong></div>
+    <div class="info-row"><strong>${diag.tecnico_nombre||diag.usuario_nombre||"—"}</strong></div>
     <div class="info-row">Tipo: ${diag.tipo_servicio||orden.descripcion||"—"}</div>
     ${diag.tiempo_estimado ? `<div class="info-row">Tiempo estimado: ${diag.tiempo_estimado}</div>` : ""}
   </div>
@@ -924,7 +949,7 @@ export default function OrdenDetallePage() {
             <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr", gap:12, marginBottom:14, fontSize:13 }}>
               <div>
                 <span style={{ color:"#6b7280", fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Técnico</span>
-                <p style={{ margin:"3px 0 0", fontWeight:700 }}>{diagnostico.tecnico_nombre || "—"}</p>
+                <p style={{ margin:"3px 0 0", fontWeight:700 }}>{diagnostico.tecnico_nombre || diagnostico.usuario_nombre || "—"}</p>
               </div>
               <div>
                 <span style={{ color:"#6b7280", fontSize:11, fontWeight:700, textTransform:"uppercase" }}>Tipo de servicio</span>

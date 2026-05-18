@@ -7,12 +7,15 @@ import { API_URL as API } from "@/config";
 interface ZonaDanio { zona: string; tipo: string; }
 interface Foto      { data: string; label: string; }
 
-// Slots fijos de fotos del vehículo
+// Slots fijos de fotos del vehículo — extendido con interior, tablero y daños
 const FOTO_SLOTS = [
-  { key: "frente",         label: "📷 Frente",           icon: "🚗" },
-  { key: "trasero",        label: "📷 Trasero",           icon: "🔙" },
-  { key: "lateral_izq",   label: "📷 Lateral Izquierdo", icon: "◀️" },
-  { key: "lateral_der",   label: "📷 Lateral Derecho",   icon: "▶️" },
+  { key: "frente",        label: "📷 Frente",           icon: "🚗" },
+  { key: "trasero",       label: "📷 Trasero",           icon: "🔙" },
+  { key: "lateral_izq",  label: "📷 Lateral Izquierdo", icon: "◀️" },
+  { key: "lateral_der",  label: "📷 Lateral Derecho",   icon: "▶️" },
+  { key: "interior",     label: "📷 Interior",          icon: "💺" },
+  { key: "tablero",      label: "📷 Tablero",           icon: "🎛️" },
+  { key: "danos_visibles",label: "📷 Daños Visibles",   icon: "⚠️" },
 ] as const;
 type FotoSlotKey = typeof FOTO_SLOTS[number]["key"];
 type FotosSlots = Record<FotoSlotKey, string | null>;
@@ -70,9 +73,10 @@ export default function InspeccionPage() {
   const [vidrios, setVidrios]         = useState("");
   const [llantas, setLlantas]         = useState("");
   const [pintura, setPintura]         = useState("");
-  // 4 slots fijos de fotos
+  // 7 slots de fotos (exterior + interior + tablero + daños)
   const [fotosSlots, setFotosSlots]   = useState<FotosSlots>({
     frente: null, trasero: null, lateral_izq: null, lateral_der: null,
+    interior: null, tablero: null, danos_visibles: null,
   });
   // compatibilidad legacy: fotos adicionales libres
   const [fotosExtra, setFotosExtra]   = useState<Foto[]>([]);
@@ -151,8 +155,8 @@ export default function InspeccionPage() {
               setFotosSlots(ins.fotos_slots);
             } else if (Array.isArray(ins.fotos) && ins.fotos.length > 0) {
               // Mapear fotos legacy al nuevo formato de slots por posición
-              const slotKeys: FotoSlotKey[] = ["frente","trasero","lateral_izq","lateral_der"];
-              const newSlots: FotosSlots = { frente: null, trasero: null, lateral_izq: null, lateral_der: null };
+              const slotKeys: FotoSlotKey[] = ["frente","trasero","lateral_izq","lateral_der","interior","tablero","danos_visibles"];
+              const newSlots: FotosSlots = { frente: null, trasero: null, lateral_izq: null, lateral_der: null, interior: null, tablero: null, danos_visibles: null };
               ins.fotos.forEach((f: Foto, i: number) => {
                 if (i < slotKeys.length) newSlots[slotKeys[i]] = f.data;
               });
@@ -508,8 +512,8 @@ export default function InspeccionPage() {
           Toma una foto por cada ángulo del vehículo. Haz clic en el slot o en la imagen para reemplazarla.
         </p>
 
-        {/* 4 slots fijos */}
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 14, marginBottom: 16 }}>
+        {/* 7 slots de fotos */}
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))", gap: 14, marginBottom: 16 }}>
           {FOTO_SLOTS.map(slot => {
             const img = fotosSlots[slot.key];
             return (
