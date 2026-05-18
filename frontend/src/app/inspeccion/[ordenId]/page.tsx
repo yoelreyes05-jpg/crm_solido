@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
 
@@ -112,7 +112,7 @@ export default function InspeccionPage() {
               // respuesta directa sin wrapper
               setOrden({ orden: json, cliente: null, vehiculo: null, diagnostico: null, log: [], inspeccion: null });
             }
-          } catch { /* JSON parse error */ }
+          } catch (_e) { /* JSON parse error */ }
         }
 
         // Fallback: si el endpoint directo falla, buscar en la lista
@@ -128,7 +128,7 @@ export default function InspeccionPage() {
               ]);
               setOrden({ orden: found, cliente: cliRes, vehiculo: vehRes, diagnostico: null, log: [], inspeccion: null });
             }
-          } catch { /* fallback silencioso */ }
+          } catch (_e) { /* fallback silencioso */ }
         }
 
         if (iRes.ok) {
@@ -176,8 +176,8 @@ export default function InspeccionPage() {
                 herramientas_ok:   ins.herramientas_ok,
               });
             }
-          } catch { /* JSON parse error inspeccion */ }
-          }
+            }
+          } catch (_e) { /* JSON parse error inspeccion */ }
         }
       } catch (err) { console.error(err); }
       setLoading(false);
@@ -535,64 +535,69 @@ export default function InspeccionPage() {
                           onMouseEnter={e => (e.currentTarget.style.opacity = "1")}
                           onMouseLeave={e => (e.currentTarget.style.opacity = "0")}
                         >
-                          <span style={{ background: "rgba(0,0,0,0.7)", color: "#fff", padding: "6px 12px", borderRadius: 6, fontSize: 12, fontWeight: 700 }}>
-                            🔄 Cambiar foto
-                          </span>
+                          <span style={{ fontSize: 28, opacity: 0.9 }}>📷</span>
                         </div>
                       </>
                     ) : (
-                      <div style={{ textAlign: "center", color: "#9ca3af" }}>
-                        <div style={{ fontSize: 28, marginBottom: 6 }}>{slot.icon}</div>
-                        <div style={{ fontSize: 12, fontWeight: 600 }}>+ Agregar foto</div>
+                      <div style={{ textAlign: "center", padding: 16, color: "#9ca3af" }}>
+                        <div style={{ fontSize: 32, marginBottom: 6 }}>{slot.icon}</div>
+                        <div style={{ fontSize: 12, fontWeight: 600 }}>{slot.label}</div>
+                        <div style={{ fontSize: 10, marginTop: 3, color: "#d1d5db" }}>Toca para fotografiar</div>
                       </div>
                     )}
                   </div>
-                  <input type="file" accept="image/*"
+                  <input
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    style={{ display: "none" }}
                     onChange={e => handleFotoSlot(slot.key, e)}
-                    style={{ display: "none" }} />
+                  />
                 </label>
-                {/* Etiqueta y botón eliminar */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 5 }}>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: img ? "#16a34a" : "#6b7280" }}>
-                    {img ? "✅ " : ""}{slot.label}
-                  </span>
-                  {img && (
-                    <button onClick={() => setFotosSlots(prev => ({ ...prev, [slot.key]: null }))}
-                      style={{ background: "none", border: "none", color: "#ef4444", cursor: "pointer", fontSize: 12, padding: 0 }}>
-                      🗑️ Quitar
-                    </button>
-                  )}
+                {img && (
+                  <button
+                    onClick={() => setFotosSlots(prev => ({ ...prev, [slot.key]: null }))}
+                    style={{
+                      position: "absolute", top: 6, right: 6,
+                      background: "rgba(0,0,0,0.6)", color: "#fff",
+                      border: "none", borderRadius: "50%", width: 24, height: 24,
+                      cursor: "pointer", fontSize: 12, lineHeight: 1,
+                      display: "flex", alignItems: "center", justifyContent: "center",
+                    }}
+                  >
+                    ✕
+                  </button>
+                )}
+                <div style={{ textAlign: "center", fontSize: 11, color: "#6b7280", marginTop: 4, fontWeight: 600 }}>
+                  {slot.label}
                 </div>
               </div>
             );
           })}
         </div>
 
-        {/* Fotos adicionales opcionales */}
-        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 12 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
-            <span style={{ fontSize: 13, fontWeight: 600, color: "#6b7280" }}>📎 Fotos adicionales (daños específicos)</span>
-            <label style={{
-              padding: "5px 12px", background: "#f3f4f6", borderRadius: 7,
-              cursor: "pointer", fontSize: 12, fontWeight: 700, color: "#374151"
-            }}>
-              + Agregar
-              <input type="file" accept="image/*" multiple onChange={handleFotoExtra} style={{ display: "none" }} />
-            </label>
-          </div>
+        {/* Fotos adicionales */}
+        <div style={{ borderTop: "1px solid #f3f4f6", paddingTop: 14 }}>
+          <label style={sty.label}>Fotos adicionales (opcional)</label>
+          <label style={{ display: "inline-flex", alignItems: "center", gap: 6, cursor: "pointer",
+            background: "#f3f4f6", padding: "7px 14px", borderRadius: 8, fontSize: 13, fontWeight: 600, color: "#374151" }}>
+            📎 Agregar foto
+            <input type="file" accept="image/*" multiple style={{ display: "none" }} onChange={handleFotoExtra} />
+          </label>
           {fotosExtra.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 12 }}>
               {fotosExtra.map((f, i) => (
-                <div key={i} style={{ position: "relative", width: 100, height: 75 }}>
+                <div key={i} style={{ position: "relative" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img src={f.data} alt={f.label}
-                    style={{ width: "100%", height: "100%", objectFit: "cover", borderRadius: 7, border: "1px solid #e5e7eb" }} />
-                  <button onClick={() => setFotosExtra(prev => prev.filter((_, j) => j !== i))}
-                    style={{ position: "absolute", top: 2, right: 2, background: "#ef4444", border: "none",
-                      color: "#fff", width: 18, height: 18, borderRadius: "50%", cursor: "pointer", fontSize: 10 }}>✕</button>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2, textAlign: "center",
-                    overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
-                    {f.label}
-                  </div>
+                    style={{ width: 80, height: 62, objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                  <button
+                    onClick={() => setFotosExtra(prev => prev.filter((_, j) => j !== i))}
+                    style={{ position: "absolute", top: 2, right: 2, background: "rgba(0,0,0,0.6)", color: "#fff",
+                      border: "none", borderRadius: "50%", width: 18, height: 18, fontSize: 10,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    ✕
+                  </button>
                 </div>
               ))}
             </div>
@@ -600,82 +605,93 @@ export default function InspeccionPage() {
         </div>
       </div>
 
-      {/* SECCIÓN 5: Observaciones */}
-      <div style={sty.card}>
-        <div style={sty.sectionTitle}>📝 Observaciones Generales</div>
-        <textarea value={observaciones} onChange={e => setObservaciones(e.target.value)}
-          style={{ ...sty.textarea, minHeight: 90 }}
-          placeholder="Describe cualquier condición relevante del vehículo al momento de la recepción..." />
-      </div>
-
-      {/* SECCIÓN 6: Firma del cliente */}
+      {/* SECCIÓN 5: Firma digital del cliente */}
       <div style={sty.card}>
         <div style={sty.sectionTitle}>✍️ Firma del Cliente</div>
-        <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 8 }}>
-          El cliente confirma que la información de arriba es correcta al momento de la entrega del vehículo al taller.
+        <p style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>
+          El cliente firma confirmando el estado del vehículo al ingreso.
         </p>
-        <div style={{ border: "2px dashed #d1d5db", borderRadius: 10, overflow: "hidden", maxWidth: 400, background: "#fafafa" }}>
-          <canvas
-            ref={canvasRef} width={400} height={120}
-            style={{ display: "block", touchAction: "none", cursor: "crosshair" }}
-            onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
-            onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw}
-          />
-        </div>
-        <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+        {inspeccionExistente?.firma_cliente && !firmada ? (
+          <div style={{ marginBottom: 10 }}>
+            <p style={{ fontSize: 11, color: "#10b981", fontWeight: 600, marginBottom: 6 }}>✓ Firma guardada previamente</p>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={inspeccionExistente.firma_cliente} alt="Firma"
+              style={{ border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", maxWidth: "100%" }} />
+            <button onClick={limpiarFirma}
+              style={{ marginTop: 8, fontSize: 12, color: "#ef4444", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+              ✕ Limpiar y volver a firmar
+            </button>
+          </div>
+        ) : (
+          <div style={{ border: "1px solid #e5e7eb", borderRadius: 10, overflow: "hidden", touchAction: "none" }}>
+            <canvas
+              ref={canvasRef}
+              width={600} height={200}
+              style={{ display: "block", width: "100%", background: "#fff", cursor: "crosshair" }}
+              onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
+              onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw}
+            />
+          </div>
+        )}
+        {firmada && (
           <button onClick={limpiarFirma}
-            style={{ padding: "7px 14px", background: "#f3f4f6", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
-            🗑️ Borrar firma
+            style={{ marginTop: 8, fontSize: 12, color: "#ef4444", background: "none", border: "none", cursor: "pointer", fontWeight: 600 }}>
+            ✕ Borrar firma
           </button>
-          {firmada && <span style={{ fontSize: 12, color: "#16a34a", alignSelf: "center", fontWeight: 700 }}>✓ Firma capturada</span>}
-          {!firmada && inspeccionExistente?.firma_cliente && (
-            <span style={{ fontSize: 12, color: "#6b7280", alignSelf: "center" }}>Firma anterior guardada (firmar de nuevo para actualizar)</span>
-          )}
-        </div>
-      </div>
-
-      {/* Botón guardar */}
-      <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8, marginBottom: 40 }}>
-        <button onClick={guardar} disabled={saving}
-          style={{
-            padding: "12px 32px", background: saving ? "#9ca3af" : "linear-gradient(135deg,#1d4ed8,#3b82f6)",
-            color: "#fff", border: "none", borderRadius: 11, cursor: saving ? "not-allowed" : "pointer",
-            fontSize: 15, fontWeight: 800, boxShadow: "0 4px 14px rgba(59,130,246,0.4)"
-          }}>
-          {saving ? "Guardando..." : inspeccionExistente ? "💾 Actualizar Inspección" : "💾 Guardar Inspección"}
-        </button>
-        {guardado && (
-          <span style={{ color: "#16a34a", fontWeight: 700, fontSize: 14 }}>✅ ¡Guardado con éxito!</span>
         )}
       </div>
 
-      {/* Modal tipo de daño */}
-      {tipoDanioModal && (
-        <div style={{
-          position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)",
-          display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999
-        }}>
-          <div style={{ background: "#fff", borderRadius: 16, padding: 24, minWidth: 280, boxShadow: "0 20px 60px rgba(0,0,0,0.25)" }}>
-            <h3 style={{ margin: "0 0 16px", fontSize: 16 }}>
-              Zona: {ZONAS.find(z => z.id === zonaSeleccionada)?.label}
-            </h3>
-            {TIPO_DANIO.map(tipo => (
-              <button key={tipo} onClick={() => seleccionarTipo(tipo)}
-                style={{
-                  display: "block", width: "100%", marginBottom: 8, padding: "10px 14px",
-                  background: TIPO_COLOR[tipo], color: "#fff", border: "none", borderRadius: 9,
-                  cursor: "pointer", fontWeight: 700, fontSize: 14, textAlign: "left"
-                }}>
-                {TIPO_LABEL[tipo]}
-              </button>
-            ))}
+      {/* Botón guardar */}
+      <div style={{ position: "sticky", bottom: 20, display: "flex", justifyContent: "flex-end", gap: 12 }}>
+        {guardado && (
+          <span style={{ background: "#d1fae5", color: "#065f46", padding: "10px 18px", borderRadius: 10, fontWeight: 700, fontSize: 14 }}>
+            ✅ Guardado correctamente
+          </span>
+        )}
+        <button
+          onClick={guardar}
+          disabled={saving}
+          style={{
+            padding: "12px 32px", background: saving ? "#93c5fd" : "#1d4ed8",
+            color: "#fff", border: "none", borderRadius: 12,
+            fontWeight: 800, fontSize: 15, cursor: saving ? "not-allowed" : "pointer",
+            boxShadow: "0 4px 14px rgba(29,78,216,0.35)",
+          }}
+        >
+          {saving ? "Guardando..." : inspeccionExistente ? "💾 Actualizar Inspección" : "💾 Guardar Inspección"}
+        </button>
+      </div>
+
+      {/* Modal: Selección de tipo de daño */}
+      {tipoDanioModal && zonaSeleccionada && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 24, minWidth: 300, boxShadow: "0 20px 50px rgba(0,0,0,0.2)" }}>
+            <p style={{ margin: "0 0 16px", fontWeight: 700, fontSize: 16 }}>
+              {ZONAS.find(z => z.id === zonaSeleccionada)?.label || zonaSeleccionada}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {TIPO_DANIO.map(tipo => (
+                <button
+                  key={tipo}
+                  onClick={() => seleccionarTipo(tipo)}
+                  style={{
+                    padding: "10px 16px", borderRadius: 8, border: "1.5px solid",
+                    borderColor: TIPO_COLOR[tipo], background: TIPO_COLOR[tipo] + "15",
+                    color: TIPO_COLOR[tipo], fontWeight: 700, fontSize: 14, cursor: "pointer", textAlign: "left",
+                  }}
+                >
+                  {TIPO_LABEL[tipo]}
+                </button>
+              ))}
+            </div>
             <button onClick={() => { setTipoDanioModal(false); setZonaSeleccionada(null); }}
-              style={{ marginTop: 4, width: "100%", padding: "8px", background: "#f3f4f6", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 600 }}>
+              style={{ marginTop: 14, width: "100%", padding: "9px 0", background: "#f3f4f6", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 600, color: "#6b7280" }}>
               Cancelar
             </button>
           </div>
         </div>
       )}
+
     </div>
   );
 }

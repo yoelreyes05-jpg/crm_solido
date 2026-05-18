@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
@@ -43,7 +43,7 @@ function abrirImpresion(html: string) {
     try {
       (iframe.contentWindow as any)?.focus();
       (iframe.contentWindow as any)?.print();
-    } catch {
+    } catch (_e) {
       const w = window.open("", "_blank", "width=860,height=1100");
       if (w) { w.document.write(html); w.document.close(); }
     }
@@ -533,7 +533,7 @@ export default function OrdenDetallePage() {
   }, [id]);
 
   useEffect(() => {
-    try { setUsuario(JSON.parse(localStorage.getItem("usuario") || "{}")); } catch {}
+    try { setUsuario(JSON.parse(localStorage.getItem("usuario") || "{}")); } catch (_e) {}
     cargar();
   }, [cargar]);
 
