@@ -143,14 +143,13 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
     const icon  = iconos[e.estado_nuevo] || "🔄";
     return `
       <tr>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top;width:36px;text-align:center;font-size:18px">${icon}</td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top">
-          <span style="font-weight:700;color:${color};font-size:14px">${label}</span>
-          ${e.motivo ? `<br><span style="font-size:12px;color:#6b7280">📝 ${e.motivo}</span>` : ""}
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top;width:28px;text-align:center;font-size:14px">${icon}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top">
+          <span style="font-weight:700;color:${color};font-size:11px">${label}</span>
+          ${e.motivo ? `<span style="font-size:10px;color:#6b7280"> — ${e.motivo}</span>` : ""}
         </td>
-        <td style="padding:10px 14px;border-bottom:1px solid #f1f5f9;vertical-align:top;font-size:12px;color:#9ca3af;white-space:nowrap">
-          ${fmtDate(e.created_at)}<br>
-          <span style="color:#6b7280">👤 ${e.usuario_nombre||"Sistema"}</span>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;vertical-align:top;font-size:10px;color:#9ca3af;white-space:nowrap">
+          ${fmtDate(e.created_at)} · ${e.usuario_nombre||"Sistema"}
         </td>
       </tr>`;
   }).join("");
@@ -263,40 +262,63 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 <title>Resumen de Servicio — ${numeroOrden}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Segoe UI',Arial,sans-serif; padding:36px; color:#1a1a1a; line-height:1.6; max-width:820px; margin:auto; }
-  .header { display:flex; justify-content:space-between; align-items:flex-start; border-bottom:3px solid #111827; padding-bottom:18px; margin-bottom:24px; }
-  .logo { font-size:22px; font-weight:900; }
-  .logo-sub { font-size:12px; color:#6b7280; margin-top:4px; line-height:1.5; }
+  body { font-family:'Segoe UI',Arial,sans-serif; padding:18px 22px; color:#1a1a1a; line-height:1.4; max-width:820px; margin:auto; font-size:12px; }
+  .header { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #111827; padding-bottom:12px; margin-bottom:14px; }
+  .logo-block { display:flex; align-items:center; gap:12px; }
+  .logo-svg { flex-shrink:0; }
+  .logo-text { font-size:18px; font-weight:900; letter-spacing:-0.5px; line-height:1.1; }
+  .logo-sub { font-size:10px; color:#6b7280; margin-top:2px; line-height:1.4; }
   .orden-badge { text-align:right; }
-  .orden-num { font-size:20px; font-weight:900; color:#1e40af; }
-  .orden-fecha { font-size:12px; color:#6b7280; margin-top:3px; }
-  .estado-badge { display:inline-block; padding:4px 14px; border-radius:20px; font-size:12px; font-weight:700; border:1.5px solid currentColor; margin-top:6px; }
-  .section-title { font-size:12px; font-weight:700; text-transform:uppercase; color:#475569; background:#f1f5f9; padding:6px 10px; border-radius:6px; margin:20px 0 10px; border-left:3px solid #334155; letter-spacing:.5px; }
-  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin-bottom:20px; }
-  .info-box { border:1px solid #e2e8f0; padding:14px 16px; border-radius:10px; background:#f8fafc; }
-  .info-box-title { font-size:11px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:8px; padding-bottom:6px; border-bottom:1px solid #e2e8f0; letter-spacing:.8px; }
-  .info-row { font-size:13px; margin-bottom:4px; }
-  .hallazgos { font-size:13px; padding:12px 16px; background:#fff; border:1px solid #e2e8f0; border-radius:8px; white-space:pre-wrap; line-height:1.7; }
-  table.timeline { width:100%; border-collapse:collapse; background:#fff; border-radius:10px; overflow:hidden; border:1px solid #f1f5f9; }
-  table.avances { width:100%; border-collapse:collapse; background:#fff; border:1px solid #f1f5f9; border-radius:8px; overflow:hidden; }
-  .cotizacion { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:10px; padding:14px 18px; margin-top:14px; }
-  .total-final { background:#111827; color:#fff; padding:14px 18px; border-radius:10px; margin-top:16px; display:flex; justify-content:space-between; align-items:center; }
-  .total-num { font-size:22px; font-weight:900; }
-  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:60px; margin-top:50px; }
-  .firma-line { border-top:1px solid #111; padding-top:8px; text-align:center; font-size:12px; color:#64748b; }
-  .footer { text-align:center; margin-top:40px; padding-top:14px; border-top:1px dashed #cbd5e1; color:#94a3b8; font-size:11px; line-height:2; }
-  @media print { body { padding:20px; } }
+  .orden-num { font-size:18px; font-weight:900; color:#1e40af; }
+  .orden-fecha { font-size:10px; color:#6b7280; margin-top:2px; }
+  .estado-badge { display:inline-block; padding:3px 10px; border-radius:20px; font-size:10px; font-weight:700; border:1.5px solid currentColor; margin-top:4px; }
+  .titulo-doc { text-align:center; font-size:13px; font-weight:700; color:#1e40af; border:1.5px solid #1e40af; padding:5px; border-radius:6px; margin-bottom:12px; text-transform:uppercase; letter-spacing:1px; }
+  .section-title { font-size:10px; font-weight:700; text-transform:uppercase; color:#475569; background:#f1f5f9; padding:4px 8px; border-radius:4px; margin:10px 0 6px; border-left:3px solid #334155; letter-spacing:.5px; }
+  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
+  .info-box { border:1px solid #e2e8f0; padding:8px 10px; border-radius:6px; background:#f8fafc; }
+  .info-box-title { font-size:9px; font-weight:700; text-transform:uppercase; color:#64748b; margin-bottom:5px; padding-bottom:4px; border-bottom:1px solid #e2e8f0; letter-spacing:.8px; }
+  .info-row { font-size:11px; margin-bottom:2px; }
+  .hallazgos { font-size:11px; padding:6px 10px; background:#fff; border:1px solid #e2e8f0; border-radius:6px; white-space:pre-wrap; line-height:1.5; }
+  table.timeline { width:100%; border-collapse:collapse; background:#fff; border:1px solid #f1f5f9; }
+  table.avances { width:100%; border-collapse:collapse; background:#fff; border:1px solid #f1f5f9; }
+  .cotizacion { background:#f0fdf4; border:1px solid #bbf7d0; border-radius:6px; padding:8px 12px; margin-top:8px; }
+  .firmas { display:grid; grid-template-columns:1fr 1fr; gap:50px; margin-top:30px; }
+  .firma-line { border-top:1px solid #111; padding-top:5px; text-align:center; font-size:10px; color:#64748b; }
+  .footer { text-align:center; margin-top:16px; padding-top:8px; border-top:1px dashed #cbd5e1; color:#94a3b8; font-size:9px; line-height:1.8; }
+  @media print {
+    @page { margin:8mm 10mm; }
+    body { padding:0; }
+    .section-title { margin:6px 0 4px; }
+    .info-grid { gap:6px; margin-bottom:6px; }
+  }
 </style>
 </head>
 <body>
 
 <!-- HEADER -->
 <div class="header">
-  <div>
-    <div class="logo">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div class="logo-sub">
-      Expertos en Mecánica &amp; Detallado<br>
-      Tel: 809-712-2027 · Santo Domingo, República Dominicana
+  <div class="logo-block">
+    <!-- Logo SVG -->
+    <svg class="logo-svg" width="54" height="54" viewBox="0 0 54 54" xmlns="http://www.w3.org/2000/svg">
+      <rect width="54" height="54" rx="10" fill="#111827"/>
+      <!-- cuerpo del carro -->
+      <rect x="8" y="28" width="38" height="10" rx="2" fill="#fff"/>
+      <path d="M13 28 L17 20 L37 20 L41 28Z" fill="#e5e7eb"/>
+      <path d="M13 28 L17 20 L37 20 L41 28Z" fill="#d1d5db"/>
+      <!-- ventanas -->
+      <path d="M18 27 L20 22 L27 22 L27 27Z" fill="#1e40af" opacity=".85"/>
+      <path d="M28 27 L28 22 L35 22 L37 27Z" fill="#1e40af" opacity=".85"/>
+      <!-- ruedas -->
+      <circle cx="16" cy="38" r="5" fill="#374151"/>
+      <circle cx="16" cy="38" r="2.2" fill="#9ca3af"/>
+      <circle cx="38" cy="38" r="5" fill="#374151"/>
+      <circle cx="38" cy="38" r="2.2" fill="#9ca3af"/>
+      <!-- llave inglesa pequeña -->
+      <path d="M38 13 Q43 11 43 15 Q43 17 41 17.5 L35 23 L33 21 L38 16 Q37 14.5 38 13Z" fill="#f59e0b"/>
+    </svg>
+    <div>
+      <div class="logo-text">SÓLIDO AUTO SERVICIO</div>
+      <div class="logo-sub">Expertos en Mecánica &amp; Detallado<br>Tel: 809-712-2027 · Santo Domingo, Rep. Dom.</div>
     </div>
   </div>
   <div class="orden-badge">
@@ -310,7 +332,7 @@ function imprimirOrdenCompleta(orden: any, cliente: any, vehiculo: any, diag: an
 </div>
 
 <!-- TITULO -->
-<div style="text-align:center;font-size:17px;font-weight:700;color:#1e40af;border:2px solid #1e40af;padding:8px;border-radius:8px;margin-bottom:24px;letter-spacing:1px;text-transform:uppercase">
+<div class="titulo-doc">
   ${mostrar?.entrega ? "Resumen Completo de Servicio" :
     mostrar?.calidad ? "Informe hasta Control de Calidad" :
     mostrar?.reparacion ? "Informe de Reparación" :
@@ -423,37 +445,36 @@ ${log?.length > 0 ? `
 
 <!-- HISTORIAL DEL VEHÍCULO (visitas anteriores) -->
 ${historial.length > 0 ? `
-<div class="section-title" style="border-left-color:#6366f1;color:#4338ca">🔑 Historial del Vehículo — Visitas Anteriores</div>
-<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #f1f5f9;border-radius:10px;overflow:hidden;margin-bottom:20px">
+<div class="section-title" style="border-left-color:#6366f1;color:#4338ca">Historial del Vehículo — Visitas Anteriores</div>
+<table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #f1f5f9;margin-bottom:10px">
   <thead>
     <tr style="background:#1e1b4b;color:#fff">
-      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Fecha</th>
-      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Tipo de servicio</th>
-      <th style="padding:9px 12px;font-size:11px;text-align:left;font-weight:700">Diagnóstico / Trabajo</th>
-      <th style="padding:9px 12px;font-size:11px;text-align:right;font-weight:700">Total</th>
+      <th style="padding:5px 8px;font-size:9px;text-align:left;font-weight:700">Fecha</th>
+      <th style="padding:5px 8px;font-size:9px;text-align:left;font-weight:700">Tipo de servicio</th>
+      <th style="padding:5px 8px;font-size:9px;text-align:left;font-weight:700">Diagnóstico / Trabajo</th>
+      <th style="padding:5px 8px;font-size:9px;text-align:right;font-weight:700">Total</th>
     </tr>
   </thead>
   <tbody>
-    ${historial.slice(0, 10).map((h: any) => `
+    ${historial.slice(0, 8).map((h: any) => `
     <tr style="border-bottom:1px solid #f1f5f9">
-      <td style="padding:7px 12px;font-size:12px;color:#6b7280;white-space:nowrap">${h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO") : "—"}</td>
-      <td style="padding:7px 12px;font-size:12px;font-weight:600">${h.tipo_servicio || "—"}</td>
-      <td style="padding:7px 12px;font-size:12px;color:#374151">${((h.diagnostico_general || h.descripcion || "—")).substring(0, 90)}${(h.diagnostico_general || h.descripcion || "").length > 90 ? "…" : ""}</td>
-      <td style="padding:7px 12px;font-size:12px;text-align:right;font-weight:700;color:#065f46">RD$ ${Number(h.total_cobrado || h.mano_obra || 0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
+      <td style="padding:4px 8px;font-size:10px;color:#6b7280;white-space:nowrap">${h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO") : "—"}</td>
+      <td style="padding:4px 8px;font-size:10px;font-weight:600">${h.tipo_servicio || "—"}</td>
+      <td style="padding:4px 8px;font-size:10px;color:#374151">${((h.diagnostico_general || h.descripcion || "—")).substring(0, 80)}${(h.diagnostico_general || h.descripcion || "").length > 80 ? "…" : ""}</td>
+      <td style="padding:4px 8px;font-size:10px;text-align:right;font-weight:700;color:#065f46">RD$ ${Number(h.total_cobrado || h.mano_obra || 0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td>
     </tr>`).join("")}
   </tbody>
 </table>` : ""}
 
 <!-- FIRMAS -->
 <div class="firmas">
-  <div><div class="firma-line">Técnico / Responsable del Servicio</div></div>
-  <div><div class="firma-line">Firma del Cliente — Conforme</div></div>
+  <div style="margin-top:10px"><div style="height:32px"></div><div class="firma-line">Técnico / Responsable del Servicio</div></div>
+  <div style="margin-top:10px"><div style="height:32px"></div><div class="firma-line">Firma del Cliente — Conforme</div></div>
 </div>
 
 <div class="footer">
   <p>Este documento certifica que el vehículo fue recibido, diagnosticado y devuelto conforme a lo indicado.</p>
-  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
-  <p>Impreso el ${new Date().toLocaleDateString("es-DO",{ year:"numeric", month:"long", day:"numeric" })}</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> · Tel: 809-712-2027 · Santo Domingo, República Dominicana · Impreso el ${new Date().toLocaleDateString("es-DO",{ year:"numeric", month:"long", day:"numeric" })}</p>
 </div>
 
 </body>
@@ -502,8 +523,10 @@ export default function OrdenDetallePage() {
           }
           setData(finalData);
           // Cargar historial de servicios anteriores del vehículo (silencioso)
-          if (json.vehiculo?.id) {
-            fetch(`${API}/vehiculo-historial/vehiculo/${json.vehiculo.id}`)
+          // Usar vehiculo?.id si viene embebido, sino el campo plano vehiculo_id de la orden
+          const vehiculoId = json.vehiculo?.id || json.orden?.vehiculo_id;
+          if (vehiculoId) {
+            fetch(`${API}/vehiculo-historial/vehiculo/${vehiculoId}`)
               .then(r => r.ok ? r.json() : [])
               .then(h => setHistorial(Array.isArray(h) ? h : []))
               .catch(() => {});
