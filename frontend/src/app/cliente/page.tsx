@@ -14,6 +14,165 @@ const ESTADO_INFO = {
 const PASOS       = ["RECIBIDO","DIAGNOSTICO","REPARACION","CONTROL_CALIDAD","LISTO","ENTREGADO"];
 const PASOS_LABEL = ["Recibido","Diagnóstico","Reparación","C. Calidad","Listo","Entregado"];
 
+// ── Función de impresión: historial completo del vehículo ─────────────────────
+function imprimirHistorialCompleto(resultado: any, historialPerm: any[]) {
+  const v = resultado?.vehiculo || {};
+  const diagnosticos: any[] = resultado?.diagnosticos || [];
+  const ordenes: any[] = resultado?.ordenes || [];
+  const fmtMoney = (n: number) => Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 });
+  const fmtDate  = (d: string) => d ? new Date(d).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" }) : "—";
+
+  // Sección por diagnóstico
+  const diagSections = diagnosticos.map((d: any) => {
+    const items: any[] = d.repuestos_items || [];
+    const repTable = items.length > 0 ? `
+      <table style="width:100%;border-collapse:collapse;font-size:12px;margin-top:8px">
+        <thead>
+          <tr style="background:#f1f5f9">
+            <th style="padding:5px 8px;text-align:left">Repuesto</th>
+            <th style="padding:5px 8px;text-align:center">Cant.</th>
+            <th style="padding:5px 8px;text-align:right">P/U</th>
+            <th style="padding:5px 8px;text-align:right">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${items.map((r: any) => `
+            <tr style="border-bottom:1px solid #f1f5f9">
+              <td style="padding:4px 8px">${r.nombre || "—"}</td>
+              <td style="padding:4px 8px;text-align:center">${r.cantidad || 1}</td>
+              <td style="padding:4px 8px;text-align:right">RD$ ${fmtMoney(r.precio_unitario)}</td>
+              <td style="padding:4px 8px;text-align:right;font-weight:700">RD$ ${fmtMoney(r.subtotal)}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>` : "";
+
+    const trabajoLineas = (d.mano_de_obra_detalle || "")
+      .split("\n").filter((l: string) => l.trim())
+      .map((l: string) => `<div style="font-size:13px;margin-bottom:3px">✓ ${l.trim()}</div>`)
+      .join("");
+
+    const moTotal  = Number(d.mano_obra || 0);
+    const repTotal = Number(d.repuestos || 0);
+    const total    = moTotal + repTotal || Number(d.total || 0);
+
+    return `
+      <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:16px;margin-bottom:14px;page-break-inside:avoid">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:10px">
+          <div>
+            <div style="font-size:13px;font-weight:700;color:#1e40af">${d.tipo_servicio || "Diagnóstico Técnico"}</div>
+            <div style="font-size:11px;color:#94a3b8;margin-top:2px">${fmtDate(d.created_at)}</div>
+          </div>
+          <div style="font-size:11px;font-weight:700;padding:3px 10px;border-radius:20px;background:${d.terminado ? "#d1fae5" : "#fef3c7"};color:${d.terminado ? "#065f46" : "#92400e"}">
+            ${d.terminado ? "Cerrado" : "Borrador"}
+          </div>
+        </div>
+
+        ${(d.descripcion || d.hallazgos) ? `
+          <div style="margin-bottom:10px">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:1px;margin-bottom:4px">Hallazgos / Diagnóstico</div>
+            <div style="font-size:13px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px 10px;white-space:pre-wrap;line-height:1.6">${d.descripcion || d.hallazgos}</div>
+          </div>` : ""}
+
+        ${trabajoLineas ? `
+          <div style="margin-bottom:10px">
+            <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;letter-spacing:1px;margin-bottom:4px">Trabajos a Realizar</div>
+            <div style="background:#f0fdf4;border-radius:6px;padding:8px 10px">${trabajoLineas}</div>
+          </div>` : ""}
+
+        ${repTable}
+
+        ${total > 0 ? `
+          <div style="background:#f8fafc;border-radius:8px;padding:12px;margin-top:10px;display:flex;gap:20px;flex-wrap:wrap">
+            ${moTotal > 0 ? `<div><span style="font-size:11px;color:#64748b">Mano de obra:</span> <strong>RD$ ${fmtMoney(moTotal)}</strong></div>` : ""}
+            ${repTotal > 0 ? `<div><span style="font-size:11px;color:#64748b">Repuestos:</span> <strong>RD$ ${fmtMoney(repTotal)}</strong></div>` : ""}
+            <div style="margin-left:auto"><span style="font-size:11px;color:#064e3b">TOTAL:</span> <strong style="font-size:16px;color:#059669">RD$ ${fmtMoney(total)}</strong></div>
+          </div>` : ""}
+
+        ${d.tiempo_estimado ? `<div style="font-size:12px;color:#64748b;margin-top:8px">⏱ Tiempo estimado: ${d.tiempo_estimado}</div>` : ""}
+        ${d.notas ? `<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:6px;padding:6px 10px;margin-top:8px">📝 ${d.notas}</div>` : ""}
+      </div>`;
+  }).join("");
+
+  // Sección historial permanente
+  const histSection = historialPerm.map((h: any) => `
+    <div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px;margin-bottom:10px;page-break-inside:avoid">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+        <div style="font-size:13px;font-weight:700;color:#1e293b">${h.tipo_servicio || "Servicio"}</div>
+        <div style="font-size:11px;color:#64748b">${fmtDate(h.fecha_servicio)}</div>
+      </div>
+      ${h.tecnico_nombre ? `<div style="font-size:12px;color:#64748b;margin-bottom:6px">Técnico: ${h.tecnico_nombre}</div>` : ""}
+      ${h.trabajos_realizados ? `<div style="font-size:12px;color:#374151;white-space:pre-wrap;margin-bottom:6px">${h.trabajos_realizados}</div>` : ""}
+      ${h.fallas_identificadas ? `<div style="font-size:12px;color:#92400e;background:#fffbeb;border-radius:6px;padding:6px 10px;margin-bottom:6px">⚠️ ${h.fallas_identificadas}</div>` : ""}
+      ${h.costo_total > 0 ? `<div style="font-size:13px;font-weight:700;color:#059669;text-align:right">Total: RD$ ${fmtMoney(h.costo_total)}</div>` : ""}
+    </div>`).join("");
+
+  const html = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<title>Historial — ${v.placa || "Vehículo"}</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  body { font-family:'Segoe UI',Arial,sans-serif; padding:32px; color:#1a1a1a; max-width:780px; margin:auto; }
+  @media print { body { padding:16px; } }
+</style>
+</head>
+<body>
+
+<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:20px">
+  <div>
+    <div style="font-size:22px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:3px">Tel: 809-712-2027 · Santo Domingo, RD</div>
+  </div>
+  <div style="text-align:right">
+    <div style="font-size:18px;font-weight:900;color:#1e40af">${v.marca || ""} ${v.modelo || ""} ${v.ano || ""}</div>
+    <div style="font-size:14px;font-weight:800;font-family:monospace;color:#374151;margin-top:2px">${v.placa || ""}</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:2px">Color: ${v.color || "—"}</div>
+  </div>
+</div>
+
+<div style="text-align:center;font-size:16px;font-weight:700;color:#1e40af;border:2px solid #1e40af;padding:8px;border-radius:8px;margin-bottom:20px;text-transform:uppercase;letter-spacing:1px">
+  Historial Completo de Servicio
+</div>
+
+${diagnosticos.length > 0 ? `
+<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #1e40af">
+  Diagnósticos Técnicos (${diagnosticos.length})
+</div>
+${diagSections}` : ""}
+
+${historialPerm.length > 0 ? `
+<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #059669;margin-top:20px">
+  Historial de Servicios Anteriores (${historialPerm.length})
+</div>
+${histSection}` : ""}
+
+${ordenes.length > 0 ? `
+<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #6366f1;margin-top:20px">
+  Órdenes de Trabajo (${ordenes.length})
+</div>
+${ordenes.slice(0, 10).map((o: any) => `
+  <div style="background:#fff;border:1px solid #e2e8f0;border-radius:8px;padding:12px;margin-bottom:8px">
+    <div style="display:flex;justify-content:space-between">
+      <span style="font-weight:700">Orden #${o.id}${o.numero_orden ? ` (${o.numero_orden})` : ""}</span>
+      <span style="font-size:12px;color:#64748b">${o.estado?.replace(/_/g, " ") || ""}</span>
+    </div>
+    <div style="font-size:13px;color:#374151;margin-top:4px">${o.descripcion || "—"}</div>
+    <div style="font-size:11px;color:#9ca3af;margin-top:3px">${fmtDate(o.created_at)}</div>
+  </div>`).join("")}` : ""}
+
+<div style="text-align:center;margin-top:32px;padding-top:14px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:11px;line-height:2">
+  <p>Documento generado el ${new Date().toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" })}</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
+</div>
+
+</body>
+</html>`;
+
+  const w = window.open("", "_blank", "width=860,height=1100");
+  if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 600); }
+}
+
 export default function ClienteApp() {
   const [placa, setPlaca]                   = useState("");
   const [resultado, setResultado]           = useState<any>(null);
@@ -811,17 +970,158 @@ export default function ClienteApp() {
                 {/* DIAGNÓSTICOS */}
                 {tab === "historial" && (
                   <div className="fade-up delay-3">
-                    {resultado.diagnosticos.length === 0 ? (
+                    {resultado.diagnosticos.length === 0 && historialPerm.length === 0 ? (
                       <div className="card" style={{ textAlign:"center", color:"#475569", padding:28 }}>
                         <div style={{ fontSize:32, marginBottom:8 }}>🔬</div>
                         Sin diagnósticos registrados.
                       </div>
-                    ) : resultado.diagnosticos.map((d: any) => (
-                      <div key={d.id} className="diag-card">
-                        <div className="diag-tipo">{d.tipo_servicio}</div>
-                        <div className="diag-obs">{d.observaciones}</div>
+                    ) : (
+                      <div>
+                        {/* Botón imprimir historial completo */}
+                        <button
+                          onClick={() => imprimirHistorialCompleto(resultado, historialPerm)}
+                          style={{
+                            width:"100%", marginBottom:14, padding:"13px 16px",
+                            background:"linear-gradient(135deg,#1e3a5f,#1d4ed8)",
+                            color:"#fff", border:"none", borderRadius:14,
+                            fontWeight:700, fontSize:14, cursor:"pointer",
+                            display:"flex", alignItems:"center", justifyContent:"center", gap:8,
+                            boxShadow:"0 4px 14px rgba(29,78,216,0.35)",
+                          }}
+                        >
+                          🖨️ Imprimir Historial Completo
+                        </button>
+
+                        {/* Diagnósticos detallados */}
+                        {resultado.diagnosticos.map((d: any) => {
+                          const moTotal  = Number(d.mano_obra || 0);
+                          const repTotal = Number(d.repuestos || 0);
+                          const total    = moTotal + repTotal || Number(d.total || 0);
+                          const items: any[] = d.repuestos_items || [];
+                          const trabajos = (d.mano_de_obra_detalle || "")
+                            .split("\n").filter((l: string) => l.trim());
+                          return (
+                            <div key={d.id} className="diag-card" style={{ marginBottom:12 }}>
+                              {/* Header */}
+                              <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
+                                <div>
+                                  <div className="diag-tipo">{d.tipo_servicio || "Diagnóstico Técnico"}</div>
+                                  {d.created_at && (
+                                    <div style={{ fontSize:11, color:"#475569", marginTop:2 }}>
+                                      {new Date(d.created_at).toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" })}
+                                    </div>
+                                  )}
+                                </div>
+                                <span style={{
+                                  fontSize:11, fontWeight:700, padding:"3px 10px", borderRadius:20,
+                                  background: d.terminado ? "rgba(52,211,153,0.15)" : "rgba(251,191,36,0.15)",
+                                  color: d.terminado ? "#34d399" : "#fbbf24",
+                                }}>
+                                  {d.terminado ? "Cerrado" : "Borrador"}
+                                </span>
+                              </div>
+
+                              {/* Hallazgos */}
+                              {(d.descripcion || d.hallazgos) && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", color:"#475569", letterSpacing:1, marginBottom:5 }}>Hallazgos Técnicos</div>
+                                  <div className="diag-obs" style={{ background:"rgba(255,255,255,0.04)", borderRadius:8, padding:"8px 10px", whiteSpace:"pre-wrap", lineHeight:1.7 }}>
+                                    {d.descripcion || d.hallazgos}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Trabajos a realizar */}
+                              {trabajos.length > 0 && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", color:"#475569", letterSpacing:1, marginBottom:5 }}>Trabajos a Realizar</div>
+                                  <div style={{ background:"rgba(52,211,153,0.06)", borderRadius:8, padding:"8px 10px" }}>
+                                    {trabajos.map((t: string, i: number) => (
+                                      <div key={i} style={{ fontSize:12, color:"#94a3b8", marginBottom:3 }}>✓ {t.trim()}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Repuestos */}
+                              {items.length > 0 && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, fontWeight:700, textTransform:"uppercase", color:"#475569", letterSpacing:1, marginBottom:5 }}>Repuestos</div>
+                                  {items.map((r: any, i: number) => (
+                                    <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, padding:"5px 0", borderBottom:"1px solid rgba(255,255,255,0.05)", color:"#94a3b8" }}>
+                                      <span>{r.nombre} ×{r.cantidad}</span>
+                                      <span style={{ color:"#fbbf24", fontWeight:700 }}>RD$ {Number(r.subtotal || 0).toLocaleString("es-DO", { minimumFractionDigits:2 })}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+
+                              {/* Costos */}
+                              {total > 0 && (
+                                <div style={{ background:"rgba(52,211,153,0.06)", borderRadius:10, padding:"10px 12px", marginTop:6 }}>
+                                  {moTotal > 0 && (
+                                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#94a3b8", marginBottom:4 }}>
+                                      <span>Mano de obra</span>
+                                      <span>RD$ {Number(moTotal).toLocaleString("es-DO", { minimumFractionDigits:2 })}</span>
+                                    </div>
+                                  )}
+                                  {repTotal > 0 && (
+                                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#94a3b8", marginBottom:4 }}>
+                                      <span>Repuestos</span>
+                                      <span>RD$ {Number(repTotal).toLocaleString("es-DO", { minimumFractionDigits:2 })}</span>
+                                    </div>
+                                  )}
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", borderTop:"1px solid rgba(52,211,153,0.2)", paddingTop:6, marginTop:4 }}>
+                                    <span style={{ fontWeight:700, fontSize:13, color:"#e2e8f0" }}>Total</span>
+                                    <span style={{ fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:18, color:"#34d399" }}>
+                                      RD$ {total.toLocaleString("es-DO", { minimumFractionDigits:2 })}
+                                    </span>
+                                  </div>
+                                </div>
+                              )}
+
+                              {d.tiempo_estimado && (
+                                <div style={{ fontSize:12, color:"#475569", marginTop:8 }}>⏱ Tiempo estimado: {d.tiempo_estimado}</div>
+                              )}
+                              {d.notas && (
+                                <div style={{ fontSize:12, color:"#fbbf24", background:"rgba(251,191,36,0.07)", borderRadius:8, padding:"6px 10px", marginTop:8 }}>
+                                  📝 {d.notas}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+
+                        {/* Historial permanente resumido debajo de diagnósticos */}
+                        {historialPerm.length > 0 && (
+                          <div style={{ marginTop:8 }}>
+                            <div style={{ fontSize:11, fontWeight:700, textTransform:"uppercase", color:"#475569", letterSpacing:1, marginBottom:10, paddingLeft:4 }}>
+                              📚 Servicios Anteriores ({historialPerm.length})
+                            </div>
+                            {historialPerm.map((h: any, idx: number) => (
+                              <div
+                                key={h.id || idx}
+                                className="hist-item"
+                                onClick={() => { setTab("histperm"); setHistDetalle(h); }}
+                                style={{ cursor:"pointer" }}
+                              >
+                                <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
+                                <div className="hist-meta">
+                                  {h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric" }) : "—"}
+                                  {h.tecnico_nombre && ` · ${h.tecnico_nombre}`}
+                                </div>
+                                {h.costo_total > 0 && (
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                                    <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO", { minimumFractionDigits:2 })}</span>
+                                    <span style={{ fontSize:11, color:"#475569" }}>Ver detalle →</span>
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    ))}
+                    )}
                   </div>
                 )}
 
