@@ -225,20 +225,24 @@ app.get("/ordenes", async (req, res) => {
       .order("id", { ascending: false });
     if (oError) throw new Error(oError.message);
 
-    // Query 2 y 3: clientes y vehículos para armar los campos derivados
-    const [{ data: cData }, { data: vData }] = await Promise.all([
+    // Query 2, 3 y 4: clientes, vehículos y técnicos asignados
+    const [{ data: cData }, { data: vData }, { data: uData }] = await Promise.all([
       supabase.from("clientes").select("id, nombre, telefono"),
       supabase.from("vehiculos").select("id, marca, modelo, placa, ano"),
+      supabase.from("usuarios").select("id, nombre").catch(() => ({ data: [] })),
     ]);
 
     const clienteMap = {};
     (cData || []).forEach(c => { clienteMap[c.id] = c; });
     const vehiculoMap = {};
     (vData || []).forEach(v => { vehiculoMap[v.id] = v; });
+    const usuarioMap = {};
+    (uData || []).forEach(u => { usuarioMap[u.id] = u; });
 
     const fixed = (oData || []).map(o => {
       const cli = clienteMap[o.cliente_id];
       const veh = vehiculoMap[o.vehiculo_id];
+      const tec = o.tecnico_asignado_id ? usuarioMap[o.tecnico_asignado_id] : null;
       return {
         ...o,
         estado:           o.estado || "RECIBIDO",
@@ -250,6 +254,8 @@ app.get("/ordenes", async (req, res) => {
         vehiculo_marca:   veh?.marca    || "",
         vehiculo_modelo:  veh?.modelo   || "",
         vehiculo_ano:     veh?.ano      ? String(veh.ano) : "",
+        // Técnico asignado (desde FK tecnico_asignado_id → usuarios)
+        tecnico_nombre:   tec?.nombre   || null,
       };
     });
 
@@ -318,16 +324,24 @@ app.patch("/ordenes/:id", async (req, res) => {
     const nuevoEstado = campos.estado || campos.status;
     const usr = campos.usuario_nombre || "Sistema";
     const uid = campos.usuario_id || null;
-    try {
-      const ordenActualizada = await transicionarEstado(Number(id), nuevoEstado, {
-        usuarioId: uid,
-        usuarioNombre: usr,
-        motivo: "Cambio desde kanban"
-      });
-      return res.json(ordenActualizada);
-    } catch (e) {
-      return res.status(400).json({ error: e.message });
+    const result = await transicionarEstado(Number(id), nuevoEstado, {
+      usuarioId: uid,
+      usuarioNombre: usr,
+      motivo: campos.motivo || "Cambio de estado",
+    });
+    if (!result.ok) {
+      // Si la orden ya está en ese estado, devolver OK silencioso (evita error en borrador técnico)
+      const { data: ordenActual } = await supabase
+        .from("ordenes_trabajo").select("*").eq("id", id).maybeSingle();
+      if (ordenActual?.estado === nuevoEstado) {
+        return res.json(ordenActual);
+      }
+      return res.status(400).json({ error: result.error });
     }
+    // Devolver la orden actualizada
+    const { data: ordenFinal } = await supabase
+      .from("ordenes_trabajo").select("*").eq("id", id).maybeSingle();
+    return res.json(ordenFinal || { ok: true });
   }
 
   const { data, error } = await supabase.from("ordenes_trabajo").update(campos).eq("id", id).select();
@@ -827,10 +841,19 @@ app.get("/diagnosticos", async (req, res) => {
 
     const fixed = (dData || []).map(d => {
       const veh = vehiculoMap[d.vehiculo_id];
+      const moTotal    = Number(d.mano_obra  || 0);
+      const repTotal   = Number(d.repuestos  || 0);
+      const totalCalc  = moTotal + repTotal || Number(d.total || d.costo_estimado || 0);
       return {
         ...d,
         cliente_nombre: clienteMap[d.cliente_id]?.nombre || "Sin cliente",
         vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "Sin vehículo",
+        // Alias: tecnico_nombre apunta a usuario_nombre para compatibilidad con el frontend
+        tecnico_nombre: d.tecnico_nombre || d.usuario_nombre || "—",
+        // Asegurar campos de monto correctamente tipados
+        mano_obra:  moTotal,
+        repuestos:  repTotal,
+        total:      totalCalc,
       };
     });
     res.json(fixed);
@@ -843,21 +866,64 @@ app.get("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
   const { data: diag } = await supabase.from("diagnosticos").select("*").eq("id", id).single();
   if (!diag) return res.json({ error: "No encontrado" });
-  const { data: cotizacion } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", id).single();
-  const { data: avances } = await supabase.from("avances_reparacion").select("*").eq("diagnostico_id", id).order("created_at");
-  const { data: cliente } = await supabase.from("clientes").select("*").eq("id", diag.cliente_id).single();
-  const { data: vehiculo } = await supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).single();
-  res.json({ diag, cotizacion, avances: avances || [], cliente, vehiculo });
+
+  const [
+    { data: cotizacion },
+    { data: avances },
+    { data: cliente },
+    { data: vehiculo },
+  ] = await Promise.all([
+    supabase.from("cotizaciones").select("*").eq("diagnostico_id", id).maybeSingle(),
+    supabase.from("avances_reparacion").select("*").eq("diagnostico_id", id).order("created_at"),
+    supabase.from("clientes").select("*").eq("id", diag.cliente_id).maybeSingle(),
+    supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).maybeSingle(),
+  ]);
+
+  const moTotal   = Number(diag.mano_obra  || 0);
+  const repTotal  = Number(diag.repuestos  || 0);
+  const totalCalc = moTotal + repTotal || Number(diag.total || diag.costo_estimado || 0);
+
+  const diagEnriquecido = {
+    ...diag,
+    tecnico_nombre:  diag.tecnico_nombre  || diag.usuario_nombre || "—",
+    mano_obra:       moTotal,
+    repuestos:       repTotal,
+    total:           totalCalc,
+    // Devolver items del inventario (guardados en cotizaciones.items_detalle)
+    repuestos_items: cotizacion?.items_detalle || [],
+  };
+  res.json({ diag: diagEnriquecido, cotizacion, avances: avances || [], cliente, vehiculo });
 });
 
 app.post("/diagnosticos", async (req, res) => {
+  // ⚠️  repuestos_items NO es columna de la tabla — extraerlo antes del INSERT
+  const { repuestos_items, ...bodyDiag } = req.body;
+
   const { data, error } = await supabase.from("diagnosticos")
-    .insert([{ ...req.body, estado: "PENDIENTE", created_at: new Date() }])
+    .insert([{ ...bodyDiag, estado: "PENDIENTE", created_at: new Date() }])
     .select();
   if (error) return res.json({ error: error.message });
 
   const diag = data[0];
   const ordenId = req.body.orden_id;
+
+  // Guardar repuestos del formulario en cotizaciones.items_detalle
+  if (diag?.id && Array.isArray(repuestos_items)) {
+    const cotPayload = {
+      diagnostico_id: diag.id,
+      items_detalle:  repuestos_items,
+      mano_obra:      Number(diag.mano_obra  || 0),
+      repuestos:      Number(diag.repuestos  || 0),
+      total:          Number(diag.total || diag.costo_estimado || 0),
+    };
+    const { data: cotExist } = await supabase.from("cotizaciones")
+      .select("id").eq("diagnostico_id", diag.id).maybeSingle().catch(() => ({ data: null }));
+    if (cotExist?.id) {
+      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).catch(() => {});
+    } else {
+      await supabase.from("cotizaciones").insert([cotPayload]).catch(() => {});
+    }
+  }
 
   if (ordenId) {
     // Paso 1: RECIBIDO → DIAGNOSTICO (siempre al crear el diagnóstico)
@@ -882,15 +948,38 @@ app.post("/diagnosticos", async (req, res) => {
     }
   }
 
-  res.json(diag);
+  // Devolver diagnóstico con repuestos_items para que el form pueda restaurarlo
+  res.json({ ...diag, repuestos_items: repuestos_items || [] });
 });
 
 app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase.from("diagnosticos").update(req.body).eq("id", id).select();
+
+  // ⚠️  repuestos_items NO es columna de la tabla — extraerlo antes del UPDATE
+  const { repuestos_items, ...bodyDiag } = req.body;
+
+  const { data, error } = await supabase.from("diagnosticos").update(bodyDiag).eq("id", id).select();
   if (error) return res.json({ error: error.message });
 
   const diag = data[0];
+
+  // Actualizar cotizaciones.items_detalle cuando el técnico edita los repuestos
+  if (diag?.id && repuestos_items !== undefined) {
+    const cotPayload = {
+      items_detalle: Array.isArray(repuestos_items) ? repuestos_items : [],
+      mano_obra:     Number(diag.mano_obra  || 0),
+      repuestos:     Number(diag.repuestos  || 0),
+      total:         Number(diag.total || diag.costo_estimado || 0),
+    };
+    const { data: cotExist } = await supabase.from("cotizaciones")
+      .select("id").eq("diagnostico_id", diag.id).maybeSingle().catch(() => ({ data: null }));
+    if (cotExist?.id) {
+      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).catch(() => {});
+    } else {
+      await supabase.from("cotizaciones")
+        .insert([{ ...cotPayload, diagnostico_id: diag.id }]).catch(() => {});
+    }
+  }
 
   // ── Cuando el técnico cierra el diagnóstico → orden pasa a ESPERANDO_APROBACION ──
   if (req.body.estado === "TERMINADO" || req.body.terminado === true) {
@@ -903,9 +992,6 @@ app.patch("/diagnosticos/:id", async (req, res) => {
       if (!r.ok) console.warn(`⚠️ Transición ESPERANDO_APROBACION orden ${diag.orden_id}: ${r.error}`);
     }
   }
-
-  // ── Cuando el técnico agrega avance de reparación → orden ya debe estar en REPARACION ──
-  // (manejado en POST /avances, pero dejamos aquí como respaldo)
 
   // 📚 Auto-crear historial + mantenimiento cuando el diagnóstico pasa a FACTURADO o COMPLETADO
   if (req.body.estado === "FACTURADO" || req.body.estado === "COMPLETADO") {
@@ -1770,60 +1856,108 @@ app.get("/compras", async (req, res) => {
 // Helper interno: captura y persiste el historial completo desde un diagnóstico
 async function crearHistorialDesdeDiagnostico(diagnosticoId) {
   try {
-    const { data: diag } = await supabase.from("diagnosticos").select("*").eq("id", diagnosticoId).single();
-    if (!diag) return;
+    const { data: diag } = await supabase.from("diagnosticos").select("*").eq("id", diagnosticoId).maybeSingle();
+    if (!diag) {
+      console.warn(`⚠️ crearHistorialDesdeDiagnostico: diagnóstico #${diagnosticoId} no encontrado`);
+      return;
+    }
 
-    // Verificar que no exista ya un registro para este diagnóstico
+    // Verificar que no exista ya un registro para este diagnóstico (usa maybeSingle para no lanzar error)
     const { data: existe } = await supabase
       .from("vehiculo_historial")
       .select("id")
       .eq("diagnostico_id", diagnosticoId)
-      .single();
+      .maybeSingle();
     if (existe) {
       console.log(`ℹ️ Historial ya existe para diagnóstico #${diagnosticoId}, omitiendo.`);
       return;
     }
 
-    const { data: vehiculo } = await supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).single();
-    const { data: cliente }  = await supabase.from("clientes").select("*").eq("id", diag.cliente_id).single();
-    const { data: cotizacion } = await supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoId).single();
-    const { data: avances } = await supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoId).order("created_at");
-    const { data: factura } = await supabase.from("facturas").select("ncf").eq("diagnostico_id", diagnosticoId).single();
+    // Obtener la orden para fallback de vehiculo_id / cliente_id y tecnico asignado
+    const { data: orden } = await supabase
+      .from("ordenes_trabajo")
+      .select("id, vehiculo_id, cliente_id, tecnico_asignado_id, numero_orden")
+      .eq("id", diag.orden_id)
+      .maybeSingle()
+      .catch(() => ({ data: null }));
 
-    const trabajos = (avances || [])
-      .map(a => `[${new Date(a.created_at).toLocaleDateString("es-DO")}] ${a.tecnico_nombre || "Técnico"}: ${a.descripcion}`)
-      .join("\n") || diag.mano_de_obra_detalle || null;
+    const vehiculoId = diag.vehiculo_id || orden?.vehiculo_id || null;
+    const clienteId  = diag.cliente_id  || orden?.cliente_id  || null;
+
+    const [vRes, cRes, cotRes, avRes, facRes, tecRes] = await Promise.all([
+      supabase.from("vehiculos").select("*").eq("id", vehiculoId).maybeSingle(),
+      supabase.from("clientes").select("*").eq("id", clienteId).maybeSingle(),
+      supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoId).maybeSingle(),
+      supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoId).order("created_at"),
+      supabase.from("facturas").select("ncf, total").eq("diagnostico_id", diagnosticoId).maybeSingle(),
+      // Resolver nombre del técnico desde usuarios si está asignado en la orden
+      orden?.tecnico_asignado_id
+        ? supabase.from("usuarios").select("nombre").eq("id", orden.tecnico_asignado_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+
+    const vehiculo   = vRes.data;
+    const cliente    = cRes.data;
+    const cotizacion = cotRes.data;
+    const avances    = avRes.data || [];
+    const factura    = facRes.data;
+    const tecUsuario = tecRes.data;
+
+    // Nombre del técnico: tecnico_nombre → usuario_nombre → tecnico asignado en orden
+    const tecnicoNombre =
+      diag.tecnico_nombre ||
+      diag.usuario_nombre ||
+      tecUsuario?.nombre  ||
+      "Sin asignar";
+
+    const trabajos = avances.length > 0
+      ? avances.map(a =>
+          `[${new Date(a.created_at).toLocaleDateString("es-DO")}] ${a.tecnico_nombre || tecnicoNombre}: ${a.descripcion}`
+        ).join("\n")
+      : (diag.mano_de_obra_detalle || diag.trabajos_realizados || null);
+
+    // Costos: cotizacion tiene prioridad; si no hay, usar campos del diagnóstico directamente
+    const costoManoObra = Number(cotizacion?.mano_obra || diag.mano_obra || 0);
+    const costoRepuestos = Number(cotizacion?.repuestos || diag.repuestos || 0);
+    const costoTotal    = Number(
+      cotizacion?.total ||
+      (costoManoObra + costoRepuestos) ||
+      diag.total        ||
+      diag.costo_estimado ||
+      factura?.total    ||
+      0
+    );
 
     await supabase.from("vehiculo_historial").insert([{
-      vehiculo_id:           diag.vehiculo_id || null,
-      placa:                 (vehiculo?.placa || "N/A").toUpperCase().trim(),
-      marca:                 vehiculo?.marca || "",
-      modelo:                vehiculo?.modelo || "",
-      ano:                   vehiculo?.ano || null,
-      color:                 vehiculo?.color || "",
-      cliente_id:            diag.cliente_id || null,
-      cliente_nombre:        cliente?.nombre || "Particular",
-      cliente_telefono:      cliente?.telefono || "",
-      diagnostico_id:        diagnosticoId,
-      fecha_servicio:        new Date(),
-      tipo_servicio:         diag.tipo_servicio || "",
-      diagnostico_general:   diag.tipo_servicio || "",
-      inspeccion_mecanica:   diag.inspeccion_mecanica || null,
-      inspeccion_electrica:  diag.inspeccion_electrica || null,
+      vehiculo_id:            vehiculoId,
+      placa:                  (vehiculo?.placa || "N/A").toUpperCase().trim(),
+      marca:                  vehiculo?.marca  || "",
+      modelo:                 vehiculo?.modelo || "",
+      ano:                    vehiculo?.ano    || null,
+      color:                  vehiculo?.color  || "",
+      cliente_id:             clienteId,
+      cliente_nombre:         cliente?.nombre   || "Particular",
+      cliente_telefono:       cliente?.telefono || "",
+      diagnostico_id:         diagnosticoId,
+      fecha_servicio:         new Date(),
+      tipo_servicio:          diag.tipo_servicio || diag.descripcion || "",
+      diagnostico_general:    diag.descripcion  || diag.tipo_servicio || "",
+      inspeccion_mecanica:    diag.inspeccion_mecanica    || null,
+      inspeccion_electrica:   diag.inspeccion_electrica   || null,
       inspeccion_electronica: diag.inspeccion_electronica || null,
-      codigos_falla:         diag.scanner_resultado || null,
-      fallas_identificadas:  diag.fallas_identificadas || null,
-      observaciones:         diag.observaciones || null,
-      trabajos_realizados:   trabajos,
-      costo_mano_obra:       Number(cotizacion?.mano_obra || 0),
-      costo_repuestos:       Number(cotizacion?.repuestos || 0),
-      costo_total:           Number(cotizacion?.total || diag.costo_estimado || 0),
-      estado:                "ENTREGADO",
-      tecnico_nombre:        diag.tecnico_nombre || null,
-      ncf:                   factura?.ncf || null,
+      codigos_falla:          diag.scanner_resultado      || null,
+      fallas_identificadas:   diag.fallas_identificadas   || null,
+      observaciones:          diag.observaciones          || diag.notas || null,
+      trabajos_realizados:    trabajos,
+      costo_mano_obra:        costoManoObra,
+      costo_repuestos:        costoRepuestos,
+      costo_total:            costoTotal,
+      estado:                 "ENTREGADO",
+      tecnico_nombre:         tecnicoNombre,
+      ncf:                    factura?.ncf || null,
     }]);
 
-    console.log(`✅ Historial guardado — Diagnóstico #${diagnosticoId} | Placa: ${vehiculo?.placa || "N/A"}`);
+    console.log(`✅ Historial guardado — Diagnóstico #${diagnosticoId} | Placa: ${vehiculo?.placa || "N/A"} | Técnico: ${tecnicoNombre}`);
   } catch (err) {
     console.error("❌ crearHistorialDesdeDiagnostico:", err.message);
   }
@@ -3701,25 +3835,43 @@ app.get("/ordenes/:id", async (req, res) => {
       supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
     ]);
 
-    // Avances de reparación (ligados al diagnóstico)
+    // Avances de reparación y cotizacion (ligados al diagnóstico)
     let avances = [];
+    let cotizacionOrden = null;
     if (diagnosticoRes.data?.id) {
-      const { data: av } = await supabase
-        .from("avances_reparacion")
-        .select("*")
-        .eq("diagnostico_id", diagnosticoRes.data.id)
-        .order("created_at", { ascending: true })
-        .catch(() => ({ data: [] }));
-      avances = av || [];
+      const [avRes, cotRes] = await Promise.all([
+        supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoRes.data.id)
+          .order("created_at", { ascending: true }).catch(() => ({ data: [] })),
+        supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoRes.data.id)
+          .maybeSingle().catch(() => ({ data: null })),
+      ]);
+      avances        = avRes.data  || [];
+      cotizacionOrden = cotRes.data || null;
     }
+
+    // Enriquecer diagnóstico con alias, totales calculados y repuestos del inventario
+    const diagRaw = diagnosticoRes.data;
+    const diagnosticoFinal = diagRaw ? (() => {
+      const moTotal   = Number(diagRaw.mano_obra  || 0);
+      const repTotal  = Number(diagRaw.repuestos  || 0);
+      const totalCalc = moTotal + repTotal || Number(diagRaw.total || diagRaw.costo_estimado || 0);
+      return {
+        ...diagRaw,
+        avances,
+        tecnico_nombre:  diagRaw.tecnico_nombre  || diagRaw.usuario_nombre || "—",
+        mano_obra:       moTotal,
+        repuestos:       repTotal,
+        total:           totalCalc,
+        // Incluir items del inventario para que el form pueda restaurarlos
+        repuestos_items: cotizacionOrden?.items_detalle || [],
+      };
+    })() : null;
 
     res.json({
       orden,
       cliente:     clienteRes.data    || null,
       vehiculo:    vehiculoRes.data   || null,
-      diagnostico: diagnosticoRes.data
-        ? { ...diagnosticoRes.data, avances }
-        : null,
+      diagnostico: diagnosticoFinal,
       log:         logRes.data        || [],
       inspeccion:  inspeccionRes.data || null,
     });
@@ -4042,6 +4194,53 @@ app.post("/permisos", async (req, res) => {
       );
     if (error) return res.status(500).json({ error: error.message });
     res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// ⚙️  CONFIGURACIÓN GENERAL DEL SISTEMA
+// Lee / escribe claves en la tabla config_sistema
+// =====================================================
+
+// GET /config — devuelve todas las claves como array [{clave, valor, descripcion}]
+app.get("/config", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("config_sistema")
+      .select("clave, valor, descripcion")
+      .not("clave", "eq", "permisos_roles") // excluir la clave de RBAC
+      .order("clave");
+    if (error) return res.status(500).json({ error: error.message });
+    // Normalizar: valor puede ser JSONB o texto plano
+    const rows = (data || []).map(r => ({
+      ...r,
+      valor: typeof r.valor === "string" ? r.valor : (r.valor ? String(r.valor) : ""),
+    }));
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// PUT /config — recibe [{clave, valor}] y hace upsert de cada par
+app.put("/config", async (req, res) => {
+  try {
+    const pares = req.body; // array de {clave, valor}
+    if (!Array.isArray(pares) || pares.length === 0)
+      return res.status(400).json({ error: "Se esperaba un array de {clave, valor}" });
+
+    for (const { clave, valor } of pares) {
+      if (!clave) continue;
+      await supabase
+        .from("config_sistema")
+        .upsert(
+          { clave, valor: String(valor ?? ""), updated_at: new Date().toISOString() },
+          { onConflict: "clave" }
+        );
+    }
+    res.json({ ok: true, updated: pares.length });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
