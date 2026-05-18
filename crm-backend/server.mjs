@@ -226,18 +226,22 @@ app.get("/ordenes", async (req, res) => {
     if (oError) throw new Error(oError.message);
 
     // Query 2, 3 y 4: clientes, vehículos y técnicos asignados
-    const [{ data: cData }, { data: vData }, { data: uData }] = await Promise.all([
-      supabase.from("clientes").select("id, nombre, telefono"),
-      supabase.from("vehiculos").select("id, marca, modelo, placa, ano"),
+    // Cada query tiene su propio catch para que un fallo aislado no rompa toda la lista
+    const [cRes, vRes, uRes] = await Promise.all([
+      supabase.from("clientes").select("id, nombre, telefono").catch(() => ({ data: [] })),
+      supabase.from("vehiculos").select("id, marca, modelo, placa, ano").catch(() => ({ data: [] })),
       supabase.from("usuarios").select("id, nombre").catch(() => ({ data: [] })),
     ]);
+    const cData = cRes.data || [];
+    const vData = vRes.data || [];
+    const uData = uRes.data || [];
 
     const clienteMap = {};
-    (cData || []).forEach(c => { clienteMap[c.id] = c; });
+    cData.forEach(c => { clienteMap[c.id] = c; });
     const vehiculoMap = {};
-    (vData || []).forEach(v => { vehiculoMap[v.id] = v; });
+    vData.forEach(v => { vehiculoMap[v.id] = v; });
     const usuarioMap = {};
-    (uData || []).forEach(u => { usuarioMap[u.id] = u; });
+    uData.forEach(u => { usuarioMap[u.id] = u; });
 
     const fixed = (oData || []).map(o => {
       const cli = clienteMap[o.cliente_id];
@@ -830,14 +834,16 @@ app.get("/diagnosticos", async (req, res) => {
     const { data: dData, error: dError } = await qDiag;
     if (dError) return res.json({ error: dError.message });
 
-    const [{ data: cData }, { data: vData }] = await Promise.all([
-      supabase.from("clientes").select("id, nombre"),
-      supabase.from("vehiculos").select("id, marca, modelo, placa"),
+    const [cRes2, vRes2] = await Promise.all([
+      supabase.from("clientes").select("id, nombre").catch(() => ({ data: [] })),
+      supabase.from("vehiculos").select("id, marca, modelo, placa").catch(() => ({ data: [] })),
     ]);
+    const cData = cRes2.data || [];
+    const vData = vRes2.data || [];
     const clienteMap = {};
-    (cData || []).forEach(c => { clienteMap[c.id] = c; });
+    cData.forEach(c => { clienteMap[c.id] = c; });
     const vehiculoMap = {};
-    (vData || []).forEach(v => { vehiculoMap[v.id] = v; });
+    vData.forEach(v => { vehiculoMap[v.id] = v; });
 
     const fixed = (dData || []).map(d => {
       const veh = vehiculoMap[d.vehiculo_id];
