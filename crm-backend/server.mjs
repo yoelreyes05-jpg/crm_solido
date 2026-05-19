@@ -38,7 +38,7 @@ app.get("/debug/orden/:id", async (req, res) => {
   const [ordRes, diagRes, allDiags] = await Promise.all([
     supabase.from("ordenes_trabajo").select("id, estado, numero_orden").eq("id", idNum).maybeSingle(),
     supabase.from("diagnosticos").select("*").eq("orden_id", idNum),
-    supabase.from("diagnosticos").select("id, orden_id, descripcion, created_at").order("created_at", { ascending: false }).limit(10),
+    supabase.from("diagnosticos").select("*").order("id", { ascending: false }).limit(10),
   ]);
   res.json({
     orden:              ordRes.data,
@@ -46,6 +46,7 @@ app.get("/debug/orden/:id", async (req, res) => {
     diagnosticos_orden: diagRes.data,
     diagnosticos_error: diagRes.error?.message || null,
     ultimos_10_diags:   allDiags.data,
+    ultimos_10_error:   allDiags.error?.message || null,
   });
 });
 
