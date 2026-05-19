@@ -4279,4 +4279,31 @@ app.patch("/inspeccion/:id", async (req, res) => {
 
 // =====================================================
 // 🔍 BÚSQUEDA GLOBAL
-// =========================================
+// =====================================================
+app.get("/buscar", async (req, res) => {
+  try {
+    const { q } = req.query;
+    if (!q || q.trim().length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
+    const term = `%${q.trim()}%`;
+    const [cliRes, vehRes, ordRes] = await Promise.all([
+      supabase.from("clientes").select("id, nombre, telefono, email, cedula_rnc").or(`nombre.ilike.${term},telefono.ilike.${term},email.ilike.${term},cedula_rnc.ilike.${term}`).limit(5),
+      supabase.from("vehiculos").select("id, placa, marca, modelo, ano, color").or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`).limit(5),
+      supabase.from("ordenes_trabajo").select("id, numero_orden, estado, created_at").or(`numero_orden.ilike.${term}`).limit(5),
+    ]);
+    res.json({
+      clientes:  cliRes.data  || [],
+      vehiculos: vehRes.data  || [],
+      ordenes:   ordRes.data  || [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// =====================================================
+// 🚀 INICIAR SERVIDOR
+// =====================================================
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`✅ SÓLIDO AUTO SERVICIO — servidor activo en puerto ${PORT}`);
+});
