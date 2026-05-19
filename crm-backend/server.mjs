@@ -1885,6 +1885,7 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       .select("id, vehiculo_id, cliente_id, tecnico_asignado_id, numero_orden")
       .eq("id", diag.orden_id)
       .maybeSingle()
+      .then(r => r)
       .catch(() => ({ data: null }));
 
     const vehiculoId = diag.vehiculo_id || orden?.vehiculo_id || null;
@@ -3847,9 +3848,9 @@ app.get("/ordenes/:id", async (req, res) => {
     if (diagnosticoRes.data?.id) {
       const [avRes, cotRes] = await Promise.all([
         supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoRes.data.id)
-          .order("created_at", { ascending: true }).catch(() => ({ data: [] })),
+          .order("created_at", { ascending: true }).then(r => r).catch(() => ({ data: [] })),
         supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoRes.data.id)
-          .maybeSingle().catch(() => ({ data: null })),
+          .maybeSingle().then(r => r).catch(() => ({ data: null })),
       ]);
       avances        = avRes.data  || [];
       cotizacionOrden = cotRes.data || null;
