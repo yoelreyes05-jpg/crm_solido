@@ -228,9 +228,9 @@ app.get("/ordenes", async (req, res) => {
     // Query 2, 3 y 4: clientes, vehículos y técnicos asignados
     // Cada query tiene su propio catch para que un fallo aislado no rompa toda la lista
     const [cRes, vRes, uRes] = await Promise.all([
-      supabase.from("clientes").select("id, nombre, telefono").catch(() => ({ data: [] })),
-      supabase.from("vehiculos").select("id, marca, modelo, placa, ano").catch(() => ({ data: [] })),
-      supabase.from("usuarios").select("id, nombre").catch(() => ({ data: [] })),
+      supabase.from("clientes").select("id, nombre, telefono").then(r => r).catch(() => ({ data: [] })),
+      supabase.from("vehiculos").select("id, marca, modelo, placa, ano").then(r => r).catch(() => ({ data: [] })),
+      supabase.from("usuarios").select("id, nombre").then(r => r).catch(() => ({ data: [] })),
     ]);
     const cData = cRes.data || [];
     const vData = vRes.data || [];
@@ -835,8 +835,8 @@ app.get("/diagnosticos", async (req, res) => {
     if (dError) return res.status(500).json({ error: dError.message });
 
     const [cRes2, vRes2] = await Promise.all([
-      supabase.from("clientes").select("id, nombre").catch(() => ({ data: [] })),
-      supabase.from("vehiculos").select("id, marca, modelo, placa").catch(() => ({ data: [] })),
+      supabase.from("clientes").select("id, nombre").then(r => r).catch(() => ({ data: [] })),
+      supabase.from("vehiculos").select("id, marca, modelo, placa").then(r => r).catch(() => ({ data: [] })),
     ]);
     const cData = cRes2.data || [];
     const vData = vRes2.data || [];
@@ -923,11 +923,11 @@ app.post("/diagnosticos", async (req, res) => {
       total:          Number(diag.total || diag.costo_estimado || 0),
     };
     const { data: cotExist } = await supabase.from("cotizaciones")
-      .select("id").eq("diagnostico_id", diag.id).maybeSingle().catch(() => ({ data: null }));
+      .select("id").eq("diagnostico_id", diag.id).maybeSingle().then(r => r).catch(() => ({ data: null }));
     if (cotExist?.id) {
-      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).catch(() => {});
+      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).then(r => r).catch(() => {});
     } else {
-      await supabase.from("cotizaciones").insert([cotPayload]).catch(() => {});
+      await supabase.from("cotizaciones").insert([cotPayload]).then(r => r).catch(() => {});
     }
   }
 
@@ -978,12 +978,12 @@ app.patch("/diagnosticos/:id", async (req, res) => {
       total:         Number(diag.total || diag.costo_estimado || 0),
     };
     const { data: cotExist } = await supabase.from("cotizaciones")
-      .select("id").eq("diagnostico_id", diag.id).maybeSingle().catch(() => ({ data: null }));
+      .select("id").eq("diagnostico_id", diag.id).maybeSingle().then(r => r).catch(() => ({ data: null }));
     if (cotExist?.id) {
-      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).catch(() => {});
+      await supabase.from("cotizaciones").update(cotPayload).eq("id", cotExist.id).then(r => r).catch(() => {});
     } else {
       await supabase.from("cotizaciones")
-        .insert([{ ...cotPayload, diagnostico_id: diag.id }]).catch(() => {});
+        .insert([{ ...cotPayload, diagnostico_id: diag.id }]).then(r => r).catch(() => {});
     }
   }
 
@@ -1164,7 +1164,7 @@ app.post("/avances", async (req, res) => {
   if (error) return res.json({ error: error.message });
 
   if (diagId) {
-    await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).catch(() => {});
+    await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).then(r => r).catch(() => {});
   }
 
   // Auto-transicionar la orden a REPARACION si está en DIAGNOSTICO o ESPERANDO_APROBACION
@@ -3796,7 +3796,7 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
   // Intentar guardar campo de fecha (silencioso si la columna no existe aún en Supabase)
   const fechaExtra = camposFecha[nuevoEstado];
   if (fechaExtra) {
-    await supabase.from("ordenes_trabajo").update(fechaExtra).eq("id", idNum).catch(() => {});
+    await supabase.from("ordenes_trabajo").update(fechaExtra).eq("id", idNum).then(r => r).catch(() => {});
   }
 
   // Insertar en log de auditoría
@@ -3834,11 +3834,11 @@ app.get("/ordenes/:id", async (req, res) => {
 
     // Cada query es independiente — si una tabla no existe todavía, devuelve null/[] sin romper todo
     const [clienteRes, vehiculoRes, diagnosticoRes, logRes, inspeccionRes] = await Promise.all([
-      supabase.from("clientes").select("*").eq("id", orden.cliente_id).maybeSingle().catch(() => ({ data: null })),
-      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle().catch(() => ({ data: null })),
-      supabase.from("diagnosticos").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
-      supabase.from("orden_trabajo_log").select("*").eq("orden_id", idNum).order("created_at", { ascending: true }).catch(() => ({ data: [] })),
-      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().catch(() => ({ data: null })),
+      supabase.from("clientes").select("*").eq("id", orden.cliente_id).maybeSingle().then(r => r).catch(() => ({ data: null })),
+      supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle().then(r => r).catch(() => ({ data: null })),
+      supabase.from("diagnosticos").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().then(r => r).catch(() => ({ data: null })),
+      supabase.from("orden_trabajo_log").select("*").eq("orden_id", idNum).order("created_at", { ascending: true }).then(r => r).catch(() => ({ data: [] })),
+      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", idNum).order("created_at", { ascending: false }).limit(1).maybeSingle().then(r => r).catch(() => ({ data: null })),
     ]);
 
     // Avances de reparación y cotizacion (ligados al diagnóstico)
