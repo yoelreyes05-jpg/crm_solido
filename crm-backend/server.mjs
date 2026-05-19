@@ -919,13 +919,20 @@ app.get("/diagnosticos/:id", async (req, res) => {
 });
 
 app.post("/diagnosticos", async (req, res) => {
-  // ⚠️  repuestos_items NO es columna de la tabla — extraerlo antes del INSERT
-  const { repuestos_items, ...bodyDiag } = req.body;
+  // ⚠️  Extraer campos que NO son columnas de la tabla antes del INSERT
+  const {
+    repuestos_items, // guardado en cotizaciones.items_detalle
+    terminado,       // flag de control, no columna
+    ...bodyDiag
+  } = req.body;
 
   const { data, error } = await supabase.from("diagnosticos")
     .insert([{ ...bodyDiag, estado: "PENDIENTE", created_at: new Date() }])
     .select();
-  if (error) return res.json({ error: error.message });
+  if (error) {
+    console.error("❌ POST /diagnosticos INSERT error:", error.message);
+    return res.status(500).json({ error: error.message });
+  }
 
   const diag = data[0];
   const ordenId = req.body.orden_id;
@@ -978,11 +985,18 @@ app.post("/diagnosticos", async (req, res) => {
 app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
 
-  // ⚠️  repuestos_items NO es columna de la tabla — extraerlo antes del UPDATE
-  const { repuestos_items, ...bodyDiag } = req.body;
+  // ⚠️  Extraer campos que NO son columnas de la tabla antes del UPDATE
+  const {
+    repuestos_items, // guardado en cotizaciones.items_detalle
+    terminado,       // flag de control, no columna
+    ...bodyDiag
+  } = req.body;
 
   const { data, error } = await supabase.from("diagnosticos").update(bodyDiag).eq("id", id).select();
-  if (error) return res.json({ error: error.message });
+  if (error) {
+    console.error("❌ PATCH /diagnosticos/:id UPDATE error:", error.message);
+    return res.status(500).json({ error: error.message });
+  }
 
   const diag = data[0];
 
