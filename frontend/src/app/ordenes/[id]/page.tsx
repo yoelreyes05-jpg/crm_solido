@@ -118,8 +118,8 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
       ${diag.tiempo_estimado?`<div class="info-row"><strong>Tiempo estimado:</strong> ${diag.tiempo_estimado}</div>`:""}
     </div>
   </div>
-  ${diag.hallazgos||diag.descripcion?`<div class="sec-titulo">🔍 Hallazgos / Diagnóstico</div><div class="sec-texto">${diag.hallazgos||diag.descripcion}</div>`:""}
-  ${diag.notas?`<div class="sec-titulo" style="background:#fffbeb;border-left-color:#f59e0b;color:#92400e">📝 Notas</div><div class="sec-texto">${diag.notas}</div>`:""}
+  ${diag.descripcion||diag.fallas_identificadas?`<div class="sec-titulo">🔍 Hallazgos / Diagnóstico</div><div class="sec-texto">${diag.descripcion||diag.fallas_identificadas}</div>`:""}
+  ${(diag.notas||diag.observaciones)?`<div class="sec-titulo" style="background:#fffbeb;border-left-color:#f59e0b;color:#92400e">📝 Notas</div><div class="sec-texto">${diag.notas||diag.observaciones}</div>`:""}
   ${total>0?`<div class="sec-titulo">💰 Cotización</div>
   <table><thead><tr><th>Descripción</th><th style="text-align:right;width:200px">Monto (RD$)</th></tr></thead>
   <tbody>${detalleLineas}${repuestos>0?`<tr><td style="padding:10px 12px;border-bottom:1px solid #eee;font-size:14px">Repuestos e Insumos</td><td style="padding:10px 12px;border-bottom:1px solid #eee;text-align:right;font-size:14px">RD$ ${repuestos.toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`:""}</tbody>
@@ -406,10 +406,10 @@ ${(mostrar ? mostrar.diagnostico : !!diag) ? `
     <div class="info-row">Registrado: ${fmtDate(diag.created_at)}</div>
   </div>
 </div>
-${diag.hallazgos||diag.descripcion ? `
+${diag.descripcion||diag.fallas_identificadas ? `
   <div style="margin-bottom:12px">
     <div style="font-size:11px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Hallazgos / Descripción</div>
-    <div class="hallazgos">${diag.hallazgos||diag.descripcion}</div>
+    <div class="hallazgos">${diag.descripcion||diag.fallas_identificadas}</div>
   </div>` : ""}
 ${diag.mano_de_obra_detalle ? `
   <div style="margin-bottom:12px">
@@ -419,10 +419,10 @@ ${diag.mano_de_obra_detalle ? `
     </div>
   </div>` : ""}
 ${repuestosTabla}
-${diag.notas ? `
+${(diag.notas||diag.observaciones) ? `
   <div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:10px 14px;margin-bottom:12px">
     <div style="font-size:11px;font-weight:700;color:#92400e;margin-bottom:4px">📝 NOTAS</div>
-    <div style="font-size:13px">${diag.notas}</div>
+    <div style="font-size:13px">${diag.notas||diag.observaciones}</div>
   </div>` : ""}
 
 <!-- COTIZACIÓN -->
@@ -963,11 +963,11 @@ export default function OrdenDetallePage() {
               )}
             </div>
 
-            {(diagnostico.hallazgos || diagnostico.descripcion) && (
+            {(diagnostico.descripcion || diagnostico.fallas_identificadas) && (
               <div style={{ marginBottom:14 }}>
-                <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#6b7280", textTransform:"uppercase" }}>Hallazgos</p>
+                <p style={{ margin:"0 0 6px", fontSize:11, fontWeight:700, color:"#6b7280", textTransform:"uppercase" }}>Hallazgos / Diagnóstico</p>
                 <div style={{ background:"#f9fafb", border:"1px solid #f1f5f9", borderRadius:8, padding:"10px 14px", fontSize:13, color:"#374151", whiteSpace:"pre-wrap", lineHeight:1.6 }}>
-                  {diagnostico.hallazgos || diagnostico.descripcion}
+                  {diagnostico.descripcion || diagnostico.fallas_identificadas}
                 </div>
               </div>
             )}

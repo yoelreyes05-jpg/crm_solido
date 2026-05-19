@@ -19,13 +19,21 @@ interface Orden {
 interface Diagnostico {
   id: number;
   orden_id: number;
-  descripcion: string;
-  mano_obra: number;
-  repuestos: number;
-  total: number;
-  tiempo_estimado?: string;
+  // Columnas reales de la tabla diagnosticos
+  fallas_identificadas?: string;
+  tipo_servicio?: string;
   mano_de_obra_detalle?: string;
-  notas?: string;
+  observaciones?: string;
+  costo_estimado?: number;
+  tecnico_nombre?: string;
+  // Aliases que devuelve el backend para compatibilidad
+  descripcion?: string;  // = fallas_identificadas
+  hallazgos?: string;    // = fallas_identificadas
+  notas?: string;        // = observaciones
+  mano_obra?: number;    // desde cotizaciones
+  repuestos?: number;    // desde cotizaciones
+  total?: number;        // costo total
+  tiempo_estimado?: string;
 }
 
 interface Toast {
@@ -434,6 +442,19 @@ function TarjetaOrden({
             💰 Cotización del Técnico
           </p>
 
+          {/* Hallazgos / descripción técnica */}
+          {(diagnostico.descripcion || diagnostico.fallas_identificadas) && (
+            <div style={{ marginBottom: 12 }}>
+              <p style={{ color: C.muted, fontSize: 11, margin: "0 0 4px", fontWeight: 600 }}>
+                🔬 Diagnóstico técnico
+              </p>
+              <p style={{ color: C.text, fontSize: 13, margin: 0, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                {diagnostico.descripcion || diagnostico.fallas_identificadas}
+              </p>
+            </div>
+          )}
+
+          {/* Desglose de costos */}
           <div
             style={{
               display: "grid",
@@ -442,18 +463,22 @@ function TarjetaOrden({
               marginBottom: 12,
             }}
           >
-            <div>
-              <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px" }}>Mano de obra</p>
-              <p style={{ color: C.text, fontSize: 15, fontWeight: 600, margin: 0 }}>
-                {fmtDinero(diagnostico.mano_obra)}
-              </p>
-            </div>
-            <div>
-              <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px" }}>Repuestos</p>
-              <p style={{ color: C.text, fontSize: 15, fontWeight: 600, margin: 0 }}>
-                {fmtDinero(diagnostico.repuestos)}
-              </p>
-            </div>
+            {(diagnostico.mano_obra ?? 0) > 0 && (
+              <div>
+                <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px" }}>Mano de obra</p>
+                <p style={{ color: C.text, fontSize: 15, fontWeight: 600, margin: 0 }}>
+                  {fmtDinero(diagnostico.mano_obra ?? 0)}
+                </p>
+              </div>
+            )}
+            {(diagnostico.repuestos ?? 0) > 0 && (
+              <div>
+                <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px" }}>Repuestos</p>
+                <p style={{ color: C.text, fontSize: 15, fontWeight: 600, margin: 0 }}>
+                  {fmtDinero(diagnostico.repuestos ?? 0)}
+                </p>
+              </div>
+            )}
             {diagnostico.tiempo_estimado && (
               <div>
                 <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px" }}>Tiempo estimado</p>
@@ -485,18 +510,18 @@ function TarjetaOrden({
                 letterSpacing: -0.5,
               }}
             >
-              {fmtDinero(diagnostico.total)}
+              {fmtDinero(diagnostico.total ?? diagnostico.costo_estimado ?? 0)}
             </span>
           </div>
 
           {diagnostico.mano_de_obra_detalle && (
             <div style={{ marginTop: 10 }}>
-              <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px", fontWeight: 600 }}>Detalle mano de obra</p>
-              <p style={{ color: C.text, fontSize: 13, margin: 0 }}>{diagnostico.mano_de_obra_detalle}</p>
+              <p style={{ color: C.muted, fontSize: 11, margin: "0 0 2px", fontWeight: 600 }}>Trabajos a realizar</p>
+              <p style={{ color: C.text, fontSize: 13, margin: 0, whiteSpace: "pre-wrap" }}>{diagnostico.mano_de_obra_detalle}</p>
             </div>
           )}
 
-          {diagnostico.notas && (
+          {(diagnostico.notas || diagnostico.observaciones) && (
             <div
               style={{
                 marginTop: 10,
@@ -507,7 +532,7 @@ function TarjetaOrden({
               }}
             >
               <p style={{ color: C.yellow, fontSize: 11, margin: "0 0 2px", fontWeight: 700 }}>NOTAS DEL TÉCNICO</p>
-              <p style={{ color: C.text, fontSize: 13, margin: 0 }}>{diagnostico.notas}</p>
+              <p style={{ color: C.text, fontSize: 13, margin: 0 }}>{diagnostico.notas || diagnostico.observaciones}</p>
             </div>
           )}
         </div>

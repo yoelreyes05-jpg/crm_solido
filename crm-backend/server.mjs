@@ -864,19 +864,21 @@ app.get("/diagnosticos", async (req, res) => {
 
     const fixed = (dData || []).map(d => {
       const veh = vehiculoMap[d.vehiculo_id];
-      const moTotal    = Number(d.mano_obra  || 0);
-      const repTotal   = Number(d.repuestos  || 0);
-      const totalCalc  = moTotal + repTotal || Number(d.total || d.costo_estimado || 0);
+      // La tabla diagnosticos guarda costo_estimado como total; mano_obra/repuestos están en cotizaciones
+      const totalCalc = Number(d.costo_estimado || 0);
       return {
         ...d,
         cliente_nombre: clienteMap[d.cliente_id]?.nombre || "Sin cliente",
         vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "Sin vehículo",
-        // Alias: tecnico_nombre apunta a usuario_nombre para compatibilidad con el frontend
         tecnico_nombre: d.tecnico_nombre || d.usuario_nombre || "—",
-        // Asegurar campos de monto correctamente tipados
-        mano_obra:  moTotal,
-        repuestos:  repTotal,
+        // Totales — mano_obra/repuestos individuales solo están en cotizaciones (join costoso aquí)
+        mano_obra:  0,
+        repuestos:  0,
         total:      totalCalc,
+        // Aliases de compatibilidad: los nombres que usa el frontend
+        descripcion: d.fallas_identificadas || d.tipo_servicio || "",
+        hallazgos:   d.fallas_identificadas || "",
+        notas:       d.observaciones || "",
       };
     });
     res.json(fixed);
@@ -902,32 +904,60 @@ app.get("/diagnosticos/:id", async (req, res) => {
     supabase.from("vehiculos").select("*").eq("id", diag.vehiculo_id).maybeSingle(),
   ]);
 
-  const moTotal   = Number(diag.mano_obra  || 0);
-  const repTotal  = Number(diag.repuestos  || 0);
-  const totalCalc = moTotal + repTotal || Number(diag.total || diag.costo_estimado || 0);
+  // mano_obra y repuestos viven en cotizaciones, NO en la tabla diagnosticos
+  const moTotal   = Number(cotizacion?.mano_obra  || 0);
+  const repTotal  = Number(cotizacion?.repuestos  || 0);
+  const totalCalc = Number(cotizacion?.total || 0) || (moTotal + repTotal) || Number(diag.costo_estimado || 0);
 
   const diagEnriquecido = {
     ...diag,
-    tecnico_nombre:  diag.tecnico_nombre  || diag.usuario_nombre || "—",
-    mano_obra:       moTotal,
-    repuestos:       repTotal,
-    total:           totalCalc,
-    // Devolver items del inventario (guardados en cotizaciones.items_detalle)
-    repuestos_items: cotizacion?.items_detalle || [],
+    tecnico_nombre:   diag.tecnico_nombre  || diag.usuario_nombre || "—",
+    mano_obra:        moTotal,
+    repuestos:        repTotal,
+    total:            totalCalc,
+    tiempo_estimado:  cotizacion?.tiempo_estimado || null,
+    repuestos_items:  cotizacion?.items_detalle || [],
+    // Aliases de compatibilidad con el frontend
+    descripcion:      diag.fallas_identificadas || diag.tipo_servicio || "",
+    hallazgos:        diag.fallas_identificadas || "",
+    notas:            diag.observaciones || "",
   };
   res.json({ diag: diagEnriquecido, cotizacion, avances: avances || [], cliente, vehiculo });
 });
 
 app.post("/diagnosticos", async (req, res) => {
   // ⚠️  Extraer campos que NO son columnas de la tabla antes del INSERT
+  // La tabla diagnosticos NO tiene: mano_obra, repuestos, descripcion, notas, tiempo_estimado, total
+  // Columnas reales: fallas_identificadas, observaciones, costo_estimado, mano_de_obra_detalle
   const {
-    repuestos_items, // guardado en cotizaciones.items_detalle
-    terminado,       // flag de control, no columna
+    repuestos_items,  // guardado en cotizaciones.items_detalle
+    terminado,        // flag de control, no columna
+    descripcion,      // → fallas_identificadas
+    mano_obra,        // → costo_estimado (sumado con repuestos) + cotizaciones.mano_obra
+    repuestos,        // → costo_estimado + cotizaciones.repuestos
+    tiempo_estimado,  // → cotizaciones.tiempo_estimado (no existe en diagnosticos)
+    notas,            // → observaciones
+    total,            // → calculado
     ...bodyDiag
   } = req.body;
 
+  const cotManoObra  = Number(mano_obra  || 0);
+  const cotRepuestos = Number(repuestos  || 0);
+  const costoTotal   = (cotManoObra + cotRepuestos) || Number(bodyDiag.costo_estimado || 0);
+
+  // Mapear usuario_nombre → tecnico_nombre; campos frontend → columnas reales
+  const insertPayload = {
+    ...bodyDiag,
+    tecnico_nombre:       bodyDiag.usuario_nombre || bodyDiag.tecnico_nombre || null,
+    estado:               "PENDIENTE",
+    created_at:           new Date(),
+    fallas_identificadas: bodyDiag.fallas_identificadas || descripcion || null,
+    observaciones:        bodyDiag.observaciones || notas || null,
+    costo_estimado:       costoTotal,
+  };
+
   const { data, error } = await supabase.from("diagnosticos")
-    .insert([{ ...bodyDiag, estado: "PENDIENTE", created_at: new Date() }])
+    .insert([insertPayload])
     .select();
   if (error) {
     console.error("❌ POST /diagnosticos INSERT error:", error.message);
@@ -937,14 +967,16 @@ app.post("/diagnosticos", async (req, res) => {
   const diag = data[0];
   const ordenId = req.body.orden_id;
 
-  // Guardar repuestos del formulario en cotizaciones.items_detalle
-  if (diag?.id && Array.isArray(repuestos_items)) {
+  // Guardar mano_obra, repuestos, items y tiempo en cotizaciones (tabla correcta para ese desglose)
+  if (diag?.id) {
     const cotPayload = {
-      diagnostico_id: diag.id,
-      items_detalle:  repuestos_items,
-      mano_obra:      Number(diag.mano_obra  || 0),
-      repuestos:      Number(diag.repuestos  || 0),
-      total:          Number(diag.total || diag.costo_estimado || 0),
+      diagnostico_id:      diag.id,
+      items_detalle:       Array.isArray(repuestos_items) ? repuestos_items : [],
+      mano_obra:           cotManoObra,
+      repuestos:           cotRepuestos,
+      total:               costoTotal,
+      tiempo_estimado:     tiempo_estimado || null,
+      mano_de_obra_detalle: bodyDiag.mano_de_obra_detalle || null,
     };
     const { data: cotExist } = await supabase.from("cotizaciones")
       .select("id").eq("diagnostico_id", diag.id).maybeSingle().then(r => r).catch(() => ({ data: null }));
@@ -978,21 +1010,51 @@ app.post("/diagnosticos", async (req, res) => {
     }
   }
 
-  // Devolver diagnóstico con repuestos_items para que el form pueda restaurarlo
-  res.json({ ...diag, repuestos_items: repuestos_items || [] });
+  // Devolver diagnóstico enriquecido con aliases para el frontend
+  res.json({
+    ...diag,
+    repuestos_items:     Array.isArray(repuestos_items) ? repuestos_items : [],
+    // Aliases de compatibilidad con el frontend
+    descripcion:         diag.fallas_identificadas || diag.tipo_servicio || "",
+    hallazgos:           diag.fallas_identificadas || "",
+    notas:               diag.observaciones || "",
+    mano_obra:           cotManoObra,
+    repuestos:           cotRepuestos,
+    total:               costoTotal,
+    tiempo_estimado:     tiempo_estimado || null,
+  });
 });
 
 app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
 
   // ⚠️  Extraer campos que NO son columnas de la tabla antes del UPDATE
+  // La tabla diagnosticos NO tiene: mano_obra, repuestos, descripcion, notas, tiempo_estimado, total
   const {
-    repuestos_items, // guardado en cotizaciones.items_detalle
-    terminado,       // flag de control, no columna
+    repuestos_items,  // guardado en cotizaciones.items_detalle
+    terminado,        // flag de control, no columna
+    descripcion,      // → fallas_identificadas
+    mano_obra,        // → costo_estimado + cotizaciones.mano_obra
+    repuestos,        // → costo_estimado + cotizaciones.repuestos
+    tiempo_estimado,  // → cotizaciones.tiempo_estimado
+    notas,            // → observaciones
+    total,            // → calculado
     ...bodyDiag
   } = req.body;
 
-  const { data, error } = await supabase.from("diagnosticos").update(bodyDiag).eq("id", id).select();
+  const cotManoObra  = Number(mano_obra  || 0);
+  const cotRepuestos = Number(repuestos  || 0);
+
+  // Construir payload con sólo columnas reales
+  const updatePayload = { ...bodyDiag };
+  if (descripcion !== undefined) updatePayload.fallas_identificadas = bodyDiag.fallas_identificadas || descripcion;
+  if (notas !== undefined)       updatePayload.observaciones = bodyDiag.observaciones || notas;
+  if (mano_obra !== undefined || repuestos !== undefined) {
+    const nuevoTotal = cotManoObra + cotRepuestos;
+    if (nuevoTotal > 0) updatePayload.costo_estimado = nuevoTotal;
+  }
+
+  const { data, error } = await supabase.from("diagnosticos").update(updatePayload).eq("id", id).select();
   if (error) {
     console.error("❌ PATCH /diagnosticos/:id UPDATE error:", error.message);
     return res.status(500).json({ error: error.message });
@@ -1000,14 +1062,22 @@ app.patch("/diagnosticos/:id", async (req, res) => {
 
   const diag = data[0];
 
-  // Actualizar cotizaciones.items_detalle cuando el técnico edita los repuestos
-  if (diag?.id && repuestos_items !== undefined) {
-    const cotPayload = {
-      items_detalle: Array.isArray(repuestos_items) ? repuestos_items : [],
-      mano_obra:     Number(diag.mano_obra  || 0),
-      repuestos:     Number(diag.repuestos  || 0),
-      total:         Number(diag.total || diag.costo_estimado || 0),
-    };
+  // Actualizar cotizaciones cuando el técnico edita costos o repuestos
+  const actualizarCot = repuestos_items !== undefined || mano_obra !== undefined
+    || repuestos !== undefined || tiempo_estimado !== undefined
+    || bodyDiag.mano_de_obra_detalle !== undefined;
+
+  if (diag?.id && actualizarCot) {
+    const costoEst = Number(diag.costo_estimado || 0);
+    const cotPayload = {};
+    if (Array.isArray(repuestos_items))        cotPayload.items_detalle       = repuestos_items;
+    if (mano_obra  !== undefined)              cotPayload.mano_obra           = cotManoObra;
+    if (repuestos  !== undefined)              cotPayload.repuestos           = cotRepuestos;
+    if (mano_obra !== undefined || repuestos !== undefined)
+                                               cotPayload.total               = cotManoObra + cotRepuestos || costoEst;
+    if (tiempo_estimado !== undefined)         cotPayload.tiempo_estimado     = tiempo_estimado;
+    if (bodyDiag.mano_de_obra_detalle !== undefined) cotPayload.mano_de_obra_detalle = bodyDiag.mano_de_obra_detalle;
+
     const { data: cotExist } = await supabase.from("cotizaciones")
       .select("id").eq("diagnostico_id", diag.id).maybeSingle().then(r => r).catch(() => ({ data: null }));
     if (cotExist?.id) {
@@ -1040,7 +1110,18 @@ app.patch("/diagnosticos/:id", async (req, res) => {
     );
   }
 
-  res.json(diag);
+  // Devolver con aliases de compatibilidad para el frontend
+  res.json({
+    ...diag,
+    repuestos_items:  Array.isArray(repuestos_items) ? repuestos_items : [],
+    descripcion:      diag.fallas_identificadas || diag.tipo_servicio || "",
+    hallazgos:        diag.fallas_identificadas || "",
+    notas:            diag.observaciones || "",
+    mano_obra:        cotManoObra,
+    repuestos:        cotRepuestos,
+    total:            cotManoObra + cotRepuestos || Number(diag.costo_estimado || 0),
+    tiempo_estimado:  tiempo_estimado || null,
+  });
 });
 
 // =====================================================
@@ -1952,19 +2033,22 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       ? avances.map(a =>
           `[${new Date(a.created_at).toLocaleDateString("es-DO")}] ${a.tecnico_nombre || tecnicoNombre}: ${a.descripcion}`
         ).join("\n")
-      : (diag.mano_de_obra_detalle || diag.trabajos_realizados || null);
+      : (cotizacion?.mano_de_obra_detalle || diag.mano_de_obra_detalle || null);
 
-    // Costos: cotizacion tiene prioridad; si no hay, usar campos del diagnóstico directamente
-    const costoManoObra = Number(cotizacion?.mano_obra || diag.mano_obra || 0);
-    const costoRepuestos = Number(cotizacion?.repuestos || diag.repuestos || 0);
-    const costoTotal    = Number(
-      cotizacion?.total ||
+    // Costos: cotizacion tiene prioridad (ahí se guardan mano_obra y repuestos por separado)
+    // Fallback: costo_estimado del diagnóstico como total
+    const costoManoObra  = Number(cotizacion?.mano_obra  || 0);
+    const costoRepuestos = Number(cotizacion?.repuestos  || 0);
+    const costoTotal     = Number(
+      cotizacion?.total  ||
       (costoManoObra + costoRepuestos) ||
-      diag.total        ||
       diag.costo_estimado ||
-      factura?.total    ||
+      factura?.total      ||
       0
     );
+
+    // descripcion_diagnostico: usar fallas_identificadas (columna real de la BD)
+    const diagGeneral = diag.fallas_identificadas || diag.tipo_servicio || "";
 
     await supabase.from("vehiculo_historial").insert([{
       vehiculo_id:            vehiculoId,
@@ -1978,14 +2062,14 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       cliente_telefono:       cliente?.telefono || "",
       diagnostico_id:         diagnosticoId,
       fecha_servicio:         new Date(),
-      tipo_servicio:          diag.tipo_servicio || diag.descripcion || "",
-      diagnostico_general:    diag.descripcion  || diag.tipo_servicio || "",
+      tipo_servicio:          diag.tipo_servicio || diagGeneral,
+      diagnostico_general:    diagGeneral,
       inspeccion_mecanica:    diag.inspeccion_mecanica    || null,
       inspeccion_electrica:   diag.inspeccion_electrica   || null,
       inspeccion_electronica: diag.inspeccion_electronica || null,
       codigos_falla:          diag.scanner_resultado      || null,
       fallas_identificadas:   diag.fallas_identificadas   || null,
-      observaciones:          diag.observaciones          || diag.notas || null,
+      observaciones:          diag.observaciones          || null,
       trabajos_realizados:    trabajos,
       costo_mano_obra:        costoManoObra,
       costo_repuestos:        costoRepuestos,
@@ -3888,20 +3972,27 @@ app.get("/ordenes/:id", async (req, res) => {
     }
 
     // Enriquecer diagnóstico con alias, totales calculados y repuestos del inventario
+    // NOTA: mano_obra/repuestos viven en cotizaciones, NO en la tabla diagnosticos
     const diagRaw = diagnosticoRes.data;
     const diagnosticoFinal = diagRaw ? (() => {
-      const moTotal   = Number(diagRaw.mano_obra  || 0);
-      const repTotal  = Number(diagRaw.repuestos  || 0);
-      const totalCalc = moTotal + repTotal || Number(diagRaw.total || diagRaw.costo_estimado || 0);
+      // Desglose real viene de cotizaciones; fallback a costo_estimado como total
+      const moTotal   = Number(cotizacionOrden?.mano_obra  || 0);
+      const repTotal  = Number(cotizacionOrden?.repuestos  || 0);
+      const totalCalc = Number(cotizacionOrden?.total || 0) || (moTotal + repTotal) || Number(diagRaw.costo_estimado || 0);
       return {
         ...diagRaw,
         avances,
-        tecnico_nombre:  diagRaw.tecnico_nombre  || diagRaw.usuario_nombre || "—",
-        mano_obra:       moTotal,
-        repuestos:       repTotal,
-        total:           totalCalc,
-        // Incluir items del inventario para que el form pueda restaurarlos
-        repuestos_items: cotizacionOrden?.items_detalle || [],
+        tecnico_nombre:   diagRaw.tecnico_nombre || diagRaw.usuario_nombre || "—",
+        mano_obra:        moTotal,
+        repuestos:        repTotal,
+        total:            totalCalc,
+        tiempo_estimado:  cotizacionOrden?.tiempo_estimado || null,
+        // Items del inventario para que el form pueda restaurarlos
+        repuestos_items:  cotizacionOrden?.items_detalle || [],
+        // Aliases de compatibilidad con el frontend
+        descripcion:      diagRaw.fallas_identificadas || diagRaw.tipo_servicio || "",
+        hallazgos:        diagRaw.fallas_identificadas || "",
+        notas:            diagRaw.observaciones || "",
       };
     })() : null;
 
