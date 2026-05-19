@@ -295,7 +295,7 @@ export default function DiagnosticoPage() {
       } else {
         const [rLista, rDiags] = await Promise.all([
           fetch(`${API}/ordenes`),
-          fetch(`${API}/diagnosticos`),
+          fetch(`${API}/diagnosticos?orden_id=${id}`),
         ]);
         if (rLista.ok) {
           const lista: any[] = await rLista.json();

@@ -832,7 +832,7 @@ app.get("/diagnosticos", async (req, res) => {
     let qDiag = supabase.from("diagnosticos").select("*").order("created_at", { ascending: false });
     if (req.query.orden_id) qDiag = qDiag.eq("orden_id", parseInt(req.query.orden_id, 10));
     const { data: dData, error: dError } = await qDiag;
-    if (dError) return res.json({ error: dError.message });
+    if (dError) return res.status(500).json({ error: dError.message });
 
     const [cRes2, vRes2] = await Promise.all([
       supabase.from("clientes").select("id, nombre").catch(() => ({ data: [] })),
@@ -864,7 +864,7 @@ app.get("/diagnosticos", async (req, res) => {
     });
     res.json(fixed);
   } catch (err) {
-    res.json({ error: err.message });
+    res.status(500).json({ error: err.message });
   }
 });
 
