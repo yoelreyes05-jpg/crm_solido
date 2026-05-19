@@ -528,7 +528,7 @@ export default function OrdenDetallePage() {
   const cargar = useCallback(async () => {
     try {
       // Intento 1: endpoint completo /ordenes/:id
-      const res = await fetch(`${API}/ordenes/${id}`);
+      const res = await fetch(`${API}/ordenes/${id}`, { cache: "no-store" });
       if (res.ok) {
         const json = await res.json();
         if (json?.orden) {
