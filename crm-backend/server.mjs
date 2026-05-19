@@ -4078,7 +4078,7 @@ app.post("/ordenes/:id/rechazar", async (req, res) => {
     const result = await transicionarEstado(Number(id), "CANCELADA", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Cliente",
       motivo: motivo || "Cliente rechazó la reparación",
-      extra: { aprobado_por_cliente: false, motivo_cancelacion: motivo || "Rechazado por cliente" },
+      extra: { aprobado_por_cliente: false, motivo_cancelacion: motivo || "Rechazado por cliente", usuario_cancelo: usuario_nombre || null },
     });
     if (!result.ok) return res.status(400).json({ error: result.error });
     await supabase.from("diagnosticos").update({ estado: "RECHAZADO" }).eq("orden_id", id);
@@ -4092,13 +4092,43 @@ app.post("/ordenes/:id/rechazar", async (req, res) => {
 app.post("/ordenes/:id/calidad-aprobada", async (req, res) => {
   try {
     const { id } = req.params;
-    const { usuario_id, usuario_nombre, motivo } = req.body;
+    const { usuario_id, usuario_nombre, motivo, tecnico_qc, checklist_qc, observaciones_qc } = req.body;
     const result = await transicionarEstado(Number(id), "LISTO", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Encargado",
       motivo: motivo || "Pasó control de calidad",
     });
     if (!result.ok) return res.status(400).json({ error: result.error });
+    // Guardar datos del QC
+    await supabase.from("ordenes_trabajo").update({
+      tecnico_qc:      tecnico_qc || usuario_nombre || null,
+      checklist_qc:    checklist_qc || {},
+      observaciones_qc: observaciones_qc || null,
+      resultado_qc:    "APROBADO",
+    }).eq("id", id).then(r => r).catch(() => {});
     res.json({ ok: true, mensaje: "Vehículo LISTO para entrega" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/calidad-rechazada — QC rechazado, regresa a REPARACION ─
+app.post("/ordenes/:id/calidad-rechazada", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo, tecnico_qc, checklist_qc, observaciones_qc } = req.body;
+    const result = await transicionarEstado(Number(id), "REPARACION", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "QC",
+      motivo: motivo || "Control de calidad rechazado — requiere corrección",
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    await supabase.from("ordenes_trabajo").update({
+      tecnico_qc:           tecnico_qc || usuario_nombre || null,
+      checklist_qc:         checklist_qc || {},
+      observaciones_qc:     observaciones_qc || null,
+      resultado_qc:         "RECHAZADO",
+      motivo_rechazo_calidad: motivo || null,
+    }).eq("id", id).then(r => r).catch(() => {});
+    res.json({ ok: true, mensaje: "Control de calidad rechazado — volviendo a REPARACIÓN" });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4108,13 +4138,19 @@ app.post("/ordenes/:id/calidad-aprobada", async (req, res) => {
 app.post("/ordenes/:id/entregar", async (req, res) => {
   try {
     const { id } = req.params;
-    const { usuario_id, usuario_nombre, motivo, notas_entrega } = req.body;
+    const { usuario_id, usuario_nombre, motivo, notas_entrega, firma_entrega, usuario_entrego } = req.body;
     const result = await transicionarEstado(Number(id), "ENTREGADO", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Recepcionista",
       motivo: motivo || "Vehículo entregado al cliente",
-      extra: { notas_entrega: notas_entrega || null },
+      extra: { notas_entrega: notas_entrega || null, firma_entrega: firma_entrega || null, usuario_entrego: usuario_entrego || usuario_nombre || null },
     });
     if (!result.ok) return res.status(400).json({ error: result.error });
+    // Guardar campos de entrega adicionales
+    await supabase.from("ordenes_trabajo").update({
+      usuario_entrego: usuario_entrego || usuario_nombre || null,
+      firma_entrega:   firma_entrega   || null,
+      notas_entrega:   notas_entrega   || null,
+    }).eq("id", id).then(r => r).catch(() => {});
     // Crear historial automático
     const { data: diag } = await supabase
       .from("diagnosticos").select("id").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
@@ -4243,146 +4279,4 @@ app.patch("/inspeccion/:id", async (req, res) => {
 
 // =====================================================
 // 🔍 BÚSQUEDA GLOBAL
-// =====================================================
-app.get("/busqueda", async (req, res) => {
-  try {
-    const q = (req.query.q || "").trim();
-    if (q.length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
-    const term = `%${q}%`;
-
-    const [cRes, vRes, oRes] = await Promise.all([
-      supabase.from("clientes")
-        .select("id, nombre, telefono, cedula")
-        .or(`nombre.ilike.${term},telefono.ilike.${term},cedula.ilike.${term}`)
-        .limit(5),
-      supabase.from("vehiculos")
-        .select("id, marca, modelo, ano, placa, cliente_id")
-        .or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
-        .limit(5),
-      supabase.from("ordenes_trabajo")
-        .select("id, numero_orden, estado, descripcion, cliente_id")
-        .or(`numero_orden.ilike.${term},descripcion.ilike.${term}`)
-        .order("id", { ascending: false })
-        .limit(5),
-    ]);
-
-    // Mapa de clientes para armar nombres sin join
-    const clienteMap = {};
-    (cRes.data || []).forEach(c => { clienteMap[c.id] = c.nombre; });
-
-    // Completar con nombres de clientes que aparecen en vehiculos u ordenes pero no en la búsqueda de clientes
-    const extraIds = [
-      ...(vRes.data || []).map(v => v.cliente_id),
-      ...(oRes.data || []).map(o => o.cliente_id),
-    ].filter(id => id && !clienteMap[id]);
-
-    if (extraIds.length > 0) {
-      const { data: extras } = await supabase.from("clientes").select("id, nombre").in("id", [...new Set(extraIds)]);
-      (extras || []).forEach(c => { clienteMap[c.id] = c.nombre; });
-    }
-
-    res.json({
-      clientes: cRes.data || [],
-      vehiculos: (vRes.data || []).map(v => ({ ...v, cliente_nombre: clienteMap[v.cliente_id] || "" })),
-      ordenes:   (oRes.data || []).map(o => ({
-        ...o,
-        numero_orden:   o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-        cliente_nombre: clienteMap[o.cliente_id] || "",
-      })),
-    });
-  } catch (err) {
-    res.json({ clientes: [], vehiculos: [], ordenes: [] });
-  }
-});
-
-// =====================================================
-// ⚙️  PERMISOS RBAC
-// =====================================================
-
-// GET /permisos — cargar configuración de permisos guardada en Supabase
-app.get("/permisos", async (req, res) => {
-  try {
-    const { data } = await supabase
-      .from("config_sistema")
-      .select("valor")
-      .eq("clave", "permisos_roles")
-      .maybeSingle();
-    // Devuelve el objeto guardado o null (el frontend usará PERMISOS_DEFAULT)
-    res.json(data?.valor ?? null);
-  } catch (err) {
-    res.json(null);
-  }
-});
-
-// POST /permisos — guardar configuración de permisos (solo gerente debe llamar esto)
-app.post("/permisos", async (req, res) => {
-  try {
-    const config = req.body;
-    if (!config || typeof config !== "object") {
-      return res.status(400).json({ error: "Payload inválido" });
-    }
-    const { error } = await supabase
-      .from("config_sistema")
-      .upsert(
-        { clave: "permisos_roles", valor: config, updated_at: new Date().toISOString() },
-        { onConflict: "clave" }
-      );
-    if (error) return res.status(500).json({ error: error.message });
-    res.json({ ok: true });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =====================================================
-// ⚙️  CONFIGURACIÓN GENERAL DEL SISTEMA
-// Lee / escribe claves en la tabla config_sistema
-// =====================================================
-
-// GET /config — devuelve todas las claves como array [{clave, valor, descripcion}]
-app.get("/config", async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from("config_sistema")
-      .select("clave, valor, descripcion")
-      .not("clave", "eq", "permisos_roles") // excluir la clave de RBAC
-      .order("clave");
-    if (error) return res.status(500).json({ error: error.message });
-    // Normalizar: valor puede ser JSONB o texto plano
-    const rows = (data || []).map(r => ({
-      ...r,
-      valor: typeof r.valor === "string" ? r.valor : (r.valor ? String(r.valor) : ""),
-    }));
-    res.json(rows);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// PUT /config — recibe [{clave, valor}] y hace upsert de cada par
-app.put("/config", async (req, res) => {
-  try {
-    const pares = req.body; // array de {clave, valor}
-    if (!Array.isArray(pares) || pares.length === 0)
-      return res.status(400).json({ error: "Se esperaba un array de {clave, valor}" });
-
-    for (const { clave, valor } of pares) {
-      if (!clave) continue;
-      await supabase
-        .from("config_sistema")
-        .upsert(
-          { clave, valor: String(valor ?? ""), updated_at: new Date().toISOString() },
-          { onConflict: "clave" }
-        );
-    }
-    res.json({ ok: true, updated: pares.length });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// =====================================================
-const PORT = process.env.PORT || 8080;
-app.listen(PORT, () => {
-  console.log(`🔥 SÓLIDO AUTO SERVICIO corriendo en puerto ${PORT}`);
-});
+// =========================================
