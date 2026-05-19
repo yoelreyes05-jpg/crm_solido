@@ -927,17 +927,21 @@ app.get("/diagnosticos/:id", async (req, res) => {
 
 app.post("/diagnosticos", async (req, res) => {
   // ⚠️  Extraer campos que NO son columnas de la tabla antes del INSERT
-  // La tabla diagnosticos NO tiene: mano_obra, repuestos, descripcion, notas, tiempo_estimado, total
-  // Columnas reales: fallas_identificadas, observaciones, costo_estimado, mano_de_obra_detalle
+  // Columnas reales de diagnosticos: orden_id, cliente_id, vehiculo_id, tipo_servicio,
+  //   inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, scanner_resultado,
+  //   fallas_identificadas, observaciones, tecnico_nombre, estado, created_at,
+  //   costo_estimado, mano_de_obra_detalle, repuestos_items
   const {
     repuestos_items,  // guardado en cotizaciones.items_detalle
     terminado,        // flag de control, no columna
     descripcion,      // → fallas_identificadas
-    mano_obra,        // → costo_estimado (sumado con repuestos) + cotizaciones.mano_obra
+    mano_obra,        // → costo_estimado + cotizaciones.mano_obra
     repuestos,        // → costo_estimado + cotizaciones.repuestos
     tiempo_estimado,  // → cotizaciones.tiempo_estimado (no existe en diagnosticos)
     notas,            // → observaciones
     total,            // → calculado
+    usuario_id,       // no es columna — solo se usa para el log de auditoría
+    usuario_nombre,   // → tecnico_nombre
     ...bodyDiag
   } = req.body;
 
@@ -945,10 +949,10 @@ app.post("/diagnosticos", async (req, res) => {
   const cotRepuestos = Number(repuestos  || 0);
   const costoTotal   = (cotManoObra + cotRepuestos) || Number(bodyDiag.costo_estimado || 0);
 
-  // Mapear usuario_nombre → tecnico_nombre; campos frontend → columnas reales
+  // Mapear usuario_nombre → tecnico_nombre; campos frontend → columnas reales de la BD
   const insertPayload = {
     ...bodyDiag,
-    tecnico_nombre:       bodyDiag.usuario_nombre || bodyDiag.tecnico_nombre || null,
+    tecnico_nombre:       bodyDiag.tecnico_nombre || usuario_nombre || null,
     estado:               "PENDIENTE",
     created_at:           new Date(),
     fallas_identificadas: bodyDiag.fallas_identificadas || descripcion || null,
@@ -990,8 +994,8 @@ app.post("/diagnosticos", async (req, res) => {
   if (ordenId) {
     // Paso 1: RECIBIDO → DIAGNOSTICO (siempre al crear el diagnóstico)
     const r1 = await transicionarEstado(Number(ordenId), "DIAGNOSTICO", {
-      usuarioId:     req.body.usuario_id    || null,
-      usuarioNombre: req.body.usuario_nombre || "Técnico",
+      usuarioId:     usuario_id    || null,
+      usuarioNombre: usuario_nombre || "Técnico",
       motivo: "Técnico abrió diagnóstico",
     });
     if (!r1.ok) {
@@ -1029,7 +1033,6 @@ app.patch("/diagnosticos/:id", async (req, res) => {
   const { id } = req.params;
 
   // ⚠️  Extraer campos que NO son columnas de la tabla antes del UPDATE
-  // La tabla diagnosticos NO tiene: mano_obra, repuestos, descripcion, notas, tiempo_estimado, total
   const {
     repuestos_items,  // guardado en cotizaciones.items_detalle
     terminado,        // flag de control, no columna
@@ -1039,16 +1042,19 @@ app.patch("/diagnosticos/:id", async (req, res) => {
     tiempo_estimado,  // → cotizaciones.tiempo_estimado
     notas,            // → observaciones
     total,            // → calculado
+    usuario_id,       // no es columna
+    usuario_nombre,   // → tecnico_nombre si no hay valor previo
     ...bodyDiag
   } = req.body;
 
   const cotManoObra  = Number(mano_obra  || 0);
   const cotRepuestos = Number(repuestos  || 0);
 
-  // Construir payload con sólo columnas reales
+  // Construir payload con sólo columnas reales de la BD
   const updatePayload = { ...bodyDiag };
-  if (descripcion !== undefined) updatePayload.fallas_identificadas = bodyDiag.fallas_identificadas || descripcion;
-  if (notas !== undefined)       updatePayload.observaciones = bodyDiag.observaciones || notas;
+  if (descripcion !== undefined)   updatePayload.fallas_identificadas = bodyDiag.fallas_identificadas || descripcion;
+  if (notas !== undefined)         updatePayload.observaciones        = bodyDiag.observaciones || notas;
+  if (usuario_nombre !== undefined && !bodyDiag.tecnico_nombre) updatePayload.tecnico_nombre = usuario_nombre;
   if (mano_obra !== undefined || repuestos !== undefined) {
     const nuevoTotal = cotManoObra + cotRepuestos;
     if (nuevoTotal > 0) updatePayload.costo_estimado = nuevoTotal;

@@ -349,11 +349,39 @@ export default function TallerPage() {
         <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
 
           {/* Diagnóstico */}
-          {(orden.estado === "RECIBIDO" || orden.estado === "DIAGNOSTICO") && (
+          {orden.estado === "RECIBIDO" && (
+            <button
+              onClick={async () => {
+                // Transicionar a DIAGNOSTICO de inmediato para que se mueva al tab correcto
+                try {
+                  await fetch(`${API}/ordenes/${orden.id}`, {
+                    method: "PATCH",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                      estado:         "DIAGNOSTICO",
+                      usuario_id:     usuario.id     || null,
+                      usuario_nombre: nombreTecnico,
+                    }),
+                  });
+                  // Actualizar la lista localmente para que el kanban lo refleje
+                  setOrdenes(prev => prev.map(o =>
+                    o.id === orden.id ? { ...o, estado: "DIAGNOSTICO" } : o
+                  ));
+                  // En vista lista, cambiar al tab de Diagnóstico
+                  if (!vistaKanban) setTabActivo("DIAGNOSTICO");
+                } catch (_e) {}
+                router.push(`/taller/diagnostico/${orden.id}`);
+              }}
+              style={{ background: C.yellow, color: "#111", border: "none", borderRadius: 7,
+                padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+              🔬 Iniciar Diagnóstico
+            </button>
+          )}
+          {orden.estado === "DIAGNOSTICO" && (
             <button onClick={() => router.push(`/taller/diagnostico/${orden.id}`)}
               style={{ background: C.yellow, color: "#111", border: "none", borderRadius: 7,
                 padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
-              🔬 {orden.estado === "RECIBIDO" ? "Iniciar Diagnóstico" : "Continuar"}
+              🔬 Continuar Diagnóstico
             </button>
           )}
 
