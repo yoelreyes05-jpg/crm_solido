@@ -704,6 +704,8 @@ export default function OrdenDetallePage() {
       await cargar();
     } catch (err: any) {
       setMsg({ tipo:"err", texto: err.message });
+      // Refrescar siempre — el estado real puede haber cambiado aunque hubo error
+      await cargar();
     }
     setProcesando(false);
   };
