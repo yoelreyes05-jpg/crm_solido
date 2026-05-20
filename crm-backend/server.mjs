@@ -2150,6 +2150,77 @@ app.get("/vehiculo-historial", async (req, res) => {
   }
 });
 
+// GET /vehiculo-historial/:id/detalle — datos completos de la orden (diagnóstico, avances, cotización, factura, QC)
+app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    // 1. Registro base del historial
+    const { data: hist, error: hErr } = await supabase
+      .from("vehiculo_historial")
+      .select("*")
+      .eq("id", id)
+      .maybeSingle();
+    if (hErr || !hist) return res.status(404).json({ error: "Historial no encontrado" });
+
+    const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
+
+    // 2. Diagnóstico completo
+    const diag = hist.diagnostico_id
+      ? await safe(() => supabase.from("diagnosticos").select("*").eq("id", hist.diagnostico_id).maybeSingle())
+      : null;
+
+    const ordenId = diag?.orden_id || null;
+
+    // 3. Orden de trabajo completa
+    const orden = ordenId
+      ? await safe(() => supabase.from("ordenes_trabajo").select("*").eq("id", ordenId).maybeSingle())
+      : null;
+
+    // 4. Avances de reparación
+    const avances = hist.diagnostico_id
+      ? await safe(() => supabase.from("avances_reparacion").select("*").eq("diagnostico_id", hist.diagnostico_id).order("created_at"))
+      : null;
+
+    // 5. Cotización + items
+    const cotizacion = hist.diagnostico_id
+      ? await safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", hist.diagnostico_id).maybeSingle())
+      : null;
+
+    const cotizacion_items = cotizacion?.id
+      ? await safe(() => supabase.from("cotizacion_items").select("*").eq("cotizacion_id", cotizacion.id).order("id"))
+      : null;
+
+    // 6. Factura + items
+    const factura = ordenId
+      ? await safe(() => supabase.from("facturas").select("*").eq("orden_id", ordenId).order("id", { ascending: false }).limit(1).maybeSingle())
+      : null;
+
+    const factura_items = factura?.id
+      ? await safe(() => supabase.from("factura_items").select("*").eq("factura_id", factura.id).order("id"))
+      : null;
+
+    // 7. Estado historial (auditoría de transiciones)
+    const estado_historial = ordenId
+      ? await safe(() => supabase.from("estado_historial").select("*").eq("orden_id", ordenId).order("created_at"))
+      : null;
+
+    res.json({
+      historial: hist,
+      diagnostico: diag,
+      orden,
+      avances: Array.isArray(avances) ? avances : [],
+      cotizacion,
+      cotizacion_items: Array.isArray(cotizacion_items) ? cotizacion_items : [],
+      factura,
+      factura_items: Array.isArray(factura_items) ? factura_items : [],
+      estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente y web
 // Busca en AMBAS fuentes: órdenes activas + historial cerrado
 app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
