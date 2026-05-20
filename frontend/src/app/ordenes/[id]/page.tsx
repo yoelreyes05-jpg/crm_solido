@@ -740,12 +740,8 @@ export default function OrdenDetallePage() {
       { key:"rechazar", label:"❌ Cliente Rechazó",  color:"#dc2626" },
     );
   }
-  if (estado === "CONTROL_CALIDAD") {
-    accionesFlujo.push(
-      { key:"calidad",            label:"✅ Aprobar Control de Calidad",        color:"#7c3aed" },
-      { key:"calidad-rechazada",  label:"❌ Rechazar — Regresar a Reparación",  color:"#dc2626" },
-    );
-  }
+  // Los botones de QC viven dentro de la sección Control de Calidad (con checklist completo)
+  // No se duplican aquí para evitar doble envío al servidor
   if (estado === "LISTO") {
     accionesFlujo.push({ key:"entregar", label:"🏁 Vehículo Entregado", color:"#1d4ed8" });
   }
@@ -756,6 +752,9 @@ export default function OrdenDetallePage() {
   } else if (estado === "REPARACION") {
     botonTaller = { label:"🔧 Ir al Taller — Reparación", href:`/taller/reparacion/${id}`, color:"#ef4444" };
   }
+
+  // Acción directa: completar reparación → CONTROL_CALIDAD
+  const puedeCompletarReparacion = estado === "REPARACION";
 
   const card: React.CSSProperties = {
     background:"#fff", borderRadius:14, padding:20,
@@ -838,8 +837,8 @@ export default function OrdenDetallePage() {
 
       {/* ── Botón taller ── */}
       {botonTaller && (
-        <div style={{ marginBottom:16 }}>
-          <Link href={botonTaller.href}>
+        <div style={{ marginBottom:16, display:"flex", gap:10, flexWrap:"wrap" }}>
+          <Link href={botonTaller.href} style={{ flex:1 }}>
             <button style={{ width:"100%", padding:"12px 20px", borderRadius:11, background: botonTaller.color + "15",
               color: botonTaller.color, border:`1.5px solid ${botonTaller.color}44`, cursor:"pointer", fontWeight:800, fontSize:14,
               display:"flex", alignItems:"center", justifyContent:"center", gap:10 }}>
@@ -847,6 +846,34 @@ export default function OrdenDetallePage() {
               <span style={{ fontSize:12, fontWeight:500, opacity:0.8 }}>→ Módulo Taller</span>
             </button>
           </Link>
+          {/* Completar reparación directo desde esta vista */}
+          {puedeCompletarReparacion && (
+            <button
+              onClick={async () => {
+                setProcesando(true);
+                setMsg(null);
+                try {
+                  const res = await fetch(`${API}/ordenes/${id}/completar-reparacion`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ usuario_id: usuario?.id, usuario_nombre: usuario?.nombre, motivo: "Reparación completada" }),
+                  });
+                  const json = await res.json();
+                  if (json.error) throw new Error(json.error);
+                  setMsg({ tipo:"ok", texto:"Reparación completada — orden en Control de Calidad." });
+                  await cargar();
+                } catch (err: any) {
+                  setMsg({ tipo:"err", texto: err.message });
+                }
+                setProcesando(false);
+              }}
+              disabled={procesando}
+              style={{ padding:"12px 20px", borderRadius:11, background:"#7c3aed15", color:"#7c3aed",
+                border:"1.5px solid #7c3aed44", cursor:"pointer", fontWeight:800, fontSize:14,
+                display:"flex", alignItems:"center", gap:8, whiteSpace:"nowrap" }}>
+              ✅ Completar Reparación → QC
+            </button>
+          )}
         </div>
       )}
 

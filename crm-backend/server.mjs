@@ -1285,15 +1285,22 @@ app.post("/avances", async (req, res) => {
     await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).then(r => r).catch(() => {});
   }
 
-  // Auto-transicionar la orden a REPARACION si está en DIAGNOSTICO o ESPERANDO_APROBACION
+  // Auto-transicionar la orden a REPARACION solo si está en DIAGNOSTICO
+  // (NO desde ESPERANDO_APROBACION — esa transición requiere aprobación explícita del cliente)
   const oid = ordenIdResuelto || (diagId ? (await supabase.from("diagnosticos").select("orden_id").eq("id", diagId).single()).data?.orden_id : null);
   if (oid) {
-    const r = await transicionarEstado(Number(oid), "REPARACION", {
-      usuarioId:     usuario_id    || null,
-      usuarioNombre: tecnico_nombre || "Técnico",
-      motivo: "Técnico inició reparación",
-    });
-    if (!r.ok) console.warn(`⚠️ Transición REPARACION orden ${oid}: ${r.error}`);
+    const { data: ordenActualAvance } = await supabase.from("ordenes_trabajo").select("estado").eq("id", oid).maybeSingle();
+    const estadoParaAvance = ordenActualAvance?.estado;
+    if (estadoParaAvance === "DIAGNOSTICO") {
+      const r = await transicionarEstado(Number(oid), "REPARACION", {
+        usuarioId:     usuario_id    || null,
+        usuarioNombre: tecnico_nombre || "Técnico",
+        motivo: "Técnico inició reparación",
+      });
+      if (!r.ok) console.warn(`⚠️ Transición REPARACION orden ${oid}: ${r.error}`);
+    }
+    // Si está en REPARACION ya, no hacer nada (es el flujo normal de agregar avances)
+    // Si está en ESPERANDO_APROBACION, tampoco — el cliente debe aprobar primero
   }
 
   res.json(data[0]);
@@ -3931,7 +3938,7 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
     motivo:          motivo,
     metadata:        extra,
     created_at:      new Date().toISOString(),
-  }]).catch(err => console.warn("⚠️ No se pudo escribir log (¿tabla existe?):", err.message));
+  }]).then(r => r).catch(err => console.warn("⚠️ No se pudo escribir log (¿tabla existe?):", err.message));
 
   return { ok: true };
 }
@@ -4093,6 +4100,16 @@ app.post("/ordenes/:id/calidad-aprobada", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo, tecnico_qc, checklist_qc, observaciones_qc } = req.body;
+
+    // Verificar estado actual — si ya es LISTO, responder OK sin error (idempotente)
+    const { data: ordenQC } = await supabase.from("ordenes_trabajo").select("estado").eq("id", id).maybeSingle();
+    if (ordenQC?.estado === "LISTO") {
+      return res.json({ ok: true, mensaje: "El control de calidad ya fue aprobado — vehículo LISTO para entrega" });
+    }
+    if (ordenQC?.estado !== "CONTROL_CALIDAD") {
+      return res.status(400).json({ error: `No se puede aprobar QC desde estado ${ordenQC?.estado || "desconocido"}. La orden debe estar en CONTROL_CALIDAD.` });
+    }
+
     const result = await transicionarEstado(Number(id), "LISTO", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Encargado",
       motivo: motivo || "Pasó control de calidad",
@@ -4116,6 +4133,13 @@ app.post("/ordenes/:id/calidad-rechazada", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo, tecnico_qc, checklist_qc, observaciones_qc } = req.body;
+
+    // Verificar que esté en CONTROL_CALIDAD antes de rechazar
+    const { data: ordenQCR } = await supabase.from("ordenes_trabajo").select("estado").eq("id", id).maybeSingle();
+    if (ordenQCR?.estado !== "CONTROL_CALIDAD") {
+      return res.status(400).json({ error: `No se puede rechazar QC desde estado ${ordenQCR?.estado || "desconocido"}. La orden debe estar en CONTROL_CALIDAD.` });
+    }
+
     const result = await transicionarEstado(Number(id), "REPARACION", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "QC",
       motivo: motivo || "Control de calidad rechazado — requiere corrección",
