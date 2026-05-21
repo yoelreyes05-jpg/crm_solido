@@ -1984,10 +1984,12 @@ app.get("/compras", async (req, res) => {
 // 📚 HISTORIAL DE VEHÍCULOS
 // =====================================================
 
-// Helper interno: captura y persiste el historial completo desde un diagnóstico
+// Helper interno: captura y persiste el historial COMPLETO desde un diagnóstico
+// Guarda un snapshot independiente de toda la información de la orden al momento de entrega
 async function crearHistorialDesdeDiagnostico(diagnosticoId) {
   try {
-    const { data: diag, error: diagErr } = await supabase.from("diagnosticos").select("*").eq("id", diagnosticoId).maybeSingle();
+    const { data: diag, error: diagErr } = await supabase
+      .from("diagnosticos").select("*").eq("id", diagnosticoId).maybeSingle();
     if (diagErr) { console.error(`❌ crearHistorial: error leyendo diagnóstico #${diagnosticoId}:`, diagErr.message); return; }
     if (!diag)   { console.warn(`⚠️ crearHistorial: diagnóstico #${diagnosticoId} no encontrado`); return; }
 
@@ -1999,38 +2001,45 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       return;
     }
 
-    // Obtener orden
+    // Obtener orden completa
     const { data: orden } = await supabase
       .from("ordenes_trabajo")
-      .select("id, vehiculo_id, cliente_id, tecnico_asignado_id, numero_orden, fecha_entrega, notas_entrega, motivo_entrada, checklist_qc, resultado_qc, observaciones_qc, tecnico_qc")
+      .select("*")
       .eq("id", diag.orden_id)
       .maybeSingle();
 
     const vehiculoId = diag.vehiculo_id || orden?.vehiculo_id || null;
     const clienteId  = diag.cliente_id  || orden?.cliente_id  || null;
 
-    // Queries individuales con fallback — si una falla no rompe el resto
+    // Queries con fallback seguro — una falla no rompe el resto
     const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
 
-    const [vehiculo, cliente, cotizacion, avances, factura, tecUsuario] = await Promise.all([
+    const [vehiculo, cliente, cotizacion, avances, factura, timeline, tecUsuario] = await Promise.all([
       safe(() => supabase.from("vehiculos").select("*").eq("id", vehiculoId).maybeSingle()),
       safe(() => supabase.from("clientes").select("*").eq("id", clienteId).maybeSingle()),
       safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoId).maybeSingle()),
       safe(() => supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diagnosticoId).order("created_at")),
-      // facturas: la columna diagnostico_id puede no existir — ignorar error
-      safe(() => supabase.from("facturas").select("ncf, total, orden_id").eq("orden_id", diag.orden_id).order("id", { ascending: false }).limit(1).maybeSingle()),
+      safe(() => supabase.from("facturas").select("*").eq("orden_id", diag.orden_id).order("id", { ascending: false }).limit(1).maybeSingle()),
+      safe(() => supabase.from("orden_trabajo_log").select("*").eq("orden_id", diag.orden_id).order("created_at")),
       safe(() => orden?.tecnico_asignado_id
         ? supabase.from("usuarios").select("nombre").eq("id", orden.tecnico_asignado_id).maybeSingle()
         : Promise.resolve({ data: null })
       ),
     ]);
 
-    const avancesArr = Array.isArray(avances) ? avances : [];
+    // Items de factura (query separada)
+    const facturaItems = factura?.id
+      ? await safe(() => supabase.from("factura_items").select("*").eq("factura_id", factura.id).order("id"))
+      : null;
+
+    const avancesArr  = Array.isArray(avances)      ? avances      : [];
+    const timelineArr = Array.isArray(timeline)      ? timeline     : [];
+    const itemsArr    = Array.isArray(facturaItems)  ? facturaItems : [];
 
     const tecnicoNombre =
       diag.tecnico_nombre || diag.usuario_nombre || orden?.tecnico_qc || tecUsuario?.nombre || "Sin asignar";
 
-    // Construir texto de trabajos realizados: avances → items JSONB → mano de obra detalle
+    // ── Texto de trabajos realizados (campo legacy de texto) ──
     let trabajos = null;
     if (avancesArr.length > 0) {
       trabajos = avancesArr
@@ -2043,69 +2052,156 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
     } else {
       trabajos = cotizacion?.mano_de_obra_detalle || diag.mano_de_obra_detalle || null;
     }
-
-    // Agregar notas de entrega al final si existen
     if (orden?.notas_entrega) {
       trabajos = trabajos
         ? `${trabajos}\n\n📋 Notas de entrega: ${orden.notas_entrega}`
         : `📋 Notas de entrega: ${orden.notas_entrega}`;
     }
 
+    // ── Costos ──
     const costoManoObra  = Number(cotizacion?.mano_obra  || 0);
     const costoRepuestos = Number(cotizacion?.repuestos   || 0);
     const costoTotal     = Number(
-      cotizacion?.total                  ||
-      (costoManoObra + costoRepuestos)   ||
-      diag.costo_estimado                ||
-      factura?.total                     ||
+      cotizacion?.total                ||
+      (costoManoObra + costoRepuestos) ||
+      diag.costo_estimado              ||
+      factura?.total                   ||
       0
     );
 
-    const diagGeneral = diag.fallas_identificadas || diag.tipo_servicio || "";
-
-    // Usar fecha real de entrega, no el momento actual
+    // ── Fecha real de entrega ──
     const fechaServicio = orden?.fecha_entrega
       ? new Date(orden.fecha_entrega).toISOString()
       : new Date().toISOString();
 
-    // Payload completo mapeado a TODAS las columnas de vehiculo_historial
-    const payload = {
-      vehiculo_id:           vehiculoId,
-      placa:                 (vehiculo?.placa || "N/A").toUpperCase().trim(),
-      marca:                 vehiculo?.marca  || "",
-      modelo:                vehiculo?.modelo || "",
-      ano:                   vehiculo?.ano    || null,
-      color:                 vehiculo?.color  || "",
-      cliente_id:            clienteId,
-      cliente_nombre:        cliente?.nombre   || "Particular",
-      cliente_telefono:      cliente?.telefono || "",
-      diagnostico_id:        diagnosticoId,
-      fecha_servicio:        fechaServicio,
-      tipo_servicio:         diag.tipo_servicio || diagGeneral,
-      diagnostico_general:   diagGeneral,
-      // Inspecciones del diagnóstico
-      inspeccion_mecanica:   diag.inspeccion_mecanica    || null,
-      inspeccion_electrica:  diag.inspeccion_electrica   || null,
-      inspeccion_electronica: diag.inspeccion_electronica || null,
-      codigos_falla:         diag.scanner_resultado      || null,
-      fallas_identificadas:  diag.fallas_identificadas   || null,
-      observaciones:         diag.observaciones          || null,
-      trabajos_realizados:   trabajos,
-      costo_total:           costoTotal,
-      costo_mano_obra:       costoManoObra,
-      costo_repuestos:       costoRepuestos,
-      estado:                "ENTREGADO",
-      tecnico_nombre:        tecnicoNombre,
-      ncf:                   factura?.ncf || null,
+    const diagGeneral = diag.fallas_identificadas || diag.tipo_servicio || "";
+
+    // ── Snapshot de cotización (con sus items JSONB incluidos) ──
+    const cotizacionData = cotizacion ? {
+      id:                 cotizacion.id,
+      numero:             cotizacion.numero,
+      mano_obra:          cotizacion.mano_obra,
+      repuestos:          cotizacion.repuestos,
+      subtotal:           cotizacion.subtotal,
+      itbis:              cotizacion.itbis,
+      total:              cotizacion.total,
+      tiempo_estimado:    cotizacion.tiempo_estimado,
+      notas:              cotizacion.notas,
+      aprobado:           cotizacion.aprobado,
+      aprobado_at:        cotizacion.aprobado_at,
+      items:              cotizacion.items      || [],   // JSONB con items de la cotización
+      items_detalle:      cotizacion.items_detalle || [],
+    } : {};
+
+    // ── Snapshot de factura (con items de factura_items) ──
+    const facturaData = factura ? {
+      id:           factura.id,
+      ncf:          factura.ncf,
+      ncf_tipo:     factura.ncf_tipo,
+      estado:       factura.estado,
+      subtotal:     factura.subtotal,
+      itbis:        factura.itbis,
+      total:        factura.total,
+      metodo_pago:  factura.metodo_pago,
+      created_at:   factura.created_at,
+      items:        itemsArr.map(fi => ({
+        descripcion:    fi.descripcion,
+        tipo:           fi.tipo,
+        cantidad:       fi.cantidad,
+        precio_unitario: fi.precio_unitario,
+        itbis_aplica:   fi.itbis_aplica,
+        subtotal:       fi.subtotal,
+      })),
+    } : {};
+
+    // ── Snapshot de avances ──
+    const avancesData = avancesArr.map(a => ({
+      descripcion:   a.descripcion,
+      tecnico_nombre: a.tecnico_nombre,
+      created_at:    a.created_at,
+    }));
+
+    // ── Snapshot de línea de tiempo (orden_trabajo_log) ──
+    const timelineData = timelineArr.map(t => ({
+      estado_anterior: t.estado_anterior,
+      estado_nuevo:    t.estado_nuevo,
+      usuario_nombre:  t.usuario_nombre,
+      motivo:          t.motivo,
+      created_at:      t.created_at,
+    }));
+
+    // ── Snapshot de fechas del proceso ──
+    const fechasProceso = {
+      recibido:               orden?.created_at                  || null,
+      diagnostico:            orden?.fecha_diagnostico           || null,
+      esperando_aprobacion:   orden?.fecha_esperando_aprobacion  || null,
+      aprobacion:             orden?.fecha_aprobacion            || null,
+      inicio_reparacion:      orden?.fecha_inicio_reparacion     || null,
+      control_calidad:        orden?.fecha_control_calidad       || null,
+      listo:                  orden?.fecha_listo                 || null,
+      entrega:                orden?.fecha_entrega               || null,
     };
 
-    const { data: inserted, error: insertErr } = await supabase.from("vehiculo_historial").insert([payload]).select("id").maybeSingle();
+    // ── PAYLOAD COMPLETO ──────────────────────────────────────────
+    const payload = {
+      // Datos del vehículo
+      vehiculo_id:            vehiculoId,
+      placa:                  (vehiculo?.placa || "N/A").toUpperCase().trim(),
+      marca:                  vehiculo?.marca  || "",
+      modelo:                 vehiculo?.modelo || "",
+      ano:                    vehiculo?.ano    || null,
+      color:                  vehiculo?.color  || "",
+      // Datos del cliente
+      cliente_id:             clienteId,
+      cliente_nombre:         cliente?.nombre   || "Particular",
+      cliente_telefono:       cliente?.telefono || "",
+      // Referencia al diagnóstico
+      diagnostico_id:         diagnosticoId,
+      // Datos del servicio
+      fecha_servicio:         fechaServicio,
+      tipo_servicio:          diag.tipo_servicio || diagGeneral,
+      diagnostico_general:    diagGeneral,
+      // Inspecciones del diagnóstico
+      inspeccion_mecanica:    diag.inspeccion_mecanica    || null,
+      inspeccion_electrica:   diag.inspeccion_electrica   || null,
+      inspeccion_electronica: diag.inspeccion_electronica || null,
+      codigos_falla:          diag.scanner_resultado      || null,
+      fallas_identificadas:   diag.fallas_identificadas   || null,
+      observaciones:          diag.observaciones          || null,
+      // Trabajos (texto resumen legacy)
+      trabajos_realizados:    trabajos,
+      // Costos
+      costo_mano_obra:        costoManoObra,
+      costo_repuestos:        costoRepuestos,
+      costo_total:            costoTotal,
+      // Estado y técnico
+      estado:                 "ENTREGADO",
+      tecnico_nombre:         tecnicoNombre,
+      ncf:                    factura?.ncf || null,
+      // Datos adicionales de la orden
+      numero_orden:           orden?.numero_orden   || null,
+      motivo_entrada:         orden?.motivo_entrada || null,
+      notas_entrega:          orden?.notas_entrega  || null,
+      // Control de calidad
+      resultado_qc:           orden?.resultado_qc      || null,
+      observaciones_qc:       orden?.observaciones_qc  || null,
+      checklist_qc:           orden?.checklist_qc      || {},
+      // Snapshots JSONB completos
+      avances_data:           avancesData,
+      cotizacion_data:        cotizacionData,
+      factura_data:           facturaData,
+      timeline_data:          timelineData,
+      fechas_proceso:         fechasProceso,
+    };
+
+    const { data: inserted, error: insertErr } = await supabase
+      .from("vehiculo_historial").insert([payload]).select("id").maybeSingle();
 
     if (insertErr) {
       console.error(`❌ crearHistorial INSERT falló — Diagnóstico #${diagnosticoId}:`, insertErr.message);
       console.error("Payload enviado:", JSON.stringify(payload, null, 2));
     } else {
-      console.log(`✅ Historial guardado (id=${inserted?.id}) — Diagnóstico #${diagnosticoId} | Placa: ${payload.placa} | Técnico: ${tecnicoNombre}`);
+      console.log(`✅ Historial guardado (id=${inserted?.id}) — Orden #${orden?.numero_orden || diag.orden_id} | Placa: ${payload.placa} | Técnico: ${tecnicoNombre}`);
     }
   } catch (err) {
     console.error("❌ crearHistorialDesdeDiagnostico excepción:", err.message);
