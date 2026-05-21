@@ -2337,6 +2337,16 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       ? await safe(() => supabase.from("estado_historial").select("*").eq("orden_id", ordenId).order("created_at"))
       : null;
 
+    // 8. Inspección vehicular de recepción
+    const inspeccion = ordenId
+      ? await safe(() => supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", ordenId).order("created_at", { ascending: false }).limit(1).maybeSingle())
+      : null;
+
+    // 9. Email del cliente
+    const cliente = hist.cliente_id
+      ? await safe(() => supabase.from("clientes").select("nombre,telefono,email").eq("id", hist.cliente_id).maybeSingle())
+      : null;
+
     res.json({
       historial: hist,
       diagnostico: diag,
@@ -2347,6 +2357,8 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       factura,
       factura_items: Array.isArray(factura_items) ? factura_items : [],
       estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
+      inspeccion: inspeccion || null,
+      cliente: cliente || null,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

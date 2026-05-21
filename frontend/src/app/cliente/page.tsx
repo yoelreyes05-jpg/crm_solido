@@ -372,6 +372,8 @@ export default function ClienteApp() {
   // ── HISTORIAL PERMANENTE ──
   const [historialPerm, setHistorialPerm]   = useState<any[]>([]);
   const [histDetalle, setHistDetalle]       = useState<any>(null);
+  const [histDetalleCompleto, setHistDetalleCompleto] = useState<any>(null);
+  const [loadingDetalle, setLoadingDetalle] = useState(false);
 
   useEffect(() => {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -476,6 +478,25 @@ export default function ClienteApp() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // Abre el detalle del historial y carga datos completos desde el backend
+  const abrirDetalleHist = async (h: any) => {
+    setHistDetalle(h);
+    setHistDetalleCompleto(null);
+    setTab("histperm");
+    setLoadingDetalle(true);
+    try {
+      const res  = await fetch(`${API}/vehiculo-historial/${h.id}/detalle`);
+      const data = await res.json();
+      if (res.ok) setHistDetalleCompleto(data);
+    } catch {}
+    finally { setLoadingDetalle(false); }
+  };
+
+  const cerrarDetalleHist = () => {
+    setHistDetalle(null);
+    setHistDetalleCompleto(null);
   };
 
   const ultimaOrden = resultado?.ordenes?.[0];
@@ -1271,7 +1292,7 @@ export default function ClienteApp() {
                               <div
                                 key={h.id || idx}
                                 className="hist-item"
-                                onClick={() => { setTab("histperm"); setHistDetalle(h); }}
+                                onClick={() => abrirDetalleHist(h)}
                                 style={{ cursor:"pointer" }}
                               >
                                 <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
@@ -1302,7 +1323,7 @@ export default function ClienteApp() {
                       <div>
                         {/* Botones Volver / Imprimir */}
                         <div style={{ display:"flex", gap:8, marginBottom:14 }}>
-                          <button onClick={() => setHistDetalle(null)} className="btn-volver" style={{ flex:1 }}>
+                          <button onClick={cerrarDetalleHist} className="btn-volver" style={{ flex:1 }}>
                             ← Volver
                           </button>
                           <button
@@ -1312,6 +1333,12 @@ export default function ClienteApp() {
                             🖨️ Imprimir
                           </button>
                         </div>
+                        {loadingDetalle && (
+                          <div style={{ textAlign:"center", padding:"14px 0", fontSize:13, color:"#64748b", marginBottom:10 }}>
+                            <span style={{ display:"inline-block", animation:"spin 1s linear infinite", marginRight:8 }}>⏳</span>
+                            Cargando expediente completo...
+                          </div>
+                        )}
 
                         {/* Header */}
                         <div className="card" style={{ background:"linear-gradient(135deg,#0f1729,#1e3a5f)", border:"1px solid rgba(59,130,246,0.2)", marginBottom:10 }}>
@@ -1330,9 +1357,12 @@ export default function ClienteApp() {
                           )}
                         </div>
 
-                        {/* ── INSPECCIÓN VEHICULAR DE RECEPCIÓN ── */}
-                        {histDetalle.inspeccion_data && typeof histDetalle.inspeccion_data === "object" && Object.keys(histDetalle.inspeccion_data).length > 0 && (() => {
-                          const insp = histDetalle.inspeccion_data;
+                        {/* ── INSPECCIÓN VEHICULAR DE RECEPCIÓN (datos vivos o snapshot) ── */}
+                        {(() => {
+                          const insp = histDetalleCompleto?.inspeccion
+                            || (histDetalle.inspeccion_data && Object.keys(histDetalle.inspeccion_data||{}).length > 0 ? histDetalle.inspeccion_data : null);
+                          if (!insp) return null;
+                          const insp2 = insp;
                           const fmtFH = (v: any) => v ? new Date(v).toLocaleString("es-DO",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
                           const zonas: any[] = Array.isArray(insp.zonas_danio) ? insp.zonas_danio : [];
                           const fotoSlots: Record<string,string> = (insp.fotos_slots && typeof insp.fotos_slots === "object") ? insp.fotos_slots : {};
@@ -1487,246 +1517,226 @@ export default function ClienteApp() {
                           );
                         })()}
 
-                        {/* Inspecciones */}
-                        {(histDetalle.inspeccion_mecanica || histDetalle.inspeccion_electrica || histDetalle.inspeccion_electronica) && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔍 Inspección Técnica</div>
-                            {histDetalle.inspeccion_mecanica && (
-                              <div className="hist-section">
-                                <div className="hist-section-title">🔧 Mecánica</div>
-                                <div className="hist-section-text">{histDetalle.inspeccion_mecanica}</div>
-                              </div>
-                            )}
-                            {histDetalle.inspeccion_electrica && (
-                              <div className="hist-section">
-                                <div className="hist-section-title">⚡ Eléctrica</div>
-                                <div className="hist-section-text">{histDetalle.inspeccion_electrica}</div>
-                              </div>
-                            )}
-                            {histDetalle.inspeccion_electronica && (
-                              <div className="hist-section">
-                                <div className="hist-section-title">💻 Scanner</div>
-                                <div className="hist-section-text">{histDetalle.inspeccion_electronica}</div>
-                              </div>
-                            )}
-                          </div>
-                        )}
+                        {/* ── SECCIONES VIVAS (usan histDetalleCompleto cuando está disponible) ── */}
+                        {(() => {
+                          const h    = histDetalle;
+                          const d    = histDetalleCompleto;
+                          const diag = d?.diagnostico || null;
+                          const orden = d?.orden || null;
+                          const clienteExtra = d?.cliente || null;
+                          const avancesVivos: any[] = d?.avances?.length > 0 ? d.avances : (Array.isArray(h.avances_data) ? h.avances_data : []);
+                          const timelineVivo: any[] = d?.estado_historial?.length > 0 ? d.estado_historial : (Array.isArray(h.timeline_data) ? h.timeline_data : []);
+                          const fmtF  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
+                          const moneda = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO",{minimumFractionDigits:2})}`;
 
-                        {/* Fallas */}
-                        {(histDetalle.codigos_falla || histDetalle.fallas_identificadas) && (
-                          <div className="hist-falla" style={{ marginBottom:10 }}>
-                            <div className="hist-falla-title">⚠️ Fallas Identificadas</div>
-                            {histDetalle.codigos_falla && <div className="hist-falla-text" style={{ marginBottom:4 }}>Códigos: {histDetalle.codigos_falla}</div>}
-                            {histDetalle.fallas_identificadas && <div className="hist-falla-text">{histDetalle.fallas_identificadas}</div>}
-                          </div>
-                        )}
+                          // Inspecciones técnicas del diagnóstico
+                          const insM = diag?.inspeccion_mecanica    || h.inspeccion_mecanica;
+                          const insE = diag?.inspeccion_electrica    || h.inspeccion_electrica;
+                          const insS = diag?.inspeccion_electronica  || h.inspeccion_electronica;
+                          const fallas = diag?.fallas_identificadas  || h.fallas_identificadas;
+                          const codigos = diag?.codigos_falla        || h.codigos_falla;
+                          const hallazgos = diag?.descripcion        || diag?.hallazgos;
+                          const moDetalle = diag?.mano_de_obra_detalle || "";
+                          const trabajosCheck = moDetalle.split("\n").map((l: string) => l.trim()).filter(Boolean);
 
-                        {/* Cotización */}
-                        {histDetalle.cotizacion_data && (histDetalle.cotizacion_data.total > 0 || histDetalle.cotizacion_data.numero) && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📄 Cotización</div>
-                            {histDetalle.cotizacion_data.numero && (
-                              <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>
-                                #{histDetalle.cotizacion_data.numero}
-                                {histDetalle.cotizacion_data.aprobado && <span style={{ marginLeft:8, color:"#34d399", fontWeight:700 }}>✓ Aprobada</span>}
-                                {histDetalle.cotizacion_data.tiempo_estimado && <span style={{ marginLeft:8 }}>· {histDetalle.cotizacion_data.tiempo_estimado}</span>}
-                              </div>
-                            )}
-                            {(() => {
-                              const items = Array.isArray(histDetalle.cotizacion_data.items_detalle) && histDetalle.cotizacion_data.items_detalle.length > 0
-                                ? histDetalle.cotizacion_data.items_detalle
-                                : (Array.isArray(histDetalle.cotizacion_data.items) ? histDetalle.cotizacion_data.items : []);
-                              return items.length > 0 ? (
-                                <div style={{ marginBottom:8 }}>
-                                  {items.map((item: any, i: number) => (
-                                    <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#cbd5e1", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-                                      <span>{item.descripcion}{item.cantidad > 1 ? ` x${item.cantidad}` : ""}</span>
-                                      <span>RD$ {Number(item.subtotal||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
+                          return (
+                            <>
+                              {/* ── DIAGNÓSTICO TÉCNICO ── */}
+                              {(insM || insE || insS || fallas || hallazgos || trabajosCheck.length > 0 || h.diagnostico_general) && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔬 Diagnóstico Técnico</div>
+
+                                  {/* Técnico + fecha */}
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10 }}>
+                                    <div style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px" }}>
+                                      <div style={{ fontSize:10, color:"#64748b", marginBottom:2 }}>TÉCNICO</div>
+                                      <div style={{ fontSize:13, fontWeight:700, color:"#e2e8f0" }}>{diag?.tecnico_nombre || diag?.usuario_nombre || h.tecnico_nombre || "—"}</div>
+                                      {diag?.tipo_servicio && <div style={{ fontSize:11, color:"#64748b" }}>Tipo: {diag.tipo_servicio}</div>}
+                                    </div>
+                                    {diag?.created_at && (
+                                      <div style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px" }}>
+                                        <div style={{ fontSize:10, color:"#64748b", marginBottom:2 }}>REGISTRADO</div>
+                                        <div style={{ fontSize:12, color:"#94a3b8" }}>{fmtF(diag.created_at)}</div>
+                                      </div>
+                                    )}
+                                  </div>
+
+                                  {/* Hallazgos */}
+                                  {hallazgos && (
+                                    <div style={{ marginBottom:10 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>Hallazgos</div>
+                                      <div style={{ fontSize:13, color:"#cbd5e1", background:"rgba(15,23,42,0.4)", borderRadius:7, padding:"8px 10px", lineHeight:1.6, whiteSpace:"pre-wrap" }}>{hallazgos}</div>
+                                    </div>
+                                  )}
+
+                                  {/* Fallas */}
+                                  {(fallas || codigos) && (
+                                    <div style={{ background:"rgba(239,68,68,0.06)", border:"1px solid rgba(239,68,68,0.18)", borderRadius:8, padding:"8px 10px", marginBottom:10 }}>
+                                      <div style={{ fontSize:10, color:"#fca5a5", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:4 }}>⚠️ Fallas Identificadas</div>
+                                      {codigos && <div style={{ fontSize:12, color:"#fecaca", marginBottom:3 }}>Códigos: {codigos}</div>}
+                                      {fallas && <div style={{ fontSize:13, color:"#fecaca", lineHeight:1.6 }}>{fallas}</div>}
+                                    </div>
+                                  )}
+
+                                  {/* Trabajos checkmarks */}
+                                  {trabajosCheck.length > 0 && (
+                                    <div style={{ marginBottom:10 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>Trabajos a Realizar</div>
+                                      <div style={{ background:"rgba(16,185,129,0.05)", border:"1px solid rgba(16,185,129,0.15)", borderRadius:8, padding:"8px 10px" }}>
+                                        {trabajosCheck.map((l: string, i: number) => (
+                                          <div key={i} style={{ fontSize:13, color:"#6ee7b7", marginBottom:i < trabajosCheck.length-1 ? 4 : 0 }}>✓ {l}</div>
+                                        ))}
+                                      </div>
+                                    </div>
+                                  )}
+
+                                  {/* Inspecciones por tipo */}
+                                  {(insM || insE || insS) && (
+                                    <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(160px,1fr))", gap:8 }}>
+                                      {insM && <div style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px" }}><div style={{ fontSize:10, color:"#64748b", marginBottom:3 }}>🔧 Mecánica</div><div style={{ fontSize:12, color:"#cbd5e1" }}>{insM}</div></div>}
+                                      {insE && <div style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px" }}><div style={{ fontSize:10, color:"#64748b", marginBottom:3 }}>⚡ Eléctrica</div><div style={{ fontSize:12, color:"#cbd5e1" }}>{insE}</div></div>}
+                                      {insS && <div style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px" }}><div style={{ fontSize:10, color:"#64748b", marginBottom:3 }}>💻 Scanner</div><div style={{ fontSize:12, color:"#cbd5e1" }}>{insS}</div></div>}
+                                    </div>
+                                  )}
+
+                                  {/* Costos del diagnóstico */}
+                                  <div style={{ marginTop:12, paddingTop:10, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
+                                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#64748b", marginBottom:4 }}>
+                                      <span>Mano de obra</span><span>{moneda(h.costo_mano_obra)}</span>
+                                    </div>
+                                    {h.costo_repuestos > 0 && (
+                                      <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#64748b", marginBottom:4 }}>
+                                        <span>Repuestos</span><span>{moneda(h.costo_repuestos)}</span>
+                                      </div>
+                                    )}
+                                    <div style={{ display:"flex", justifyContent:"space-between", fontWeight:800, fontSize:16, color:"#34d399", paddingTop:6, borderTop:"1px solid rgba(255,255,255,0.06)", marginTop:4 }}>
+                                      <span>TOTAL</span><span>{moneda(h.costo_total)}</span>
+                                    </div>
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* ── TRABAJOS REALIZADOS (tabla con tipo/estado) ── */}
+                              {avancesVivos.length > 0 && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔧 Trabajos Realizados</div>
+                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
+                                    <thead>
+                                      <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
+                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Tipo</th>
+                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Descripción</th>
+                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Estado</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {avancesVivos.map((a: any, i: number) => (
+                                        <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
+                                          <td style={{ padding:"6px 8px", color:"#94a3b8", verticalAlign:"top" }}>{a.tipo || "—"}</td>
+                                          <td style={{ padding:"6px 8px", color:"#cbd5e1", verticalAlign:"top" }}>{a.descripcion}</td>
+                                          <td style={{ padding:"6px 8px", verticalAlign:"top" }}>
+                                            <span style={{ fontSize:11, fontWeight:700, color: a.estado === "REALIZADO" ? "#34d399" : "#f59e0b", background: a.estado === "REALIZADO" ? "rgba(52,211,153,0.1)" : "rgba(245,158,11,0.1)", padding:"2px 7px", borderRadius:20 }}>
+                                              {a.estado || "—"}
+                                            </span>
+                                          </td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
+
+                              {/* ── AVANCES DE REPARACIÓN (cronología) ── */}
+                              {avancesVivos.length > 0 && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔧 Avances de Reparación</div>
+                                  {avancesVivos.map((a: any, i: number) => (
+                                    <div key={i} style={{ paddingBottom:8, marginBottom:8, borderBottom: i < avancesVivos.length-1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                                      <div style={{ fontSize:11, color:"#64748b", marginBottom:3 }}>
+                                        {a.tecnico_nombre && <><b style={{ color:"#94a3b8" }}>{a.tecnico_nombre}</b> · </>}
+                                        {a.created_at ? fmtF(a.created_at) : ""}
+                                      </div>
+                                      <div style={{ fontSize:13, color:"#cbd5e1" }}>{a.descripcion}</div>
                                     </div>
                                   ))}
                                 </div>
-                              ) : null;
-                            })()}
-                            {histDetalle.cotizacion_data.mano_obra > 0 && (
-                              <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#94a3b8", marginBottom:4 }}>
-                                <span>Mano de obra</span><span>RD$ {Number(histDetalle.cotizacion_data.mano_obra).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                              </div>
-                            )}
-                            {histDetalle.cotizacion_data.repuestos > 0 && (
-                              <div style={{ display:"flex", justifyContent:"space-between", fontSize:13, color:"#94a3b8", marginBottom:4 }}>
-                                <span>Repuestos</span><span>RD$ {Number(histDetalle.cotizacion_data.repuestos).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                              </div>
-                            )}
-                            <div style={{ display:"flex", justifyContent:"space-between", fontSize:14, fontWeight:700, color:"#38bdf8", marginTop:6, paddingTop:6, borderTop:"1px solid rgba(255,255,255,0.1)" }}>
-                              <span>Total cotizado</span><span>RD$ {Number(histDetalle.cotizacion_data.total||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                            </div>
-                            {histDetalle.cotizacion_data.notas && (
-                              <div style={{ fontSize:11, color:"#64748b", marginTop:8 }}>{histDetalle.cotizacion_data.notas}</div>
-                            )}
-                          </div>
-                        )}
+                              )}
 
-                        {/* Avances de Reparación */}
-                        {Array.isArray(histDetalle.avances_data) && histDetalle.avances_data.length > 0 && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ Avances de Reparación</div>
-                            {histDetalle.avances_data.map((a: any, i: number) => (
-                              <div key={i} style={{ paddingBottom:10, marginBottom:10, borderBottom: i < histDetalle.avances_data.length - 1 ? "1px solid rgba(255,255,255,0.06)" : "none" }}>
-                                <div style={{ fontSize:11, color:"#64748b", marginBottom:4 }}>
-                                  {a.created_at ? new Date(a.created_at).toLocaleDateString("es-DO",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
-                                  {a.tecnico_nombre && ` · ${a.tecnico_nombre}`}
+                              {/* Trabajos fallback si no hay avances */}
+                              {avancesVivos.length === 0 && h.trabajos_realizados && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
+                                  <div className="hist-section-text" style={{ whiteSpace:"pre-wrap" }}>{h.trabajos_realizados}</div>
                                 </div>
-                                <div style={{ fontSize:13, color:"#cbd5e1" }}>{a.descripcion}</div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                              )}
 
-                        {/* Trabajos Realizados (fallback legado) */}
-                        {histDetalle.trabajos_realizados && !(Array.isArray(histDetalle.avances_data) && histDetalle.avances_data.length > 0) && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
-                            <div className="hist-section-text">{histDetalle.trabajos_realizados}</div>
-                          </div>
-                        )}
-
-                        {/* Control de Calidad */}
-                        {histDetalle.resultado_qc && (
-                          <div className="card" style={{ marginBottom:10, border:`1px solid ${histDetalle.resultado_qc === "aprobado" ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.3)"}` }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>✅ Control de Calidad</div>
-                            <div style={{ fontSize:14, fontWeight:700, color: histDetalle.resultado_qc === "aprobado" ? "#34d399" : "#ef4444", marginBottom:8 }}>
-                              {histDetalle.resultado_qc === "aprobado" ? "✅ Aprobado" : "❌ Rechazado"}
-                            </div>
-                            {histDetalle.observaciones_qc && (
-                              <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>{histDetalle.observaciones_qc}</div>
-                            )}
-                            {histDetalle.checklist_qc && Object.keys(histDetalle.checklist_qc).length > 0 && (
-                              <div>
-                                {Object.entries(histDetalle.checklist_qc).map(([k, v]: [string, any]) => (
-                                  <div key={k} style={{ display:"flex", alignItems:"center", gap:8, fontSize:12, color:"#94a3b8", marginBottom:4 }}>
-                                    <span>{v ? "✅" : "❌"}</span>
-                                    <span style={{ textTransform:"capitalize" }}>{k.replace(/_/g," ")}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                          </div>
-                        )}
-
-                        {/* Factura */}
-                        {histDetalle.factura_data && histDetalle.factura_data.id && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🧾 Factura</div>
-                            {histDetalle.factura_data.ncf && (
-                              <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>NCF: {histDetalle.factura_data.ncf}{histDetalle.factura_data.metodo_pago ? ` · ${histDetalle.factura_data.metodo_pago}` : ""}</div>
-                            )}
-                            {Array.isArray(histDetalle.factura_data.items) && histDetalle.factura_data.items.length > 0 && (
-                              <div style={{ marginBottom:10 }}>
-                                {histDetalle.factura_data.items.map((fi: any, i: number) => (
-                                  <div key={i} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#cbd5e1", padding:"4px 0", borderBottom:"1px solid rgba(255,255,255,0.05)" }}>
-                                    <span>{fi.descripcion}{fi.cantidad > 1 ? ` x${fi.cantidad}` : ""}</span>
-                                    <span>RD$ {Number(fi.subtotal||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-                            {histDetalle.factura_data.itbis > 0 && (
-                              <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#94a3b8", marginBottom:4 }}>
-                                <span>ITBIS</span><span>RD$ {Number(histDetalle.factura_data.itbis).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                              </div>
-                            )}
-                            <div style={{ display:"flex", justifyContent:"space-between", fontSize:16, fontWeight:800, color:"#34d399", marginTop:8, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.1)" }}>
-                              <span>Total Pagado</span>
-                              <span>RD$ {Number(histDetalle.factura_data.total||histDetalle.costo_total||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Costos fallback si no hay factura_data */}
-                        {!(histDetalle.factura_data && histDetalle.factura_data.id) && histDetalle.costo_total > 0 && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>💰 Costos del Servicio</div>
-                            <div className="hist-costos">
-                              <div className="hist-costo-box">
-                                <div className="hist-costo-label">Mano de Obra</div>
-                                <div className="hist-costo-val">RD$ {Number(histDetalle.costo_mano_obra||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</div>
-                              </div>
-                              <div className="hist-costo-box">
-                                <div className="hist-costo-label">Repuestos</div>
-                                <div className="hist-costo-val">RD$ {Number(histDetalle.costo_repuestos||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</div>
-                              </div>
-                            </div>
-                            <div style={{ textAlign:"center", marginTop:12, fontFamily:"Syne,sans-serif", fontWeight:800, fontSize:22, color:"#34d399" }}>
-                              Total: RD$ {Number(histDetalle.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}
-                            </div>
-                            {histDetalle.ncf && <div className="hist-ncf">🧾 NCF: {histDetalle.ncf}</div>}
-                          </div>
-                        )}
-
-                        {/* Línea de Tiempo */}
-                        {Array.isArray(histDetalle.timeline_data) && histDetalle.timeline_data.length > 0 && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>📅 Línea de Tiempo</div>
-                            {histDetalle.timeline_data.map((t: any, i: number) => (
-                              <div key={i} style={{ display:"flex", gap:10, marginBottom:10 }}>
-                                <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
-                                  <div style={{ width:8, height:8, borderRadius:"50%", background:"#3b82f6", flexShrink:0, marginTop:3 }} />
-                                  {i < histDetalle.timeline_data.length - 1 && <div style={{ width:1, flex:1, background:"rgba(59,130,246,0.2)", minHeight:16 }} />}
+                              {/* ── CONTROL DE CALIDAD ── */}
+                              {h.resultado_qc && (
+                                <div className="card" style={{ marginBottom:10, border:`1px solid ${h.resultado_qc?.toUpperCase().includes("APROBADO") ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.3)"}` }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>✅ Control de Calidad — Resultado: {h.resultado_qc}</div>
+                                  {orden?.tecnico_qc && <div style={{ fontSize:13, color:"#94a3b8", marginBottom:8 }}>Técnico QC: <b style={{ color:"#e2e8f0" }}>{orden.tecnico_qc}</b></div>}
+                                  {h.observaciones_qc && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>{h.observaciones_qc}</div>}
+                                  {h.checklist_qc && Object.keys(h.checklist_qc).length > 0 && (
+                                    <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                                      {Object.entries(h.checklist_qc).map(([k, v]: [string, any]) => (
+                                        <span key={k} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background: v ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)", color: v ? "#6ee7b7" : "#fca5a5", border:`1px solid ${v ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.15)"}` }}>
+                                          {v ? "✅" : "❌"} {k.replace(/_/g," ")}
+                                        </span>
+                                      ))}
+                                    </div>
+                                  )}
                                 </div>
-                                <div style={{ flex:1, paddingBottom:4 }}>
-                                  <div style={{ fontSize:12, fontWeight:700, color:"#e2e8f0" }}>
-                                    {(t.estado_nuevo||"").replace(/_/g," ").replace(/\b\w/g,(c:string)=>c.toUpperCase())}
+                              )}
+
+                              {/* ── ENTREGA AL CLIENTE ── */}
+                              {h.fechas_proceso?.entrega && (
+                                <div className="card" style={{ marginBottom:10, border:"1px solid rgba(148,163,184,0.15)" }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🏁 Entrega al Cliente</div>
+                                  <div style={{ fontSize:13, color:"#94a3b8", marginBottom:6 }}>
+                                    Fecha entrega: <b style={{ color:"#e2e8f0" }}>{fmtF(h.fechas_proceso.entrega)}</b>
                                   </div>
-                                  <div style={{ fontSize:11, color:"#475569" }}>
-                                    {t.created_at ? new Date(t.created_at).toLocaleDateString("es-DO",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : ""}
-                                    {t.usuario_nombre && ` · ${t.usuario_nombre}`}
-                                  </div>
-                                  {t.motivo && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>{t.motivo}</div>}
+                                  {orden?.tecnico_qc && (
+                                    <div style={{ fontSize:13, color:"#94a3b8", marginBottom:6 }}>
+                                      Entregado por: <b style={{ color:"#e2e8f0" }}>{orden.tecnico_qc}</b>
+                                    </div>
+                                  )}
+                                  {(h.notas_entrega || orden?.notas_entrega) && (
+                                    <div style={{ fontSize:12, color:"#64748b", background:"rgba(15,23,42,0.4)", borderRadius:7, padding:"8px 10px", marginTop:6 }}>
+                                      {h.notas_entrega || orden?.notas_entrega}
+                                    </div>
+                                  )}
                                 </div>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                              )}
 
-                        {/* Fechas del Proceso */}
-                        {histDetalle.fechas_proceso && Object.values(histDetalle.fechas_proceso).some(Boolean) && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📅 Fechas del Proceso</div>
-                            {([
-                              { key:"recibido", label:"Recibido" },
-                              { key:"diagnostico", label:"Diagnóstico" },
-                              { key:"esperando_aprobacion", label:"En Espera Aprobación" },
-                              { key:"aprobacion", label:"Aprobado" },
-                              { key:"inicio_reparacion", label:"Inicio Reparación" },
-                              { key:"control_calidad", label:"Control de Calidad" },
-                              { key:"listo", label:"Listo para Entrega" },
-                              { key:"entrega", label:"Entregado" },
-                            ] as {key:string,label:string}[]).filter(f => histDetalle.fechas_proceso[f.key]).map(f => (
-                              <div key={f.key} style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#94a3b8", marginBottom:6 }}>
-                                <span>{f.label}</span>
-                                <span style={{ color:"#cbd5e1" }}>{new Date(histDetalle.fechas_proceso[f.key]).toLocaleDateString("es-DO",{year:"numeric",month:"short",day:"numeric"})}</span>
-                              </div>
-                            ))}
-                          </div>
-                        )}
+                              {/* ── HISTORIAL DEL PROCESO (timeline) ── */}
+                              {timelineVivo.length > 0 && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>📜 Historial del Proceso</div>
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, fontSize:11, color:"#475569", fontWeight:700, textTransform:"uppercase", letterSpacing:.7, marginBottom:8, paddingBottom:6, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
+                                    <span>Estado</span><span>Fecha y Usuario</span>
+                                  </div>
+                                  {timelineVivo.map((t: any, i: number) => {
+                                    const estadoLabel = (t.estado_nuevo || t.estado || "").replace(/_/g," ");
+                                    const motivo = t.motivo || "";
+                                    return (
+                                      <div key={i} style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:8, marginBottom:10, alignItems:"start" }}>
+                                        <div>
+                                          <div style={{ fontSize:12, fontWeight:700, color:"#e2e8f0" }}>{estadoLabel}</div>
+                                          {motivo && <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>— {motivo}</div>}
+                                        </div>
+                                        <div style={{ fontSize:11, color:"#64748b" }}>
+                                          {t.created_at ? fmtF(t.created_at) : ""}
+                                          {t.usuario_nombre && <> · <b style={{ color:"#94a3b8" }}>{t.usuario_nombre}</b></>}
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </>
+                          );
+                        })()}
 
-                        {/* Observaciones */}
-                        {histDetalle.observaciones && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>📝 Observaciones</div>
-                            <div className="hist-section-text">{histDetalle.observaciones}</div>
-                          </div>
-                        )}
-
-                        {/* Notas de Entrega */}
-                        {histDetalle.notas_entrega && (
-                          <div className="card" style={{ marginBottom:10 }}>
-                            <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:6 }}>📦 Notas de Entrega</div>
-                            <div className="hist-section-text">{histDetalle.notas_entrega}</div>
-                          </div>
-                        )}
-
-                        {/* Segundo botón imprimir al final */}
+                        {/* ── BOTÓN IMPRIMIR ── */}
                         <button
                           onClick={() => imprimirExpediente(histDetalle)}
                           style={{ width:"100%", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"12px 0", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:14 }}
@@ -1756,7 +1766,7 @@ export default function ClienteApp() {
                                 <div
                                   key={h.id}
                                   className={`hist-item ${abierto ? "open" : ""}`}
-                                  onClick={() => setHistDetalle(h)}
+                                  onClick={() => abrirDetalleHist(h)}
                                 >
                                   <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
                                   <div className="hist-meta">
