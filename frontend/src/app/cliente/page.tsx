@@ -1330,6 +1330,163 @@ export default function ClienteApp() {
                           )}
                         </div>
 
+                        {/* ── INSPECCIÓN VEHICULAR DE RECEPCIÓN ── */}
+                        {histDetalle.inspeccion_data && typeof histDetalle.inspeccion_data === "object" && Object.keys(histDetalle.inspeccion_data).length > 0 && (() => {
+                          const insp = histDetalle.inspeccion_data;
+                          const fmtFH = (v: any) => v ? new Date(v).toLocaleString("es-DO",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
+                          const zonas: any[] = Array.isArray(insp.zonas_danio) ? insp.zonas_danio : [];
+                          const fotoSlots: Record<string,string> = (insp.fotos_slots && typeof insp.fotos_slots === "object") ? insp.fotos_slots : {};
+                          const fotosSlotArr = Object.entries(fotoSlots).filter(([,v]) => v).map(([k,v]) => ({ data: v, label: k.replace(/_/g," ") }));
+                          const fotosExtra: any[] = Array.isArray(insp.fotos) ? insp.fotos : [];
+                          const todasFotos = [...fotosSlotArr, ...fotosExtra].slice(0, 12);
+                          const combPct = Number(insp.nivel_combustible || 0);
+                          const combColor = combPct >= 60 ? "#22c55e" : combPct >= 30 ? "#f59e0b" : "#ef4444";
+                          const checkItems = [
+                            { k:"radio_pantalla",    l:"Radio / Pantalla" },
+                            { k:"tapiceria_ok",      l:"Tapicería" },
+                            { k:"alfombras_ok",      l:"Alfombras" },
+                            { k:"luces_ok",          l:"Luces" },
+                            { k:"bocina_ok",         l:"Bocina" },
+                            { k:"espejos_ok",        l:"Espejos" },
+                            { k:"gato_ok",           l:"Gato" },
+                            { k:"llanta_repuesto_ok",l:"Llanta de repuesto" },
+                            { k:"documentos_ok",     l:"Documentos" },
+                            { k:"herramientas_ok",   l:"Herramientas" },
+                          ].filter(c => insp[c.k] !== null && insp[c.k] !== undefined);
+
+                          return (
+                            <div className="card" style={{ marginBottom:10, border:"1px solid rgba(249,115,22,0.2)", background:"rgba(249,115,22,0.03)" }}>
+                              <div style={{ fontSize:11, fontWeight:700, color:"#fb923c", textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>
+                                🚗 Inspección de Recepción
+                              </div>
+
+                              {/* Datos principales */}
+                              <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:8, marginBottom:12 }}>
+                                {insp.km_entrada != null && (
+                                  <div style={{ background:"rgba(15,23,42,0.6)", borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+                                    <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.7, marginBottom:3 }}>Kilometraje</div>
+                                    <div style={{ fontWeight:800, fontSize:14, color:"#f1f5f9" }}>{Number(insp.km_entrada).toLocaleString("es-DO")} km</div>
+                                  </div>
+                                )}
+                                {insp.condicion_general && (
+                                  <div style={{ background:"rgba(15,23,42,0.6)", borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+                                    <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.7, marginBottom:3 }}>Condición</div>
+                                    <div style={{ fontWeight:700, fontSize:13, color:"#f1f5f9" }}>{insp.condicion_general}</div>
+                                  </div>
+                                )}
+                                {insp.nivel_combustible != null && (
+                                  <div style={{ background:"rgba(15,23,42,0.6)", borderRadius:8, padding:"8px 10px", textAlign:"center" }}>
+                                    <div style={{ fontSize:10, color:"#64748b", textTransform:"uppercase", letterSpacing:.7, marginBottom:3 }}>Combustible</div>
+                                    <div style={{ fontWeight:800, fontSize:14, color: combColor }}>{combPct}%</div>
+                                    <div style={{ height:5, background:"rgba(148,163,184,0.15)", borderRadius:3, marginTop:4, overflow:"hidden" }}>
+                                      <div style={{ height:"100%", width:`${combPct}%`, background: combColor, borderRadius:3 }} />
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+
+                              {/* Estado exterior */}
+                              {(insp.estado_vidrios || insp.estado_llantas || insp.estado_pintura || insp.rayones || insp.golpes) && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>Condición Exterior</div>
+                                  <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 }}>
+                                    {[
+                                      { l:"Vidrios",  v:insp.estado_vidrios },
+                                      { l:"Llantas",  v:insp.estado_llantas },
+                                      { l:"Pintura",  v:insp.estado_pintura },
+                                      { l:"Rayones",  v:insp.rayones },
+                                      { l:"Golpes",   v:insp.golpes },
+                                    ].filter(x => x.v).map(x => (
+                                      <div key={x.l} style={{ background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"6px 10px" }}>
+                                        <div style={{ fontSize:10, color:"#64748b", marginBottom:2 }}>{x.l}</div>
+                                        <div style={{ fontSize:12, color:"#cbd5e1", fontWeight:600 }}>{x.v}</div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Zonas de daño */}
+                              {zonas.length > 0 && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, color:"#fb923c", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>⚠️ Zonas con Daño</div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                                    {zonas.map((z: any, i: number) => (
+                                      <span key={i} style={{ fontSize:11, padding:"3px 10px", background:"rgba(249,115,22,0.1)", color:"#fb923c", border:"1px solid rgba(249,115,22,0.2)", borderRadius:20, fontWeight:600 }}>
+                                        📍 {(z.zona||"").replace(/_/g," ")}{z.tipo ? ` — ${z.tipo}` : ""}
+                                      </span>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Checklist de accesorios */}
+                              {checkItems.length > 0 && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>Accesorios e Interior</div>
+                                  <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
+                                    {checkItems.map(c => (
+                                      <span key={c.k} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600,
+                                        background: insp[c.k] ? "rgba(16,185,129,0.1)" : "rgba(239,68,68,0.08)",
+                                        color:      insp[c.k] ? "#6ee7b7"              : "#fca5a5",
+                                        border:     `1px solid ${insp[c.k] ? "rgba(16,185,129,0.2)" : "rgba(239,68,68,0.15)"}` }}>
+                                        {insp[c.k] ? "✅" : "❌"} {c.l}
+                                      </span>
+                                    ))}
+                                    {insp.otros_accesorios && (
+                                      <span style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background:"rgba(99,102,241,0.1)", color:"#a5b4fc", border:"1px solid rgba(99,102,241,0.2)" }}>
+                                        📦 {insp.otros_accesorios}
+                                      </span>
+                                    )}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Observaciones */}
+                              {insp.observaciones && (
+                                <div style={{ fontSize:12, color:"#94a3b8", background:"rgba(15,23,42,0.5)", borderRadius:7, padding:"8px 10px", marginBottom:10 }}>
+                                  {insp.observaciones}
+                                </div>
+                              )}
+
+                              {/* Fotos */}
+                              {todasFotos.length > 0 && (
+                                <div style={{ marginBottom:10 }}>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>📷 Fotos de Recepción</div>
+                                  <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:8 }}>
+                                    {todasFotos.map((f: any, i: number) => (
+                                      <div key={i} style={{ borderRadius:8, overflow:"hidden", border:"1px solid rgba(148,163,184,0.1)", background:"rgba(15,23,42,0.5)" }}>
+                                        <img src={f.data} alt={f.label||""} loading="lazy"
+                                          style={{ width:"100%", aspectRatio:"4/3", objectFit:"cover", display:"block" }}
+                                          onError={(e) => { (e.target as HTMLImageElement).style.display="none"; }} />
+                                        {f.label && <div style={{ fontSize:10, textAlign:"center", padding:"3px 4px", color:"#64748b" }}>{f.label}</div>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+
+                              {/* Firma del cliente */}
+                              {insp.firma_cliente && (
+                                <div>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>✍️ Firma del Cliente</div>
+                                  <div style={{ borderRadius:8, overflow:"hidden", border:"1px solid rgba(148,163,184,0.1)", maxWidth:260 }}>
+                                    <div style={{ fontSize:10, color:"#64748b", padding:"4px 8px", background:"rgba(15,23,42,0.8)", textAlign:"center" }}>Firmado al momento de la recepción</div>
+                                    <img src={insp.firma_cliente} alt="Firma del cliente" style={{ width:"100%", display:"block", background:"#fff" }} />
+                                  </div>
+                                </div>
+                              )}
+
+                              {insp.creado_por_nombre && (
+                                <div style={{ fontSize:11, color:"#475569", marginTop:10, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.05)" }}>
+                                  Recibido por: <b style={{ color:"#64748b" }}>{insp.creado_por_nombre}</b>
+                                  {insp.fecha_recepcion && <span> · {fmtFH(insp.fecha_recepcion)}</span>}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+
                         {/* Inspecciones */}
                         {(histDetalle.inspeccion_mecanica || histDetalle.inspeccion_electrica || histDetalle.inspeccion_electronica) && (
                           <div className="card" style={{ marginBottom:10 }}>

@@ -2014,7 +2014,7 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
     // Queries con fallback seguro — una falla no rompe el resto
     const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
 
-    const [vehiculo, cliente, cotizacion, avances, factura, timeline, tecUsuario] = await Promise.all([
+    const [vehiculo, cliente, cotizacion, avances, factura, timeline, tecUsuario, inspeccion] = await Promise.all([
       safe(() => supabase.from("vehiculos").select("*").eq("id", vehiculoId).maybeSingle()),
       safe(() => supabase.from("clientes").select("*").eq("id", clienteId).maybeSingle()),
       safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diagnosticoId).maybeSingle()),
@@ -2025,6 +2025,7 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
         ? supabase.from("usuarios").select("nombre").eq("id", orden.tecnico_asignado_id).maybeSingle()
         : Promise.resolve({ data: null })
       ),
+      safe(() => supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", diag.orden_id).order("created_at", { ascending: false }).limit(1).maybeSingle()),
     ]);
 
     // Items de factura (query separada)
@@ -2142,6 +2143,40 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       entrega:                orden?.fecha_entrega               || null,
     };
 
+    // ── Snapshot de inspección vehicular de recepción ──
+    const inspeccionData = inspeccion ? {
+      id:                  inspeccion.id,
+      fecha_recepcion:     inspeccion.fecha_recepcion,
+      km_entrada:          inspeccion.km_entrada,
+      nivel_combustible:   inspeccion.nivel_combustible,
+      condicion_general:   inspeccion.condicion_general,
+      zonas_danio:         inspeccion.zonas_danio         || [],
+      rayones:             inspeccion.rayones,
+      golpes:              inspeccion.golpes,
+      estado_vidrios:      inspeccion.estado_vidrios,
+      estado_llantas:      inspeccion.estado_llantas,
+      estado_pintura:      inspeccion.estado_pintura,
+      // Checklist de accesorios
+      radio_pantalla:      inspeccion.radio_pantalla,
+      tapiceria_ok:        inspeccion.tapiceria_ok,
+      alfombras_ok:        inspeccion.alfombras_ok,
+      luces_ok:            inspeccion.luces_ok,
+      bocina_ok:           inspeccion.bocina_ok,
+      espejos_ok:          inspeccion.espejos_ok,
+      gato_ok:             inspeccion.gato_ok,
+      llanta_repuesto_ok:  inspeccion.llanta_repuesto_ok,
+      documentos_ok:       inspeccion.documentos_ok,
+      herramientas_ok:     inspeccion.herramientas_ok,
+      otros_accesorios:    inspeccion.otros_accesorios,
+      // Fotos y firma
+      fotos:               inspeccion.fotos              || [],
+      fotos_slots:         inspeccion.fotos_slots        || {},
+      firma_cliente:       inspeccion.firma_cliente,
+      // Observaciones y auditoría
+      observaciones:       inspeccion.observaciones,
+      creado_por_nombre:   inspeccion.creado_por_nombre,
+    } : {};
+
     // ── PAYLOAD COMPLETO ──────────────────────────────────────────
     const payload = {
       // Datos del vehículo
@@ -2192,6 +2227,7 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       factura_data:           facturaData,
       timeline_data:          timelineData,
       fechas_proceso:         fechasProceso,
+      inspeccion_data:        inspeccionData,
     };
 
     const { data: inserted, error: insertErr } = await supabase
