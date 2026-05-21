@@ -4578,6 +4578,174 @@ app.get("/buscar", async (req, res) => {
 });
 
 // =====================================================
+// ⚙️ CONFIGURACIÓN DEL SISTEMA
+// =====================================================
+
+/** Convierte valor JSONB almacenado {v: "texto"} → string plano */
+const cfgVal = (row) => {
+  if (!row) return "";
+  const v = row.valor;
+  if (typeof v === "object" && v !== null && "v" in v) return v.v ?? "";
+  if (typeof v === "string") return v;
+  return String(v ?? "");
+};
+
+// GET /config → devuelve todos los pares clave/valor
+app.get("/config", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("config_sistema").select("*").order("clave");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json((data || []).map(r => ({
+      clave: r.clave,
+      valor: cfgVal(r),
+      updated_at: r.updated_at,
+    })));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// PUT /config → upsert array [{clave, valor}]
+app.put("/config", async (req, res) => {
+  try {
+    const configs = req.body;
+    if (!Array.isArray(configs)) return res.status(400).json({ error: "Se esperaba un array" });
+    const rows = configs.map(c => ({
+      clave: c.clave,
+      valor: { v: c.valor ?? "" },
+      updated_at: new Date().toISOString(),
+    }));
+    const { error } = await supabase.from("config_sistema").upsert(rows, { onConflict: "clave" });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /ncf/config → devuelve tabla ncf_config completa
+app.get("/ncf/config", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("ncf_config").select("*").order("tipo");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =====================================================
+// 📥 EXPORTACIÓN CSV
+// =====================================================
+
+const toCSV = (rows, cols) => {
+  const header = cols.map(c => c.label).join(",");
+  const body = rows.map(r =>
+    cols.map(c => {
+      const val = r[c.key] ?? "";
+      const str = String(val).replace(/"/g, '""');
+      return str.includes(",") || str.includes('"') || str.includes("\n") ? `"${str}"` : str;
+    }).join(",")
+  ).join("\n");
+  return `${header}\n${body}`;
+};
+
+// GET /export/clientes
+app.get("/export/clientes", async (req, res) => {
+  try {
+    const { data } = await supabase.from("clientes").select("id,nombre,telefono,email,cedula,created_at").order("nombre");
+    const csv = toCSV(data || [], [
+      { key: "id", label: "ID" },
+      { key: "nombre", label: "Nombre" },
+      { key: "telefono", label: "Teléfono" },
+      { key: "email", label: "Email" },
+      { key: "cedula", label: "Cédula/RNC" },
+      { key: "created_at", label: "Registro" },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="clientes_${Date.now()}.csv"`);
+    res.send("﻿" + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /export/facturas
+app.get("/export/facturas", async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    let q = supabase.from("facturas").select("id,ncf,ncf_tipo,total,metodo_pago,estado,created_at").order("created_at", { ascending: false });
+    if (desde) q = q.gte("created_at", desde);
+    if (hasta) q = q.lte("created_at", hasta + "T23:59:59");
+    const { data } = await q;
+    const csv = toCSV(data || [], [
+      { key: "id", label: "ID" },
+      { key: "ncf", label: "NCF" },
+      { key: "ncf_tipo", label: "Tipo NCF" },
+      { key: "total", label: "Total RD$" },
+      { key: "metodo_pago", label: "Método Pago" },
+      { key: "estado", label: "Estado" },
+      { key: "created_at", label: "Fecha" },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="facturas_${Date.now()}.csv"`);
+    res.send("﻿" + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /export/inventario
+app.get("/export/inventario", async (req, res) => {
+  try {
+    const { data } = await supabase.from("inventario").select("*").order("nombre");
+    const csv = toCSV(data || [], [
+      { key: "codigo", label: "Código" },
+      { key: "nombre", label: "Nombre" },
+      { key: "categoria", label: "Categoría" },
+      { key: "stock", label: "Stock" },
+      { key: "stock_minimo", label: "Stock Mínimo" },
+      { key: "precio_compra", label: "Precio Compra" },
+      { key: "precio_venta", label: "Precio Venta" },
+      { key: "proveedor", label: "Proveedor" },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="inventario_${Date.now()}.csv"`);
+    res.send("﻿" + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /export/ordenes
+app.get("/export/ordenes", async (req, res) => {
+  try {
+    const { desde, hasta } = req.query;
+    let q = supabase.from("ordenes_trabajo").select("id,numero_orden,cliente_nombre,vehiculo_placa,vehiculo_marca,vehiculo_modelo,estado,tecnico_nombre,costo_total,created_at").order("created_at", { ascending: false });
+    if (desde) q = q.gte("created_at", desde);
+    if (hasta) q = q.lte("created_at", hasta + "T23:59:59");
+    const { data } = await q;
+    const csv = toCSV(data || [], [
+      { key: "id", label: "ID" },
+      { key: "numero_orden", label: "N° OT" },
+      { key: "cliente_nombre", label: "Cliente" },
+      { key: "vehiculo_placa", label: "Placa" },
+      { key: "vehiculo_marca", label: "Marca" },
+      { key: "vehiculo_modelo", label: "Modelo" },
+      { key: "estado", label: "Estado" },
+      { key: "tecnico_nombre", label: "Técnico" },
+      { key: "costo_total", label: "Costo Total" },
+      { key: "created_at", label: "Fecha" },
+    ]);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    res.setHeader("Content-Disposition", `attachment; filename="ordenes_${Date.now()}.csv"`);
+    res.send("﻿" + csv);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// =====================================================
 // 🚀 INICIAR SERVIDOR
 // =====================================================
 const PORT = process.env.PORT || 3001;
