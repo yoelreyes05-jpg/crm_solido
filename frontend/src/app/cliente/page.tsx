@@ -174,20 +174,59 @@ ${ordenes.slice(0, 10).map((o: any) => `
 }
 
 // ── Función de impresión: expediente de UN servicio ──────────────────────────
-function imprimirExpediente(h: any) {
+function imprimirExpediente(h: any, detalleCompleto: any) {
   const fmtMoney = (n: any) => Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 });
   const fmtDate  = (d: any) => d ? new Date(d).toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" }) : "—";
-  const fmtDT    = (d: any) => d ? new Date(d).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  const fmtDT    = (d: any) => d ? new Date(d).toLocaleString("es-DO", { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  const parseArr = (v: any): any[] => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string" && v.trim().startsWith("[")) { try { return JSON.parse(v); } catch { return []; } }
+    return [];
+  };
 
-  const cot = h.cotizacion_data || {};
-  const fac = h.factura_data || {};
-  const avances: any[] = Array.isArray(h.avances_data) ? h.avances_data : [];
+  // ── Fuentes de datos: live > snapshot ──
+  const cot        = h.cotizacion_data && typeof h.cotizacion_data === "object" ? h.cotizacion_data : {};
+  const fac        = h.factura_data    && typeof h.factura_data    === "object" ? h.factura_data    : {};
+  const fechas     = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso  : {};
+  const checklist  = h.checklist_qc   && typeof h.checklist_qc    === "object" ? h.checklist_qc    : {};
+  const inspecSnap = h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null;
+  const inspec: any = detalleCompleto?.inspeccion || inspecSnap || null;
+
+  const avancesSnap: any[] = Array.isArray(h.avances_data) ? h.avances_data : [];
+  const avances: any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
+    ? detalleCompleto.avances : avancesSnap;
   const timeline: any[] = Array.isArray(h.timeline_data) ? h.timeline_data : [];
-  const fechas = h.fechas_proceso || {};
-  const checklist = h.checklist_qc || {};
 
-  const cotItems = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle : (Array.isArray(cot.items) ? cot.items : []);
+  const cotItems  = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle : (Array.isArray(cot.items) ? cot.items : []);
   const facItems: any[] = Array.isArray(fac.items) ? fac.items : [];
+
+  // ── Campos enriquecidos ──
+  const rawTrabItems = detalleCompleto?.diagnostico?.trabajos_realizados_items
+    || cot?.trabajos_realizados_items || h.trabajos_realizados_items;
+  const trabajosItems: any[] = parseArr(rawTrabItems);
+
+  const manoDeObraDetalle: string =
+    detalleCompleto?.diagnostico?.mano_de_obra_detalle
+    || detalleCompleto?.cotizacion?.mano_de_obra_detalle
+    || cot?.mano_de_obra_detalle
+    || h.mano_de_obra_detalle || "";
+
+  const descripcionTrabajo: string =
+    detalleCompleto?.orden?.descripcion || h.descripcion || h.motivo_entrada || "";
+
+  const firmaEntrega: string = detalleCompleto?.orden?.firma_entrega || h.firma_entrega || "";
+  const usuarioEntrego: string = detalleCompleto?.orden?.usuario_entrego || h.usuario_entrego || h.tecnico_nombre || "";
+  const fechaEntrega: string  = detalleCompleto?.orden?.fecha_entrega  || h.fecha_entrega  || (fechas as any).entrega || "";
+
+  const diagLive: any = detalleCompleto?.diagnostico || null;
+  const hallazgos: string = diagLive?.descripcion || diagLive?.hallazgos || h.fallas_identificadas || "";
+  const codigosFalla: string = diagLive?.codigos_falla || h.codigos_falla || "";
+
+  const QC_LBL: Record<string,string> = {
+    motor:"Motor",transmision:"Transmisión",frenos:"Frenos",suspension:"Suspensión",
+    direccion:"Dirección",electrico:"Eléctrico",ac:"A/C",escape:"Escape",
+    neumaticos:"Neumáticos",limpieza:"Limpieza",documentos:"Documentos",fluidos:"Fluidos",
+  };
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -197,28 +236,34 @@ function imprimirExpediente(h: any) {
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   body { font-family:'Segoe UI',Arial,sans-serif; padding:28px; color:#1a1a1a; max-width:780px; margin:auto; }
-  h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:#475569; background:#f1f5f9; padding:5px 10px; border-radius:5px; border-left:4px solid #1e40af; margin:18px 0 10px; }
+  h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:#475569;
+       background:#f1f5f9; padding:5px 10px; border-radius:5px; border-left:4px solid #1e40af; margin:18px 0 10px; }
   .card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:10px; }
   table { width:100%; border-collapse:collapse; font-size:12px; }
   th { background:#f8fafc; padding:6px 8px; text-align:left; font-weight:700; color:#475569; }
   td { padding:5px 8px; border-bottom:1px solid #f1f5f9; color:#374151; }
   .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
   .label { color:#64748b; }
-  .total { font-size:18px; font-weight:900; color:#059669; text-align:right; margin-top:8px; padding-top:8px; border-top:2px solid #d1fae5; }
+  .chip { display:inline-block; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700;
+          margin:2px 3px; background:#fee2e2; color:#991b1b; }
+  .total { font-size:18px; font-weight:900; color:#059669; text-align:right; margin-top:8px;
+           padding-top:8px; border-top:2px solid #d1fae5; }
   @media print { body { padding:16px; } h3 { page-break-after:avoid; } .card { page-break-inside:avoid; } }
 </style>
 </head>
 <body>
 
+<!-- ══ Encabezado empresa ══ -->
 <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:14px;margin-bottom:18px">
   <div>
     <div style="font-size:20px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
     <div style="font-size:11px;color:#6b7280;margin-top:2px">Tel: 809-712-2027 · Santo Domingo, RD</div>
   </div>
   <div style="text-align:right">
-    <div style="font-size:16px;font-weight:900;color:#1e40af">${h.vehiculo_marca || ""} ${h.vehiculo_modelo || ""} ${h.vehiculo_ano || ""}</div>
+    <div style="font-size:16px;font-weight:900;color:#1e40af">${h.marca || h.vehiculo_marca || ""} ${h.modelo || h.vehiculo_modelo || ""} ${h.ano || h.vehiculo_ano || ""}</div>
     <div style="font-size:13px;font-weight:800;font-family:monospace">${h.placa || ""}</div>
     ${h.numero_orden ? `<div style="font-size:11px;color:#6b7280">Orden #${h.numero_orden}</div>` : ""}
+    <div style="font-size:11px;color:#6b7280;margin-top:2px">Estado: <strong>${(h.estado||"ENTREGADO").replace(/_/g," ")}</strong></div>
   </div>
 </div>
 
@@ -226,66 +271,139 @@ function imprimirExpediente(h: any) {
   Expediente de Servicio — ${h.tipo_servicio || "Servicio"}
 </div>
 
+<!-- ══ Datos generales ══ -->
 <div class="card">
   <div class="row"><span class="label">Fecha de servicio</span><span>${fmtDate(h.fecha_servicio)}</span></div>
-  <div class="row"><span class="label">Técnico</span><span>${h.tecnico_nombre || "—"}</span></div>
-  ${h.motivo_entrada ? `<div class="row"><span class="label">Motivo de entrada</span><span>${h.motivo_entrada}</span></div>` : ""}
+  ${h.tecnico_nombre ? `<div class="row"><span class="label">Técnico asignado</span><span>${h.tecnico_nombre}</span></div>` : ""}
   ${h.cliente_nombre ? `<div class="row"><span class="label">Cliente</span><span>${h.cliente_nombre}</span></div>` : ""}
+  ${h.cliente_telefono ? `<div class="row"><span class="label">Teléfono</span><span>${h.cliente_telefono}</span></div>` : ""}
+  ${h.motivo_entrada ? `<div class="row"><span class="label">Motivo de entrada</span><span>${h.motivo_entrada}</span></div>` : ""}
 </div>
 
-${(h.inspeccion_mecanica || h.inspeccion_electrica || h.inspeccion_electronica) ? `
-<h3>🔍 Inspección Técnica</h3>
+<!-- ══ Trabajo solicitado ══ -->
+${descripcionTrabajo && descripcionTrabajo !== h.motivo_entrada ? `
+<h3>📝 Trabajo Solicitado</h3>
 <div class="card">
-  ${h.inspeccion_mecanica ? `<div style="margin-bottom:8px"><strong>Mecánica:</strong><br><span style="color:#374151;font-size:13px">${h.inspeccion_mecanica}</span></div>` : ""}
-  ${h.inspeccion_electrica ? `<div style="margin-bottom:8px"><strong>Eléctrica:</strong><br><span style="color:#374151;font-size:13px">${h.inspeccion_electrica}</span></div>` : ""}
-  ${h.inspeccion_electronica ? `<div><strong>Scanner:</strong><br><span style="color:#374151;font-size:13px">${h.inspeccion_electronica}</span></div>` : ""}
+  <div style="font-size:13px;color:#374151;white-space:pre-wrap;line-height:1.6">${descripcionTrabajo}</div>
 </div>` : ""}
 
-${(h.fallas_identificadas || h.codigos_falla) ? `
-<h3>⚠️ Fallas Identificadas</h3>
+<!-- ══ Inspección de recepción ══ -->
+${inspec ? `
+<h3>🔍 Inspección de Recepción</h3>
+<div class="card">
+  ${inspec.zonas_danio && inspec.zonas_danio.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:5px">Zonas con daño</div>
+      <div>${(Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : []).map((z: string) => `<span class="chip">${z}</span>`).join("")}</div>
+    </div>` : ""}
+  ${inspec.kilometraje ? `<div class="row"><span class="label">Kilometraje</span><span>${Number(inspec.kilometraje).toLocaleString()} km</span></div>` : ""}
+  ${inspec.combustible ? `<div class="row"><span class="label">Combustible</span><span>${inspec.combustible}%</span></div>` : ""}
+  ${inspec.observaciones_generales ? `
+    <div style="margin-top:8px;font-size:13px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px 10px;white-space:pre-wrap">${inspec.observaciones_generales}</div>` : ""}
+</div>` : ""}
+
+<!-- ══ Diagnóstico / Hallazgos ══ -->
+${(hallazgos || codigosFalla) ? `
+<h3>🔎 Diagnóstico / Hallazgos</h3>
 <div class="card" style="background:#fffbeb;border-color:#fde68a">
-  ${h.codigos_falla ? `<div style="font-size:12px;margin-bottom:4px"><strong>Códigos:</strong> ${h.codigos_falla}</div>` : ""}
-  ${h.fallas_identificadas ? `<div style="font-size:13px">${h.fallas_identificadas}</div>` : ""}
+  ${codigosFalla ? `<div style="font-size:12px;margin-bottom:6px"><strong>Códigos de falla:</strong> ${codigosFalla}</div>` : ""}
+  ${hallazgos    ? `<div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${hallazgos}</div>` : ""}
 </div>` : ""}
 
+<!-- ══ Mano de obra (trabajos a realizar) ══ -->
+${manoDeObraDetalle ? `
+<h3>🔧 Trabajos a Realizar (Mano de Obra)</h3>
+<div class="card" style="background:#f0fdf4;border-color:#bbf7d0">
+  ${manoDeObraDetalle.split("\n").filter((l: string) => l.trim())
+    .map((l: string) => `<div style="font-size:13px;margin-bottom:4px">✓ ${l.trim()}</div>`)
+    .join("")}
+</div>` : ""}
+
+<!-- ══ Trabajos realizados estructurados ══ -->
+${trabajosItems.length > 0 ? `
+<h3>🛠️ Trabajos Realizados</h3>
+<div class="card">
+  <table>
+    <thead><tr>
+      <th>Trabajo</th>
+      <th style="text-align:center">Tipo</th>
+      <th style="text-align:center">Estado</th>
+    </tr></thead>
+    <tbody>
+      ${trabajosItems.map((t: any) => `
+        <tr>
+          <td>${t.nombre || t.descripcion || "—"}</td>
+          <td style="text-align:center;font-size:11px">${t.tipo || "—"}</td>
+          <td style="text-align:center">
+            <span style="font-size:11px;font-weight:700;padding:2px 8px;border-radius:10px;
+              background:${t.estado === "REALIZADO" ? "#d1fae5" : t.estado === "PENDIENTE" ? "#fef3c7" : "#f1f5f9"};
+              color:${t.estado === "REALIZADO" ? "#065f46" : t.estado === "PENDIENTE" ? "#92400e" : "#475569"}">
+              ${t.estado || "—"}
+            </span>
+          </td>
+        </tr>`).join("")}
+    </tbody>
+  </table>
+</div>` : ""}
+
+<!-- ══ Cotización ══ -->
 ${cotItems.length > 0 || cot.total > 0 ? `
 <h3>📄 Cotización${cot.numero ? ` #${cot.numero}` : ""}${cot.aprobado ? " ✓ Aprobada" : ""}</h3>
 <div class="card">
-  ${cotItems.length > 0 ? `<table><thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>
-    ${cotItems.map((it: any) => `<tr><td>${it.descripcion||"—"}</td><td style="text-align:center">${it.cantidad||1}</td><td style="text-align:right">RD$ ${fmtMoney(it.subtotal)}</td></tr>`).join("")}
-  </tbody></table><br>` : ""}
-  ${cot.mano_obra > 0 ? `<div class="row"><span class="label">Mano de obra</span><span>RD$ ${fmtMoney(cot.mano_obra)}</span></div>` : ""}
-  ${cot.repuestos > 0 ? `<div class="row"><span class="label">Repuestos</span><span>RD$ ${fmtMoney(cot.repuestos)}</span></div>` : ""}
-  ${cot.itbis > 0 ? `<div class="row"><span class="label">ITBIS</span><span>RD$ ${fmtMoney(cot.itbis)}</span></div>` : ""}
-  <div class="row" style="font-weight:700;font-size:14px;border-top:1px solid #e2e8f0;padding-top:6px;margin-top:4px"><span>Total Cotizado</span><span style="color:#1e40af">RD$ ${fmtMoney(cot.total)}</span></div>
+  ${cotItems.length > 0 ? `
+  <table>
+    <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead>
+    <tbody>
+      ${cotItems.map((it: any) => `<tr><td>${it.descripcion||"—"}</td><td style="text-align:center">${it.cantidad||1}</td><td style="text-align:right">RD$ ${fmtMoney(it.subtotal)}</td></tr>`).join("")}
+    </tbody>
+  </table><br>` : ""}
+  ${cot.mano_obra  > 0 ? `<div class="row"><span class="label">Mano de obra</span><span>RD$ ${fmtMoney(cot.mano_obra)}</span></div>` : ""}
+  ${cot.repuestos  > 0 ? `<div class="row"><span class="label">Repuestos</span><span>RD$ ${fmtMoney(cot.repuestos)}</span></div>` : ""}
+  ${cot.itbis      > 0 ? `<div class="row"><span class="label">ITBIS</span><span>RD$ ${fmtMoney(cot.itbis)}</span></div>` : ""}
+  <div class="row" style="font-weight:700;font-size:14px;border-top:1px solid #e2e8f0;padding-top:6px;margin-top:4px">
+    <span>Total Cotizado</span><span style="color:#1e40af">RD$ ${fmtMoney(cot.total)}</span>
+  </div>
 </div>` : ""}
 
+<!-- ══ Avances de reparación ══ -->
 ${avances.length > 0 ? `
-<h3>🛠️ Avances de Reparación</h3>
+<h3>📋 Avances de Reparación</h3>
 <div class="card">
   ${avances.map((a: any, i: number) => `
     <div style="${i < avances.length-1 ? "margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9" : ""}">
       <div style="font-size:11px;color:#64748b;margin-bottom:3px">${fmtDT(a.created_at)}${a.tecnico_nombre ? ` · ${a.tecnico_nombre}` : ""}</div>
-      <div style="font-size:13px">${a.descripcion}</div>
+      <div style="font-size:13px;white-space:pre-wrap">${a.descripcion || "—"}</div>
     </div>`).join("")}
-</div>` : (h.trabajos_realizados ? `<h3>🛠️ Trabajos Realizados</h3><div class="card"><div style="font-size:13px;white-space:pre-wrap">${h.trabajos_realizados}</div></div>` : "")}
+</div>` : (h.trabajos_realizados ? `
+<h3>📋 Avances de Reparación</h3>
+<div class="card"><div style="font-size:13px;white-space:pre-wrap">${h.trabajos_realizados}</div></div>` : "")}
 
+<!-- ══ Control de Calidad ══ -->
 ${h.resultado_qc ? `
 <h3>✅ Control de Calidad</h3>
 <div class="card" style="border-color:${h.resultado_qc === "aprobado" ? "#6ee7b7" : "#fca5a5"}">
-  <div style="font-size:14px;font-weight:700;color:${h.resultado_qc === "aprobado" ? "#059669" : "#dc2626"};margin-bottom:6px">
+  <div style="font-size:14px;font-weight:700;color:${h.resultado_qc === "aprobado" ? "#059669" : "#dc2626"};margin-bottom:8px">
     ${h.resultado_qc === "aprobado" ? "✅ Aprobado" : "❌ Rechazado"}
   </div>
-  ${h.observaciones_qc ? `<div style="font-size:12px;color:#374151;margin-bottom:8px">${h.observaciones_qc}</div>` : ""}
-  ${Object.keys(checklist).length > 0 ? Object.entries(checklist).map(([k,v]) => `<div style="font-size:12px;margin-bottom:3px">${v ? "✅" : "❌"} ${k.replace(/_/g," ")}</div>`).join("") : ""}
+  ${h.observaciones_qc ? `<div style="font-size:12px;color:#374151;margin-bottom:10px">${h.observaciones_qc}</div>` : ""}
+  ${Object.keys(checklist).length > 0 ? `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
+    ${Object.entries(checklist).map(([k,v]) => `
+      <div style="font-size:12px;padding:3px 0">${v ? "✅" : "❌"} ${QC_LBL[k] || k.replace(/_/g," ")}</div>`).join("")}
+  </div>` : ""}
 </div>` : ""}
 
+<!-- ══ Factura ══ -->
 ${fac.id ? `
 <h3>🧾 Factura${fac.ncf ? ` — NCF: ${fac.ncf}` : ""}${fac.metodo_pago ? ` · ${fac.metodo_pago}` : ""}</h3>
 <div class="card">
-  ${facItems.length > 0 ? `<table><thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead><tbody>
-    ${facItems.map((fi: any) => `<tr><td>${fi.descripcion||"—"}</td><td style="text-align:center">${fi.cantidad||1}</td><td style="text-align:right">RD$ ${fmtMoney(fi.subtotal)}</td></tr>`).join("")}
-  </tbody></table><br>` : ""}
+  ${facItems.length > 0 ? `
+  <table>
+    <thead><tr><th>Descripción</th><th style="text-align:center">Cant.</th><th style="text-align:right">Subtotal</th></tr></thead>
+    <tbody>
+      ${facItems.map((fi: any) => `<tr><td>${fi.descripcion||"—"}</td><td style="text-align:center">${fi.cantidad||1}</td><td style="text-align:right">RD$ ${fmtMoney(fi.subtotal)}</td></tr>`).join("")}
+    </tbody>
+  </table><br>` : ""}
   ${fac.itbis > 0 ? `<div class="row"><span class="label">ITBIS</span><span>RD$ ${fmtMoney(fac.itbis)}</span></div>` : ""}
   <div class="total">Total Pagado: RD$ ${fmtMoney(fac.total || h.costo_total)}</div>
 </div>` : (h.costo_total > 0 ? `
@@ -297,6 +415,21 @@ ${fac.id ? `
   ${h.ncf ? `<div style="font-size:11px;color:#64748b;margin-top:6px">NCF: ${h.ncf}</div>` : ""}
 </div>` : "")}
 
+<!-- ══ Entrega al cliente ══ -->
+${(usuarioEntrego || fechaEntrega || firmaEntrega) ? `
+<h3>🏁 Entrega al Cliente</h3>
+<div class="card">
+  ${usuarioEntrego ? `<div class="row"><span class="label">Entregado por</span><span>${usuarioEntrego}</span></div>` : ""}
+  ${fechaEntrega   ? `<div class="row"><span class="label">Fecha de entrega</span><span>${fmtDate(fechaEntrega)}</span></div>` : ""}
+  ${h.notas_entrega ? `<div style="font-size:12px;color:#374151;margin-top:8px;background:#f9fafb;border-radius:6px;padding:7px 10px">${h.notas_entrega}</div>` : ""}
+  ${firmaEntrega ? `
+    <div style="margin-top:12px">
+      <div style="font-size:11px;color:#64748b;margin-bottom:6px">Firma del cliente:</div>
+      <img src="${firmaEntrega}" style="max-width:220px;border:1px solid #e2e8f0;border-radius:6px;display:block" />
+    </div>` : ""}
+</div>` : ""}
+
+<!-- ══ Línea de tiempo ══ -->
 ${timeline.length > 0 ? `
 <h3>📅 Línea de Tiempo</h3>
 <div class="card">
@@ -311,25 +444,23 @@ ${timeline.length > 0 ? `
     </div>`).join("")}
 </div>` : ""}
 
+<!-- ══ Fechas del proceso ══ -->
 ${Object.values(fechas).some(Boolean) ? `
 <h3>📅 Fechas del Proceso</h3>
 <div class="card">
-  ${[
-    ["recibido","Recibido"],["diagnostico","Diagnóstico"],["esperando_aprobacion","En Espera Aprobación"],
-    ["aprobacion","Aprobado"],["inicio_reparacion","Inicio Reparación"],["control_calidad","Control Calidad"],
-    ["listo","Listo para Entrega"],["entrega","Entregado"]
-  ].filter(([k]) => (fechas as any)[k]).map(([k,label]) => `
-    <div class="row"><span class="label">${label}</span><span>${fmtDate((fechas as any)[k])}</span></div>`).join("")}
+  ${([["recibido","Recibido"],["diagnostico","Diagnóstico"],["esperando_aprobacion","Espera Aprobación"],
+     ["aprobacion","Aprobado"],["inicio_reparacion","Inicio Reparación"],["control_calidad","Control Calidad"],
+     ["listo","Listo para Entrega"],["entrega","Entregado"]] as [string,string][])
+    .filter(([k]) => (fechas as any)[k])
+    .map(([k,label]) => `<div class="row"><span class="label">${label}</span><span>${fmtDate((fechas as any)[k])}</span></div>`)
+    .join("")}
 </div>` : ""}
-
-${h.notas_entrega ? `
-<h3>📦 Notas de Entrega</h3>
-<div class="card"><div style="font-size:13px">${h.notas_entrega}</div></div>` : ""}
 
 ${h.observaciones ? `
 <h3>📝 Observaciones</h3>
 <div class="card"><div style="font-size:13px">${h.observaciones}</div></div>` : ""}
 
+<!-- ══ Pie de página ══ -->
 <div style="text-align:center;margin-top:28px;padding-top:12px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:11px;line-height:2">
   <p>Documento generado el ${new Date().toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"})}</p>
   <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
@@ -338,8 +469,17 @@ ${h.observaciones ? `
 </body>
 </html>`;
 
-  const w = window.open("", "_blank", "width=860,height=1100");
-  if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 600); }
+  // Usar iframe para evitar bloqueador de popups
+  const iframe = document.createElement("iframe");
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:1px;height:1px;border:none;";
+  document.body.appendChild(iframe);
+  const doc = iframe.contentDocument || iframe.contentWindow?.document;
+  if (doc) { doc.open(); doc.write(html); doc.close(); }
+  setTimeout(() => {
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 2000);
+  }, 800);
 }
 
 export default function ClienteApp() {
@@ -1327,7 +1467,7 @@ export default function ClienteApp() {
                             ← Volver
                           </button>
                           <button
-                            onClick={() => imprimirExpediente(histDetalle)}
+                            onClick={() => imprimirExpediente(histDetalle, histDetalleCompleto)}
                             style={{ flex:1, background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer" }}
                           >
                             🖨️ Imprimir
@@ -1767,7 +1907,7 @@ export default function ClienteApp() {
 
                         {/* ── BOTÓN IMPRIMIR ── */}
                         <button
-                          onClick={() => imprimirExpediente(histDetalle)}
+                          onClick={() => imprimirExpediente(histDetalle, histDetalleCompleto)}
                           style={{ width:"100%", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"12px 0", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:14 }}
                         >
                           🖨️ Imprimir Expediente
