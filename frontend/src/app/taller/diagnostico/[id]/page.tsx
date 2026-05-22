@@ -168,6 +168,9 @@ export default function DiagnosticoPage() {
   const [moDetalle, setMoDetalle] = useState("");
   const [notas,     setNotas]     = useState("");
 
+  // Checklist rápido de diagnóstico
+  const [checklistSel, setChecklistSel] = useState<Set<string>>(new Set());
+
   // Repuestos del inventario
   const [repuestosItems, setRepuestosItems] = useState<RepuestoSeleccionado[]>([]);
   const [inventario,     setInventario]     = useState<InventarioItem[]>([]);
@@ -599,6 +602,150 @@ export default function DiagnosticoPage() {
               </div>
             )}
 
+            {/* ── Checklist rápido de problemas ── */}
+            {!diagnostico?.terminado && (() => {
+              const GRUPOS = [
+                {
+                  label: "🔧 Motor y Mecánica", color: C.orange, items: [
+                    "Motor con falla / no enciende",
+                    "Ruido en motor (válvulas, cadena, etc.)",
+                    "Pérdida de potencia",
+                    "Sobrecalentamiento",
+                    "Fuga de aceite",
+                    "Fuga de refrigerante",
+                    "Consumo excesivo de aceite",
+                    "Humo excesivo (azul / negro / blanco)",
+                    "Vibración excesiva en motor",
+                    "Fallo en arranque / motor de arranque",
+                  ],
+                },
+                {
+                  label: "⚡ Sistema Eléctrico", color: C.yellow, items: [
+                    "Batería descargada / no carga",
+                    "Alternador defectuoso",
+                    "Fallo en sistema de luces",
+                    "Corto circuito",
+                    "Luz check engine encendida",
+                    "Fallo en sensor (ABS, oxígeno, MAF, etc.)",
+                    "Sistema de arranque sin respuesta",
+                    "Fusible quemado",
+                    "Problema en sistema de audio / pantalla",
+                    "A/C no enfría (eléctrico)",
+                  ],
+                },
+                {
+                  label: "🛑 Frenos y Suspensión", color: C.red, items: [
+                    "Frenos fallan / pedal blando",
+                    "Ruido en frenos (chirrido / golpe)",
+                    "Fuga de líquido de frenos",
+                    "Vibración al frenar",
+                    "Ruido en suspensión (amortiguadores)",
+                    "Jaloneos en dirección",
+                    "Volante desviado / no alinea",
+                    "Ruido en rodamientos / cubos",
+                    "Estabilizadores / bujes desgastados",
+                  ],
+                },
+                {
+                  label: "⚙️ Transmisión y Tren", color: C.purple, items: [
+                    "Transmisión no engancha / resbala",
+                    "Ruido en caja de cambios",
+                    "Fuga de aceite de transmisión",
+                    "Problemas en diferencial",
+                    "Fallo en clutch / embrague",
+                    "Fallo en palier / semieje",
+                    "Ruido en cardán / junta homocinética",
+                  ],
+                },
+                {
+                  label: "❄️ A/C y Confort", color: C.blue, items: [
+                    "A/C no enfría (gas agotado)",
+                    "Compresor de A/C defectuoso",
+                    "Fuga de refrigerante A/C",
+                    "Calefacción no funciona",
+                    "Olores internos",
+                  ],
+                },
+                {
+                  label: "🔍 Mantenimiento", color: C.green, items: [
+                    "Cambio de aceite y filtro",
+                    "Cambio de filtros (aire, combustible)",
+                    "Revisión de bujías",
+                    "Alineación y balanceo",
+                    "Revisión de líquidos y fluidos",
+                    "Mantenimiento preventivo 5,000 km",
+                    "Mantenimiento preventivo 10,000 km",
+                    "Mantenimiento preventivo 20,000 km",
+                  ],
+                },
+              ];
+
+              const toggleItem = (item: string) => {
+                setChecklistSel(prev => {
+                  const next = new Set(prev);
+                  if (next.has(item)) next.delete(item); else next.add(item);
+                  return next;
+                });
+              };
+
+              const aplicarChecklist = () => {
+                if (checklistSel.size === 0) return;
+                const lineas = Array.from(checklistSel).map(i => `• ${i}`).join("\n");
+                setDesc(prev => prev ? prev + "\n\n" + lineas : lineas);
+                setChecklistSel(new Set());
+              };
+
+              return (
+                <div style={{ marginBottom: 20, background: C.card2, borderRadius: 10, border: `1px solid ${C.border}`, padding: 16 }}>
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: C.muted, textTransform: "uppercase", letterSpacing: 0.8 }}>
+                      ⚡ Checklist rápido — selecciona los hallazgos
+                    </div>
+                    {checklistSel.size > 0 && (
+                      <button
+                        onClick={aplicarChecklist}
+                        style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+                      >
+                        ✓ Agregar {checklistSel.size} al diagnóstico
+                      </button>
+                    )}
+                  </div>
+                  {GRUPOS.map(g => (
+                    <div key={g.label} style={{ marginBottom: 12 }}>
+                      <div style={{ fontSize: 11, fontWeight: 700, color: g.color, marginBottom: 6 }}>{g.label}</div>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
+                        {g.items.map(item => {
+                          const sel = checklistSel.has(item);
+                          return (
+                            <button
+                              key={item}
+                              type="button"
+                              onClick={() => toggleItem(item)}
+                              style={{
+                                padding: "4px 10px", borderRadius: 20, fontSize: 11, cursor: "pointer",
+                                fontWeight: sel ? 700 : 500,
+                                background: sel ? g.color + "33" : C.card,
+                                color: sel ? g.color : C.muted,
+                                border: `1px solid ${sel ? g.color + "88" : C.border}`,
+                                transition: "all .1s",
+                              }}
+                            >
+                              {sel ? "✓ " : ""}{item}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                  {checklistSel.size > 0 && (
+                    <div style={{ marginTop: 8, padding: "8px 12px", background: C.blue + "15", borderRadius: 7, border: `1px solid ${C.blue}33`, fontSize: 12, color: C.blue }}>
+                      {checklistSel.size} ítem{checklistSel.size > 1 ? "s" : ""} seleccionado{checklistSel.size > 1 ? "s" : ""}. Haz clic en <strong>"Agregar al diagnóstico"</strong> para añadirlos al campo de descripción.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
             {/* Descripcion */}
             <div style={{ marginBottom: 18 }}>
               <label style={labelStyle}>
@@ -609,7 +756,7 @@ export default function DiagnosticoPage() {
                 onChange={e => setDesc(e.target.value)}
                 disabled={!!diagnostico?.terminado}
                 rows={5}
-                placeholder="Describe detalladamente los hallazgos tecnicos encontrados..."
+                placeholder="Describe detalladamente los hallazgos tecnicos encontrados... (o usa el checklist rápido arriba)"
                 style={{ ...inputStyle, resize: "vertical", height: 120 }}
               />
             </div>

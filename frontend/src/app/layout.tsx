@@ -6,9 +6,9 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","inspeccion","diagnosticos","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento","taller","aprobacion","permisos"],
-  secretaria: ["dashboard","clientes","vehiculos","contabilidad","diagnosticos","ordenes","inspeccion","facturacion","historial-vehiculo","inteligencia","mantenimiento","aprobacion"],
-  tecnico:    ["taller","ordenes","inspeccion","dashboard","diagnosticos","historial-vehiculo","mantenimiento"],
+  gerente:    ["dashboard","clientes","vehiculos","ordenes","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento","taller","aprobacion","permisos"],
+  secretaria: ["dashboard","clientes","vehiculos","contabilidad","ordenes","facturacion","historial-vehiculo","inteligencia","mantenimiento","aprobacion","taller"],
+  tecnico:    ["taller","ordenes","dashboard","historial-vehiculo","mantenimiento"],
   almacen:    ["inventario","suplidores","ventas"],
   cafeteria:  ["cafeteria"],
 };
@@ -38,8 +38,6 @@ const MODULOS: Modulo[] = [
       { href: "/aprobacion",         icon: "✅", label: "Aprobaciones",        key: "aprobacion",         iconBg: "linear-gradient(145deg,#065f46,#10b981)", iconShadow: "0 4px 12px rgba(16,185,129,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/vehiculos",          icon: "🚗", label: "Vehículos",           key: "vehiculos",          iconBg: "linear-gradient(145deg,#312e81,#6366f1)", iconShadow: "0 4px 12px rgba(99,102,241,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/ordenes",            icon: "🔧", label: "Órdenes de Trabajo",  key: "ordenes",            iconBg: "linear-gradient(145deg,#92400e,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
-      { href: "/inspeccion",         icon: "📋", label: "Inspección Vehículo", key: "inspeccion",         iconBg: "linear-gradient(145deg,#065f46,#059669)", iconShadow: "0 4px 12px rgba(5,150,105,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
-      { href: "/diagnosticos",       icon: "🔬", label: "Diagnósticos",        key: "diagnosticos",       iconBg: "linear-gradient(145deg,#4c1d95,#8b5cf6)", iconShadow: "0 4px 12px rgba(139,92,246,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/mantenimiento",      icon: "🛠️", label: "Mantenimiento",       key: "mantenimiento",      iconBg: "linear-gradient(145deg,#0c4a6e,#0284c7)", iconShadow: "0 4px 12px rgba(2,132,199,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/historial-vehiculo", icon: "📚", label: "Historial Vehículos", key: "historial-vehiculo", iconBg: "linear-gradient(145deg,#1e1b4b,#4f46e5)", iconShadow: "0 4px 12px rgba(79,70,229,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
     ],

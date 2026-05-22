@@ -111,6 +111,7 @@ export default function TallerPage() {
   const [toast,         setToast]         = useState<{ msg: string; tipo: "ok"|"err" } | null>(null);
   const [vistaKanban,   setVistaKanban]   = useState(true);
   const [tabActivo,     setTabActivo]     = useState("TODOS");
+  const [busquedaLista, setBusquedaLista] = useState("");
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   // Usuario desde localStorage (evitar SSR mismatch)
@@ -419,13 +420,28 @@ export default function TallerPage() {
             </button>
           )}
 
-          {/* Listo → Entregar */}
-          {orden.estado === "LISTO" && !isConfirming && puedeEntregar && (
-            <button onClick={() => { setConfirmId(orden.id); setConfirmAction("entregar"); }} disabled={isLoading}
-              style={{ background: C.green, color: "#fff", border: "none", borderRadius: 7,
-                padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
-              🏁 Entregar al Cliente
-            </button>
+          {/* Listo → Entregar + WhatsApp aviso */}
+          {orden.estado === "LISTO" && !isConfirming && (
+            <>
+              {puedeEntregar && (
+                <button onClick={() => { setConfirmId(orden.id); setConfirmAction("entregar"); }} disabled={isLoading}
+                  style={{ background: C.green, color: "#fff", border: "none", borderRadius: 7,
+                    padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                  🏁 Entregar al Cliente
+                </button>
+              )}
+              {orden.cliente_telefono && (
+                <a
+                  href={`https://wa.me/${(() => { const d = (orden.cliente_telefono||"").replace(/\D/g,""); return d.startsWith("1") ? d : "1"+d; })()}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre}, le informamos que su ${orden.vehiculo_marca||""} ${orden.vehiculo_modelo||""} (placa ${orden.vehiculo_placa||""}) ya está listo para retirar en Sólido Auto Servicio.${monto > 0 ? ` Total a pagar: ${fmtDinero(monto)}.` : ""} ¡Le esperamos! 🔧`)}`}
+                  target="_blank" rel="noopener noreferrer"
+                >
+                  <button style={{ background: "#25d366", color: "#fff", border: "none", borderRadius: 7,
+                    padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                    📲 Avisar por WhatsApp
+                  </button>
+                </a>
+              )}
+            </>
           )}
         </div>
 
@@ -476,9 +492,17 @@ export default function TallerPage() {
     { key: "TODOS", label: "Todas" },
     ...COLUMNAS.map(c => ({ key: c.key, label: c.label })),
   ];
-  const listaFiltrada = tabActivo === "TODOS"
-    ? ordenesOrdenadas
-    : ordenesOrdenadas.filter(o => o.estado === tabActivo);
+  const listaFiltrada = (() => {
+    let base = tabActivo === "TODOS" ? ordenesOrdenadas : ordenesOrdenadas.filter(o => o.estado === tabActivo);
+    if (busquedaLista.trim()) {
+      const q = busquedaLista.toLowerCase();
+      base = base.filter(o =>
+        [o.cliente_nombre, o.numero_orden, o.vehiculo_placa, o.vehiculo_marca, o.vehiculo_modelo, o.descripcion]
+          .some(v => (v || "").toLowerCase().includes(q))
+      );
+    }
+    return base;
+  })();
 
   // ── Render ────────────────────────────────────────────────────────────────
   return (
@@ -527,7 +551,7 @@ export default function TallerPage() {
             <button style={{ background: C.green, color: "#fff", border: "none",
               borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700,
               boxShadow: `0 2px 10px ${C.green}44` }}>
-              + Nueva Orden
+              🚗 Nueva Recepción
             </button>
           </Link>
         </div>
@@ -559,6 +583,47 @@ export default function TallerPage() {
           );
         })}
       </div>
+
+      {/* ── Panel: Listas para entregar hoy ── */}
+      {(() => {
+        const listas = ordenesActivas.filter(o => o.estado === "LISTO");
+        if (listas.length === 0) return null;
+        return (
+          <div style={{ margin: "12px 24px 0", background: C.green + "12", border: `1px solid ${C.green}44`, borderRadius: 10, padding: "12px 16px" }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: C.green, marginBottom: 8 }}>
+              🎉 {listas.length} vehículo{listas.length > 1 ? "s" : ""} listo{listas.length > 1 ? "s" : ""} para entregar
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {listas.map(o => {
+                const diag = diagMap[o.id];
+                const monto = Number(diag?.total || diag?.costo_estimado || o.total || 0);
+                return (
+                  <div key={o.id} style={{ background: C.card, borderRadius: 8, padding: "8px 12px", border: `1px solid ${C.green}33`, display: "flex", alignItems: "center", gap: 10 }}>
+                    <div>
+                      <div style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{o.cliente_nombre}</div>
+                      <div style={{ fontSize: 11, color: C.muted }}>
+                        {o.vehiculo_placa && <span style={{ fontFamily: "monospace" }}>🪪 {o.vehiculo_placa} · </span>}
+                        {o.numero_orden || `OT-${String(o.id).padStart(4,"0")}`}
+                        {monto > 0 && <span style={{ color: C.green, fontWeight: 700, marginLeft: 6 }}>· {fmtDinero(monto)}</span>}
+                      </div>
+                    </div>
+                    {o.cliente_telefono && (
+                      <a
+                        href={`https://wa.me/${(() => { const d=(o.cliente_telefono||"").replace(/\D/g,""); return d.startsWith("1")?d:"1"+d; })()}?text=${encodeURIComponent(`Hola ${o.cliente_nombre}, su ${o.vehiculo_marca||""} ${o.vehiculo_modelo||""} (placa ${o.vehiculo_placa||""}) ya está listo para retirar en Sólido Auto Servicio.${monto>0?` Total: ${fmtDinero(monto)}.`:""} ¡Le esperamos! 🔧`)}`}
+                        target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}
+                      >
+                        <button style={{ background: "#25d366", color: "#fff", border: "none", borderRadius: 6, padding: "5px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>
+                          💬 Avisar
+                        </button>
+                      </a>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })()}
 
       {loading ? (
         <div style={{ textAlign: "center", color: C.muted, padding: 80, fontSize: 15 }}>⏳ Cargando órdenes...</div>
@@ -608,6 +673,18 @@ export default function TallerPage() {
 
         // ── VISTA LISTA ───────────────────────────────────────────────────────
         <div style={{ padding: "14px 24px" }}>
+          {/* Búsqueda */}
+          <input
+            type="text"
+            value={busquedaLista}
+            onChange={e => setBusquedaLista(e.target.value)}
+            placeholder="🔍 Buscar por cliente, placa, OT..."
+            style={{
+              width: "100%", maxWidth: 420, padding: "9px 14px", marginBottom: 14,
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 9,
+              color: C.text, fontSize: 13, outline: "none", boxSizing: "border-box", display: "block",
+            }}
+          />
           {/* Tabs filtro */}
           <div style={{ display: "flex", gap: 4, marginBottom: 16, borderBottom: `1px solid ${C.border}`, overflowX: "auto", paddingBottom: 0 }}>
             {TABS_LISTA.map(t => {
