@@ -735,8 +735,14 @@ export default function OrdenDetallePage() {
   const estado  = orden.estado || "RECIBIDO";
   const estCfg  = EST[estado] || EST.RECIBIDO;
 
+  // ── Permisos por rol ─────────────────────────────────────────────────────────
+  const rolUsuario    = (usuario?.rol || "tecnico").toLowerCase();
+  const puedeAprobar  = ["gerente","secretaria","admin"].includes(rolUsuario);
+  const puedeCalidad  = ["gerente","admin"].includes(rolUsuario);
+  const puedeEntregar = ["gerente","secretaria","admin"].includes(rolUsuario);
+
   const accionesFlujo: { key: string; label: string; color: string }[] = [];
-  if (estado === "ESPERANDO_APROBACION") {
+  if (estado === "ESPERANDO_APROBACION" && puedeAprobar) {
     accionesFlujo.push(
       { key:"aprobar",  label:"✅ Cliente Aprobó",  color:"#16a34a" },
       { key:"rechazar", label:"❌ Cliente Rechazó",  color:"#dc2626" },
@@ -744,7 +750,7 @@ export default function OrdenDetallePage() {
   }
   // Los botones de QC viven dentro de la sección Control de Calidad (con checklist completo)
   // No se duplican aquí para evitar doble envío al servidor
-  if (estado === "LISTO") {
+  if (estado === "LISTO" && puedeEntregar) {
     accionesFlujo.push({ key:"entregar", label:"🏁 Vehículo Entregado", color:"#1d4ed8" });
   }
 
@@ -810,6 +816,17 @@ export default function OrdenDetallePage() {
           color:      msg.tipo === "ok" ? "#065f46" : "#991b1b",
           border:`1px solid ${msg.tipo === "ok" ? "#6ee7b7" : "#fca5a5"}` }}>
           {msg.tipo === "ok" ? "✅" : "❌"} {msg.texto}
+        </div>
+      )}
+
+      {/* ── Banner informativo para técnico en etapas que requieren aprobación ── */}
+      {accionesFlujo.length === 0 && estado === "ESPERANDO_APROBACION" && !puedeAprobar && (
+        <div style={{ ...card, borderLeft:"4px solid #f59e0b", background:"#fffbeb", display:"flex", alignItems:"center", gap:12 }}>
+          <span style={{ fontSize:22 }}>⏳</span>
+          <div>
+            <p style={{ margin:0, fontWeight:700, fontSize:14, color:"#92400e" }}>Esperando aprobación del cliente</p>
+            <p style={{ margin:"2px 0 0", fontSize:12, color:"#b45309" }}>Secretaría/Gerencia contactará al cliente para aprobar o rechazar la cotización.</p>
+          </div>
         </div>
       )}
 
@@ -1195,7 +1212,13 @@ export default function OrdenDetallePage() {
         <div style={{ ...card, marginTop:16, borderLeft:"4px solid #8b5cf6" }}>
           <div style={sTitle as any}>✅ Control de Calidad</div>
 
-          {estado === "CONTROL_CALIDAD" ? (
+          {estado === "CONTROL_CALIDAD" && !puedeCalidad ? (
+            /* Técnico: solo puede ver que está pendiente de QC */
+            <div style={{ background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:10, padding:"16px 20px", textAlign:"center", color:"#5b21b6" }}>
+              <p style={{ margin:"0 0 4px", fontWeight:700, fontSize:14 }}>⏳ Pendiente de Control de Calidad</p>
+              <p style={{ margin:0, fontSize:12, color:"#7c3aed" }}>El gerente realizará la revisión antes de notificar al cliente.</p>
+            </div>
+          ) : estado === "CONTROL_CALIDAD" ? (
             /* Formulario editable de QC */
             <div>
               <div style={{ marginBottom:14 }}>
@@ -1288,7 +1311,13 @@ export default function OrdenDetallePage() {
         <div style={{ ...card, marginTop:16, borderLeft:"4px solid #1d4ed8" }}>
           <div style={sTitle as any}>🏁 Entrega al Cliente</div>
 
-          {estado === "LISTO" ? (
+          {estado === "LISTO" && !puedeEntregar ? (
+            /* Técnico: ver que está listo, pero no puede procesar entrega */
+            <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"16px 20px", textAlign:"center", color:"#1d4ed8" }}>
+              <p style={{ margin:"0 0 4px", fontWeight:700, fontSize:14 }}>🎉 Vehículo listo para entrega</p>
+              <p style={{ margin:0, fontSize:12, color:"#3b82f6" }}>La entrega al cliente será procesada por secretaría o gerencia.</p>
+            </div>
+          ) : estado === "LISTO" ? (
             /* Formulario de entrega */
             <div>
               <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:14, marginBottom:14 }}>

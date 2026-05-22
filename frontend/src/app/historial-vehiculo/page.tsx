@@ -220,20 +220,50 @@ export default function HistorialVehiculoPage() {
 }
 
 // ── Expediente completo ────────────────────────────────
-function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
-  // Leer snapshot JSONB guardado
-  const avances:    any[] = Array.isArray(h.avances_data)   ? h.avances_data   : [];
-  const timeline:   any[] = Array.isArray(h.timeline_data)  ? h.timeline_data  : [];
-  const cot:        any   = h.cotizacion_data && typeof h.cotizacion_data === "object" && !Array.isArray(h.cotizacion_data) ? h.cotizacion_data : null;
-  const fac:        any   = h.factura_data    && typeof h.factura_data    === "object" && !Array.isArray(h.factura_data)    ? h.factura_data    : null;
-  const fechas:     any   = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso : {};
-  const checklist:  any   = h.checklist_qc    && typeof h.checklist_qc    === "object" ? h.checklist_qc   : {};
-  const cotItems:   any[] = Array.isArray(cot?.items) ? cot.items : Array.isArray(cot?.items_detalle) ? cot.items_detalle : [];
-  const facItems:   any[] = Array.isArray(fac?.items) ? fac.items : [];
+const QC_CHECKLIST_LABELS: Record<string, string> = {
+  motor:       "Motor funcionando correctamente",
+  frenos:      "Sistema de frenos operativo",
+  fluidos:     "Sin fugas de fluidos",
+  luces:       "Sistema de luces completo",
+  electrico:   "Sistema eléctrico sin fallas",
+  transmision: "Transmisión / caja de cambios",
+  suspension:  "Suspensión y dirección",
+  ac:          "A/C y climatización",
+  limpieza:    "Limpieza y presentación",
+  prueba_ruta: "Prueba de ruta realizada",
+  trabajo_ok:  "Trabajo solicitado completado al 100%",
+};
 
-  const hayInspecciones = h.inspeccion_mecanica || h.inspeccion_electrica || h.inspeccion_electronica;
-  const hayFallas       = h.codigos_falla || h.fallas_identificadas;
-  const hayQC           = h.resultado_qc || h.observaciones_qc || Object.keys(checklist).length > 0;
+function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
+  const [detalleCompleto, setDetalleCompleto] = useState<any>(null);
+
+  useEffect(() => {
+    fetch(`${API}/vehiculo-historial/${h.id}/detalle`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d) setDetalleCompleto(d); })
+      .catch(() => {});
+  }, [h.id]);
+
+  // Snapshot JSONB
+  const avancesSnap: any[] = Array.isArray(h.avances_data)   ? h.avances_data   : [];
+  const timeline:    any[] = Array.isArray(h.timeline_data)  ? h.timeline_data  : [];
+  const cot:         any   = h.cotizacion_data && typeof h.cotizacion_data === "object" && !Array.isArray(h.cotizacion_data) ? h.cotizacion_data : null;
+  const fac:         any   = h.factura_data    && typeof h.factura_data    === "object" && !Array.isArray(h.factura_data)    ? h.factura_data    : null;
+  const fechas:      any   = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso : {};
+  const checklist:   any   = h.checklist_qc    && typeof h.checklist_qc    === "object" ? h.checklist_qc   : {};
+  const inspecSnap:  any   = h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null;
+  const cotItems:    any[] = Array.isArray(cot?.items) ? cot.items : Array.isArray(cot?.items_detalle) ? cot.items_detalle : [];
+  const facItems:    any[] = Array.isArray(fac?.items) ? fac.items : [];
+
+  // Live data: prefer detalle endpoint, fallback to snapshot
+  const inspec:       any   = detalleCompleto?.inspeccion || inspecSnap;
+  const avancesLive:  any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
+    ? detalleCompleto.avances : avancesSnap;
+  const trabajosItems: any[] = Array.isArray(detalleCompleto?.trabajos_realizados_items) && detalleCompleto.trabajos_realizados_items.length > 0
+    ? detalleCompleto.trabajos_realizados_items : [];
+
+  const hayFallas = h.codigos_falla || h.fallas_identificadas;
+  const hayQC     = h.resultado_qc || h.observaciones_qc || Object.keys(checklist).length > 0;
 
   return (
     <div style={{ background: "#fff", borderRadius: 18, padding: 32, boxShadow: "0 4px 32px rgba(0,0,0,0.10)", marginBottom: 24 }}>
@@ -294,6 +324,100 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
       </div>
 
       <Divider />
+
+      {/* ── Trabajo Solicitado ── */}
+      {(h.descripcion || h.motivo_entrada) && (
+        <>
+          <Seccion icono="📝" titulo="Trabajo Solicitado">
+            <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "12px 16px", fontSize: 14, color: "#1e3a5f", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+              {h.descripcion || h.motivo_entrada}
+            </div>
+          </Seccion>
+          <Divider />
+        </>
+      )}
+
+      {/* ── Inspección de Recepción ── */}
+      {inspec && (
+        <>
+          <Seccion icono="📋" titulo="Inspección de Recepción">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <Card>
+                <Fila label="KM entrada"  valor={inspec.km_entrada != null ? Number(inspec.km_entrada).toLocaleString() : null} />
+                <Fila label="Combustible" valor={inspec.nivel_combustible != null ? `${inspec.nivel_combustible}%` : null} />
+                <Fila label="Condición"   valor={inspec.condicion_general} />
+              </Card>
+              {inspec.observaciones && (
+                <div style={{ gridColumn: "span 2" }}>
+                  <Card>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 6 }}>📝 Observaciones</div>
+                    <p style={{ margin: 0, fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{inspec.observaciones}</p>
+                  </Card>
+                </div>
+              )}
+            </div>
+
+            {Array.isArray(inspec.zonas_danio) && inspec.zonas_danio.length > 0 && (
+              <div style={{ marginBottom: 14 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>⚠️ Daños al Ingreso</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  {inspec.zonas_danio.map((z: any, i: number) => (
+                    <span key={i} style={{ background: "#fef9c3", border: "1px solid #fde68a", color: "#92400e", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600 }}>
+                      {(z.zona || "").replace(/_/g, " ")}: {(z.tipo || "").replace(/_/g, " ")}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {(() => {
+              const items: [string, string][] = [
+                ["luces_ok","💡 Luces"],["espejos_ok","🔍 Espejos"],["radio_pantalla","📻 Radio"],
+                ["tapiceria_ok","🪑 Tapicería"],["alfombras_ok","🧺 Alfombras"],["bocina_ok","📣 Bocina"],
+                ["gato_ok","🔩 Gato"],["llanta_repuesto_ok","🛞 Llanta rep."],
+                ["documentos_ok","📄 Documentos"],["herramientas_ok","🔧 Herramientas"],
+              ];
+              const defined = items.filter(([k]) => inspec[k] !== undefined && inspec[k] !== null);
+              if (defined.length === 0) return null;
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Artículos verificados</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6 }}>
+                    {defined.map(([k, l]) => {
+                      const ok = inspec[k] === true || inspec[k] === 1;
+                      return (
+                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, padding: "5px 8px", borderRadius: 8, background: ok ? "#f0fdf4" : "#fef2f2", border: `1px solid ${ok ? "#6ee7b7" : "#fca5a5"}` }}>
+                          <span style={{ color: ok ? "#16a34a" : "#dc2626" }}>{ok ? "✓" : "✗"}</span>
+                          <span>{l}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {inspec.fotos_slots && Object.values(inspec.fotos_slots as Record<string,any>).some(Boolean) && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>📸 Fotos de Recepción</div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: 8 }}>
+                  {(["frente","trasero","lateral_izq","lateral_der"] as const).map(k => {
+                    const img = (inspec.fotos_slots as any)?.[k];
+                    const lbl: Record<string,string> = { frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der." };
+                    return img ? (
+                      <div key={k} style={{ textAlign: "center" }}>
+                        <img src={img} alt={lbl[k]} style={{ width: "100%", aspectRatio: "4/3", objectFit: "cover", borderRadius: 8, border: "1px solid #e5e7eb" }} />
+                        <div style={{ fontSize: 11, color: "#888", marginTop: 4 }}>{lbl[k]}</div>
+                      </div>
+                    ) : null;
+                  })}
+                </div>
+              </div>
+            )}
+          </Seccion>
+          <Divider />
+        </>
+      )}
 
       {/* ── Diagnóstico ── */}
       <Seccion icono="🔬" titulo="Diagnóstico Técnico">
@@ -382,9 +506,23 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
 
       {/* ── Trabajos realizados / Avances ── */}
       <Seccion icono="🛠️" titulo="Trabajos Realizados">
-        {avances.length > 0 ? (
+        {trabajosItems.length > 0 ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-            {avances.map((a: any, i: number) => (
+            {trabajosItems.map((t: any, i: number) => {
+              const estadoColor = t.estado === "REALIZADO" ? "#065f46" : t.estado === "PENDIENTE" ? "#92400e" : "#6b7280";
+              const estadoBg    = t.estado === "REALIZADO" ? "#f0fdf4" : t.estado === "PENDIENTE" ? "#fffbeb" : "#f9fafb";
+              return (
+                <div key={i} style={{ background: estadoBg, border: `1px solid ${estadoColor}33`, borderLeft: `3px solid ${estadoColor}`, borderRadius: 10, padding: "10px 14px", display: "flex", gap: 14, alignItems: "center" }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#888", minWidth: 130 }}>{t.tipo || "—"}</div>
+                  <div style={{ flex: 1, fontSize: 13, color: "#333" }}>{t.descripcion || "—"}</div>
+                  <div style={{ fontSize: 11, fontWeight: 800, color: estadoColor, whiteSpace: "nowrap" }}>{(t.estado || "").replace("_", " ")}</div>
+                </div>
+              );
+            })}
+          </div>
+        ) : avancesLive.length > 0 ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {avancesLive.map((a: any, i: number) => (
               <div key={i} style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: "10px 14px", display: "flex", gap: 14, alignItems: "flex-start" }}>
                 <div style={{ minWidth: 90, fontSize: 11, color: "#888", paddingTop: 1 }}>{fmtFecha(a.created_at)}</div>
                 <div style={{ flex: 1, fontSize: 13, color: "#333" }}>{a.descripcion}</div>
@@ -421,12 +559,12 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
               </Card>
               {Object.keys(checklist).length > 0 && (
                 <Card>
-                  <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 10 }}>CHECKLIST</div>
-                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 10 }}>CHECKLIST DE CALIDAD</div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 5 }}>
                     {Object.entries(checklist).map(([k, v]) => (
-                      <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, background: v ? "#f0fdf4" : "#fef2f2", padding: "4px 10px", borderRadius: 20 }}>
-                        <span>{v ? "✅" : "❌"}</span>
-                        <span style={{ textTransform: "capitalize" }}>{k.replace(/_/g, " ")}</span>
+                      <div key={k} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 12, background: v ? "#f0fdf4" : "#fef2f2", padding: "5px 10px", borderRadius: 8, border: `1px solid ${v ? "#6ee7b7" : "#fca5a5"}` }}>
+                        <span style={{ color: v ? "#16a34a" : "#dc2626" }}>{v ? "✓" : "✗"}</span>
+                        <span>{QC_CHECKLIST_LABELS[k] || k.replace(/_/g, " ")}</span>
                       </div>
                     ))}
                   </div>
@@ -482,6 +620,35 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
           </div>
         ) : <SinDatos texto="Sin factura registrada para esta orden" />}
       </Seccion>
+
+      <Divider />
+
+      {/* ── Entrega al Cliente ── */}
+      {(h.fecha_entrega || h.notas_entrega || h.usuario_entrego || h.firma_entrega) && (
+        <>
+          <Divider />
+          <Seccion icono="🏁" titulo="Entrega al Cliente">
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
+              <Card bg="#eff6ff" border="#bfdbfe">
+                <Fila label="Fecha de entrega" valor={fmtFechaHora(h.fecha_entrega)} destaca />
+                <Fila label="Entregado por"    valor={h.usuario_entrego} />
+              </Card>
+              {h.notas_entrega && (
+                <Card>
+                  <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 6 }}>📝 Notas</div>
+                  <p style={{ margin: 0, fontSize: 13, color: "#333", whiteSpace: "pre-wrap" }}>{h.notas_entrega}</p>
+                </Card>
+              )}
+            </div>
+            {h.firma_entrega && (
+              <div>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 8 }}>Firma del Cliente</div>
+                <img src={h.firma_entrega} alt="Firma del cliente" style={{ maxHeight: 90, border: "1px solid #e5e7eb", borderRadius: 8, background: "#fff", padding: 6 }} />
+              </div>
+            )}
+          </Seccion>
+        </>
+      )}
 
       <Divider />
 

@@ -1357,6 +1357,16 @@ export default function ClienteApp() {
                           )}
                         </div>
 
+                        {/* ── Trabajo Solicitado ── */}
+                        {(histDetalle.descripcion || histDetalleCompleto?.orden?.descripcion) && (
+                          <div className="card" style={{ marginBottom:10, border:"1px solid rgba(59,130,246,0.15)" }}>
+                            <div style={{ fontSize:10, color:"#60a5fa", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>📝 Trabajo Solicitado</div>
+                            <div style={{ fontSize:13, color:"#cbd5e1", lineHeight:1.7, whiteSpace:"pre-wrap" }}>
+                              {histDetalle.descripcion || histDetalleCompleto?.orden?.descripcion}
+                            </div>
+                          </div>
+                        )}
+
                         {/* ── INSPECCIÓN VEHICULAR DE RECEPCIÓN (datos vivos o snapshot) ── */}
                         {(() => {
                           const insp = histDetalleCompleto?.inspeccion
@@ -1677,11 +1687,19 @@ export default function ClienteApp() {
                                   {h.observaciones_qc && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>{h.observaciones_qc}</div>}
                                   {h.checklist_qc && Object.keys(h.checklist_qc).length > 0 && (
                                     <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                                      {Object.entries(h.checklist_qc).map(([k, v]: [string, any]) => (
-                                        <span key={k} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background: v ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)", color: v ? "#6ee7b7" : "#fca5a5", border:`1px solid ${v ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.15)"}` }}>
-                                          {v ? "✅" : "❌"} {k.replace(/_/g," ")}
-                                        </span>
-                                      ))}
+                                      {(() => {
+                                          const QC_LBL: Record<string,string> = {
+                                            motor:"Motor OK",frenos:"Frenos OK",fluidos:"Sin fugas",
+                                            luces:"Luces OK",electrico:"Eléctrico OK",transmision:"Transmisión",
+                                            suspension:"Suspensión",ac:"A/C",limpieza:"Limpieza",
+                                            prueba_ruta:"Prueba de ruta",trabajo_ok:"Trabajo al 100%",
+                                          };
+                                          return Object.entries(h.checklist_qc).map(([k, v]: [string, any]) => (
+                                            <span key={k} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background: v ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)", color: v ? "#6ee7b7" : "#fca5a5", border:`1px solid ${v ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.15)"}` }}>
+                                              {v ? "✅" : "❌"} {QC_LBL[k] || k.replace(/_/g," ")}
+                                            </span>
+                                          ));
+                                        })()}
                                     </div>
                                   )}
                                 </div>
@@ -1694,14 +1712,20 @@ export default function ClienteApp() {
                                   <div style={{ fontSize:13, color:"#94a3b8", marginBottom:6 }}>
                                     Fecha entrega: <b style={{ color:"#e2e8f0" }}>{fmtF(h.fechas_proceso.entrega)}</b>
                                   </div>
-                                  {orden?.tecnico_qc && (
+                                  {(h.usuario_entrego || orden?.usuario_entrego) && (
                                     <div style={{ fontSize:13, color:"#94a3b8", marginBottom:6 }}>
-                                      Entregado por: <b style={{ color:"#e2e8f0" }}>{orden.tecnico_qc}</b>
+                                      Entregado por: <b style={{ color:"#e2e8f0" }}>{h.usuario_entrego || orden?.usuario_entrego}</b>
                                     </div>
                                   )}
                                   {(h.notas_entrega || orden?.notas_entrega) && (
                                     <div style={{ fontSize:12, color:"#64748b", background:"rgba(15,23,42,0.4)", borderRadius:7, padding:"8px 10px", marginTop:6 }}>
                                       {h.notas_entrega || orden?.notas_entrega}
+                                    </div>
+                                  )}
+                                  {(h.firma_entrega || orden?.firma_entrega) && (
+                                    <div style={{ marginTop:10 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>Firma del Cliente</div>
+                                      <img src={h.firma_entrega || orden?.firma_entrega} alt="Firma" style={{ maxHeight:70, border:"1px solid rgba(148,163,184,0.2)", borderRadius:6, background:"rgba(255,255,255,0.05)", padding:4 }} />
                                     </div>
                                   )}
                                 </div>
