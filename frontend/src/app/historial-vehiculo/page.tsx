@@ -255,12 +255,40 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
   const cotItems:    any[] = Array.isArray(cot?.items) ? cot.items : Array.isArray(cot?.items_detalle) ? cot.items_detalle : [];
   const facItems:    any[] = Array.isArray(fac?.items) ? fac.items : [];
 
+  // ── Helper: parsear campo que puede venir como JSON string ──
+  const parseJsonField = (v: any): any[] => {
+    if (Array.isArray(v)) return v;
+    if (typeof v === "string" && v.trim().startsWith("[")) {
+      try { return JSON.parse(v); } catch { return []; }
+    }
+    return [];
+  };
+
   // Live data: prefer detalle endpoint, fallback to snapshot
   const inspec:       any   = detalleCompleto?.inspeccion || inspecSnap;
   const avancesLive:  any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
     ? detalleCompleto.avances : avancesSnap;
-  const trabajosItems: any[] = Array.isArray(detalleCompleto?.trabajos_realizados_items) && detalleCompleto.trabajos_realizados_items.length > 0
-    ? detalleCompleto.trabajos_realizados_items : [];
+
+  // trabajos_realizados_items: viene en diagnostico.trabajos_realizados_items (puede ser string JSON)
+  const rawTrabajosItems = detalleCompleto?.diagnostico?.trabajos_realizados_items
+    || cot?.trabajos_realizados_items   // snapshot
+    || h.trabajos_realizados_items;     // campo directo si lo hay
+  const trabajosItems: any[] = parseJsonField(rawTrabajosItems);
+
+  // mano_de_obra_detalle: del diagnóstico en vivo, luego del snapshot en cotizacion_data, luego campo directo
+  const manoDeObraDetalle: string =
+    detalleCompleto?.diagnostico?.mano_de_obra_detalle
+    || detalleCompleto?.cotizacion?.mano_de_obra_detalle
+    || cot?.mano_de_obra_detalle
+    || (h as any).mano_de_obra_detalle
+    || "";
+
+  // descripcion (trabajo solicitado): de la orden en vivo o del snapshot
+  const descripcionTrabajo: string =
+    detalleCompleto?.orden?.descripcion
+    || (h as any).descripcion
+    || h.motivo_entrada
+    || "";
 
   const hayFallas = h.codigos_falla || h.fallas_identificadas;
   const hayQC     = h.resultado_qc || h.observaciones_qc || Object.keys(checklist).length > 0;
@@ -326,11 +354,11 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
       <Divider />
 
       {/* ── Trabajo Solicitado ── */}
-      {(h.descripcion || h.motivo_entrada) && (
+      {descripcionTrabajo && (
         <>
           <Seccion icono="📝" titulo="Trabajo Solicitado">
             <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: 10, padding: "12px 16px", fontSize: 14, color: "#1e3a5f", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
-              {h.descripcion || h.motivo_entrada}
+              {descripcionTrabajo}
             </div>
           </Seccion>
           <Divider />
@@ -421,11 +449,28 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
 
       {/* ── Diagnóstico ── */}
       <Seccion icono="🔬" titulo="Diagnóstico Técnico">
-        {h.diagnostico_general && (
-          <div style={{ background: "#eff6ff", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#1e40af", fontWeight: 600 }}>
-            {h.diagnostico_general}
+        {/* Hallazgos generales */}
+        {(h.diagnostico_general || h.fallas_identificadas || detalleCompleto?.diagnostico?.fallas_identificadas) && (
+          <div style={{ background: "#eff6ff", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#1e40af", fontWeight: 600, whiteSpace: "pre-wrap" }}>
+            {h.diagnostico_general || h.fallas_identificadas || detalleCompleto?.diagnostico?.fallas_identificadas}
           </div>
         )}
+
+        {/* Mano de obra / trabajos solicitados en el diagnóstico */}
+        {manoDeObraDetalle && (
+          <div style={{ marginBottom: 14 }}>
+            <div style={{ fontSize: 11, fontWeight: 700, color: "#065f46", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>🔧 Trabajos del Diagnóstico (Mano de Obra)</div>
+            <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: 10, padding: "10px 14px" }}>
+              {manoDeObraDetalle.split("\n").filter((l: string) => l.trim()).map((l: string, i: number) => (
+                <div key={i} style={{ fontSize: 13, marginBottom: 4, display: "flex", gap: 6 }}>
+                  <span style={{ color: "#16a34a" }}>✓</span>
+                  <span style={{ color: "#374151" }}>{l.trim()}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Card>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 8 }}>🔧 Inspección Mecánica</div>
@@ -447,11 +492,10 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
           </Card>
         </div>
 
-        {hayFallas && (
+        {h.codigos_falla && (
           <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 12, padding: "14px 18px", marginTop: 14 }}>
-            <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 8, fontSize: 13 }}>⚠️ Fallas y Códigos Identificados</div>
-            {h.codigos_falla      && <div style={{ fontSize: 13, marginBottom: 4 }}><b>Códigos:</b> {h.codigos_falla}</div>}
-            {h.fallas_identificadas && <div style={{ fontSize: 13, whiteSpace: "pre-wrap" }}>{h.fallas_identificadas}</div>}
+            <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 8, fontSize: 13 }}>⚠️ Códigos de Falla</div>
+            <div style={{ fontSize: 13 }}>{h.codigos_falla}</div>
           </div>
         )}
 

@@ -561,9 +561,15 @@ export default function OrdenDetallePage() {
           }
           setData(finalData);
 
-          // Poblar trabajosItems
-          const items = finalData.diagnostico?.trabajos_realizados_items;
-          if (Array.isArray(items) && items.length > 0) {
+          // Poblar trabajosItems — puede ser array o JSON string
+          const rawItems = finalData.diagnostico?.trabajos_realizados_items;
+          let items: any[] = [];
+          if (Array.isArray(rawItems)) {
+            items = rawItems;
+          } else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+            try { items = JSON.parse(rawItems); } catch { items = []; }
+          }
+          if (items.length > 0) {
             setTrabajosItems(items);
           } else if (finalData.diagnostico?.avances?.length > 0) {
             setTrabajosItems(finalData.diagnostico.avances.map((av: any) => ({
@@ -620,9 +626,15 @@ export default function OrdenDetallePage() {
       };
       setData(finalData);
 
-      const items = diag?.trabajos_realizados_items;
-      if (Array.isArray(items) && items.length > 0) {
-        setTrabajosItems(items);
+      const rawItems2 = diag?.trabajos_realizados_items;
+      let items2: any[] = [];
+      if (Array.isArray(rawItems2)) {
+        items2 = rawItems2;
+      } else if (typeof rawItems2 === "string" && rawItems2.trim().startsWith("[")) {
+        try { items2 = JSON.parse(rawItems2); } catch { items2 = []; }
+      }
+      if (items2.length > 0) {
+        setTrabajosItems(items2);
       } else if (diag?.avances?.length > 0) {
         setTrabajosItems(diag.avances.map((av: any) => ({
           id: String(av.id), tipo: "Mecánica general",

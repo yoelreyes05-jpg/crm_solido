@@ -1536,6 +1536,17 @@ export default function ClienteApp() {
                           const clienteExtra = d?.cliente || null;
                           const avancesVivos: any[] = d?.avances?.length > 0 ? d.avances : (Array.isArray(h.avances_data) ? h.avances_data : []);
                           const timelineVivo: any[] = d?.estado_historial?.length > 0 ? d.estado_historial : (Array.isArray(h.timeline_data) ? h.timeline_data : []);
+                          // trabajos_realizados_items del diagnóstico (puede ser string JSON o array)
+                          const _rawTrab = diag?.trabajos_realizados_items || (h.cotizacion_data as any)?.trabajos_realizados_items;
+                          const trabajosItemsPWA: any[] = (() => {
+                            if (Array.isArray(_rawTrab)) return _rawTrab;
+                            if (typeof _rawTrab === "string" && _rawTrab.trim().startsWith("[")) {
+                              try { return JSON.parse(_rawTrab); } catch { return []; }
+                            }
+                            return [];
+                          })();
+                          // mano_de_obra_detalle del diagnóstico
+                          const manoObraDet: string = diag?.mano_de_obra_detalle || (h.cotizacion_data as any)?.mano_de_obra_detalle || "";
                           const fmtF  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
                           const moneda = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO",{minimumFractionDigits:2})}`;
 
@@ -1546,7 +1557,7 @@ export default function ClienteApp() {
                           const fallas = diag?.fallas_identificadas  || h.fallas_identificadas;
                           const codigos = diag?.codigos_falla        || h.codigos_falla;
                           const hallazgos = diag?.descripcion        || diag?.hallazgos;
-                          const moDetalle = diag?.mano_de_obra_detalle || "";
+                          const moDetalle = manoObraDet; // usa fallbacks: diag → cotizacion_data snapshot
                           const trabajosCheck = moDetalle.split("\n").map((l: string) => l.trim()).filter(Boolean);
 
                           return (
@@ -1626,39 +1637,33 @@ export default function ClienteApp() {
                                 </div>
                               )}
 
-                              {/* ── TRABAJOS REALIZADOS (tabla con tipo/estado) ── */}
-                              {avancesVivos.length > 0 && (
+                              {/* ── TRABAJOS REALIZADOS (items estructurados con tipo/estado) ── */}
+                              {trabajosItemsPWA.length > 0 && (
                                 <div className="card" style={{ marginBottom:10 }}>
-                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔧 Trabajos Realizados</div>
-                                  <table style={{ width:"100%", borderCollapse:"collapse", fontSize:12 }}>
-                                    <thead>
-                                      <tr style={{ borderBottom:"1px solid rgba(255,255,255,0.08)" }}>
-                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Tipo</th>
-                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Descripción</th>
-                                        <th style={{ padding:"5px 8px", textAlign:"left", color:"#475569", fontWeight:600 }}>Estado</th>
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {avancesVivos.map((a: any, i: number) => (
-                                        <tr key={i} style={{ borderBottom:"1px solid rgba(255,255,255,0.04)" }}>
-                                          <td style={{ padding:"6px 8px", color:"#94a3b8", verticalAlign:"top" }}>{a.tipo || "—"}</td>
-                                          <td style={{ padding:"6px 8px", color:"#cbd5e1", verticalAlign:"top" }}>{a.descripcion}</td>
-                                          <td style={{ padding:"6px 8px", verticalAlign:"top" }}>
-                                            <span style={{ fontSize:11, fontWeight:700, color: a.estado === "REALIZADO" ? "#34d399" : "#f59e0b", background: a.estado === "REALIZADO" ? "rgba(52,211,153,0.1)" : "rgba(245,158,11,0.1)", padding:"2px 7px", borderRadius:20 }}>
-                                              {a.estado || "—"}
-                                            </span>
-                                          </td>
-                                        </tr>
-                                      ))}
-                                    </tbody>
-                                  </table>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ Trabajos Realizados</div>
+                                  <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
+                                    {trabajosItemsPWA.map((t: any, i: number) => {
+                                      const ok = t.estado === "REALIZADO";
+                                      return (
+                                        <div key={i} style={{ display:"flex", gap:10, alignItems:"flex-start", padding:"7px 10px", borderRadius:8, background: ok ? "rgba(52,211,153,0.06)" : "rgba(245,158,11,0.06)", borderLeft:`2px solid ${ok ? "#34d399" : "#f59e0b"}` }}>
+                                          <div style={{ flex:1 }}>
+                                            <div style={{ fontSize:11, color:"#64748b", fontWeight:600 }}>{t.tipo || "—"}</div>
+                                            <div style={{ fontSize:13, color:"#cbd5e1", marginTop:2 }}>{t.descripcion || "—"}</div>
+                                          </div>
+                                          <span style={{ fontSize:10, fontWeight:700, color: ok ? "#34d399" : "#f59e0b", background: ok ? "rgba(52,211,153,0.12)" : "rgba(245,158,11,0.12)", padding:"2px 8px", borderRadius:20, whiteSpace:"nowrap" }}>
+                                            {(t.estado || "").replace(/_/g," ")}
+                                          </span>
+                                        </div>
+                                      );
+                                    })}
+                                  </div>
                                 </div>
                               )}
 
                               {/* ── AVANCES DE REPARACIÓN (cronología) ── */}
                               {avancesVivos.length > 0 && (
                                 <div className="card" style={{ marginBottom:10 }}>
-                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🔧 Avances de Reparación</div>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📋 Avances de Reparación</div>
                                   {avancesVivos.map((a: any, i: number) => (
                                     <div key={i} style={{ paddingBottom:8, marginBottom:8, borderBottom: i < avancesVivos.length-1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
                                       <div style={{ fontSize:11, color:"#64748b", marginBottom:3 }}>
@@ -1671,11 +1676,11 @@ export default function ClienteApp() {
                                 </div>
                               )}
 
-                              {/* Trabajos fallback si no hay avances */}
-                              {avancesVivos.length === 0 && h.trabajos_realizados && (
+                              {/* Fallback: si no hay ninguno de los anteriores */}
+                              {trabajosItemsPWA.length === 0 && avancesVivos.length === 0 && !manoObraDet && h.trabajos_realizados && (
                                 <div className="card" style={{ marginBottom:10 }}>
-                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
-                                  <div className="hist-section-text" style={{ whiteSpace:"pre-wrap" }}>{h.trabajos_realizados}</div>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
+                                  <div style={{ fontSize:13, color:"#94a3b8", whiteSpace:"pre-wrap" }}>{h.trabajos_realizados}</div>
                                 </div>
                               )}
 

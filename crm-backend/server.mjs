@@ -2040,15 +2040,22 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
     const tecnicoNombre =
       diag.tecnico_nombre || diag.usuario_nombre || orden?.tecnico_qc || tecUsuario?.nombre || "Sin asignar";
 
+    // ── Parsear trabajos_realizados_items (puede ser string JSON o array) ──
+    let trabajosItemsParsed = diag.trabajos_realizados_items;
+    if (typeof trabajosItemsParsed === "string") {
+      try { trabajosItemsParsed = JSON.parse(trabajosItemsParsed); } catch { trabajosItemsParsed = []; }
+    }
+    if (!Array.isArray(trabajosItemsParsed)) trabajosItemsParsed = [];
+
     // ── Texto de trabajos realizados (campo legacy de texto) ──
     let trabajos = null;
     if (avancesArr.length > 0) {
       trabajos = avancesArr
         .map(a => `[${new Date(a.created_at).toLocaleDateString("es-DO")}] ${a.tecnico_nombre || tecnicoNombre}: ${a.descripcion}`)
         .join("\n");
-    } else if (Array.isArray(diag.trabajos_realizados_items) && diag.trabajos_realizados_items.length > 0) {
-      trabajos = diag.trabajos_realizados_items
-        .map(t => `• ${t.descripcion || t.trabajo || JSON.stringify(t)}`)
+    } else if (trabajosItemsParsed.length > 0) {
+      trabajos = trabajosItemsParsed
+        .map(t => `• [${t.tipo || "Trabajo"}] ${t.descripcion || t.trabajo || JSON.stringify(t)}`)
         .join("\n");
     } else {
       trabajos = cotizacion?.mano_de_obra_detalle || diag.mano_de_obra_detalle || null;
@@ -2078,21 +2085,29 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
     const diagGeneral = diag.fallas_identificadas || diag.tipo_servicio || "";
 
     // ── Snapshot de cotización (con sus items JSONB incluidos) ──
+    const manoObraDetalle = cotizacion?.mano_de_obra_detalle || diag.mano_de_obra_detalle || null;
     const cotizacionData = cotizacion ? {
-      id:                 cotizacion.id,
-      numero:             cotizacion.numero,
-      mano_obra:          cotizacion.mano_obra,
-      repuestos:          cotizacion.repuestos,
-      subtotal:           cotizacion.subtotal,
-      itbis:              cotizacion.itbis,
-      total:              cotizacion.total,
-      tiempo_estimado:    cotizacion.tiempo_estimado,
-      notas:              cotizacion.notas,
-      aprobado:           cotizacion.aprobado,
-      aprobado_at:        cotizacion.aprobado_at,
-      items:              cotizacion.items      || [],   // JSONB con items de la cotización
-      items_detalle:      cotizacion.items_detalle || [],
-    } : {};
+      id:                       cotizacion.id,
+      numero:                   cotizacion.numero,
+      mano_obra:                cotizacion.mano_obra,
+      repuestos:                cotizacion.repuestos,
+      subtotal:                 cotizacion.subtotal,
+      itbis:                    cotizacion.itbis,
+      total:                    cotizacion.total,
+      tiempo_estimado:          cotizacion.tiempo_estimado,
+      notas:                    cotizacion.notas,
+      aprobado:                 cotizacion.aprobado,
+      aprobado_at:              cotizacion.aprobado_at,
+      items:                    cotizacion.items      || [],
+      items_detalle:            cotizacion.items_detalle || [],
+      // Detalles de mano de obra y trabajos (para historial completo)
+      mano_de_obra_detalle:     manoObraDetalle,
+      trabajos_realizados_items: trabajosItemsParsed,
+    } : {
+      // Sin cotizacion: guardar igualmente para que el historial los muestre
+      mano_de_obra_detalle:     manoObraDetalle,
+      trabajos_realizados_items: trabajosItemsParsed,
+    };
 
     // ── Snapshot de factura (con items de factura_items) ──
     const facturaData = factura ? {
@@ -2215,8 +2230,14 @@ async function crearHistorialDesdeDiagnostico(diagnosticoId) {
       ncf:                    factura?.ncf || null,
       // Datos adicionales de la orden
       numero_orden:           orden?.numero_orden   || null,
+      descripcion:            orden?.descripcion    || null,
       motivo_entrada:         orden?.motivo_entrada || null,
       notas_entrega:          orden?.notas_entrega  || null,
+      usuario_entrego:        orden?.usuario_entrego || null,
+      firma_entrega:          orden?.firma_entrega   || null,
+      fecha_entrega:          orden?.fecha_entrega   || null,
+      // Mano de obra y trabajos (accesibles desde el snapshot sin llamar al detalle)
+      mano_de_obra_detalle:   manoObraDetalle,
       // Control de calidad
       resultado_qc:           orden?.resultado_qc      || null,
       observaciones_qc:       orden?.observaciones_qc  || null,
