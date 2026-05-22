@@ -38,17 +38,17 @@ interface DiagInfo {
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
 const C = {
-  bg:     "#0f172a",
-  card:   "#1e293b",
-  card2:  "#162032",
-  border: "#334155",
-  text:   "#e2e8f0",
-  muted:  "#94a3b8",
+  bg:     "#f1f5f9",
+  card:   "#ffffff",
+  card2:  "#f8fafc",
+  border: "#e2e8f0",
+  text:   "#0f172a",
+  muted:  "#64748b",
   blue:   "#3b82f6",
   green:  "#10b981",
   red:    "#ef4444",
   orange: "#f97316",
-  yellow: "#f59e0b",
+  yellow: "#d97706",
   purple: "#8b5cf6",
   teal:   "#14b8a6",
 };
@@ -231,6 +231,7 @@ export default function TallerPage() {
         padding: 14,
         marginBottom: 10,
         fontSize: 13,
+        boxShadow: "0 1px 6px rgba(0,0,0,0.07)",
       }}>
         {/* Encabezado tarjeta */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 10 }}>
@@ -324,7 +325,7 @@ export default function TallerPage() {
                 onChange={e => setMotivoRechazo(e.target.value)}
                 placeholder="Motivo del rechazo..."
                 rows={2}
-                style={{ width: "100%", background: C.bg, color: C.text,
+                style={{ width: "100%", background: C.card2, color: C.text,
                   border: `1px solid ${C.border}`, borderRadius: 6,
                   padding: "6px 8px", fontSize: 12, marginBottom: 8,
                   resize: "none", boxSizing: "border-box", fontFamily: "inherit" }}
@@ -471,8 +472,8 @@ export default function TallerPage() {
 
   function btnSec(): CSSProperties {
     return {
-      background: "transparent", color: C.muted,
-      border: `1px solid ${C.border}44`, borderRadius: 6,
+      background: C.card2, color: C.muted,
+      border: `1px solid ${C.border}`, borderRadius: 6,
       padding: "4px 9px", cursor: "pointer", fontSize: 11, fontWeight: 500,
     };
   }
@@ -512,16 +513,16 @@ export default function TallerPage() {
       {toast && (
         <div style={{
           position: "fixed", top: 20, right: 20, zIndex: 9999,
-          background: toast.tipo === "ok" ? "#064e3b" : "#7f1d1d",
+          background: toast.tipo === "ok" ? "#d1fae5" : "#fee2e2",
           border: `1px solid ${toast.tipo === "ok" ? C.green : C.red}`,
-          color: "#fff", borderRadius: 10, padding: "12px 18px",
+          color: toast.tipo === "ok" ? "#065f46" : "#991b1b", borderRadius: 10, padding: "12px 18px",
           fontSize: 14, fontWeight: 600, boxShadow: "0 4px 20px #0008", maxWidth: 340,
         }}>{toast.msg}</div>
       )}
 
       {/* ── Header ── */}
       <div style={{
-        background: "#1e293b", borderBottom: `1px solid ${C.border}`,
+        background: C.card, borderBottom: `1px solid ${C.border}`,
         padding: "14px 24px", display: "flex", alignItems: "center",
         justifyContent: "space-between", flexWrap: "wrap", gap: 12,
       }}>
@@ -537,7 +538,7 @@ export default function TallerPage() {
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* Toggle vista */}
           <button onClick={() => setVistaKanban(!vistaKanban)}
-            style={{ background: C.card, color: C.muted, border: `1px solid ${C.border}`,
+            style={{ background: C.card2, color: C.muted, border: `1px solid ${C.border}`,
               borderRadius: 8, padding: "6px 12px", cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
             {vistaKanban ? "☰ Lista" : "⊞ Kanban"}
           </button>
@@ -598,7 +599,7 @@ export default function TallerPage() {
                 const diag = diagMap[o.id];
                 const monto = Number(diag?.total || diag?.costo_estimado || o.total || 0);
                 return (
-                  <div key={o.id} style={{ background: C.card, borderRadius: 8, padding: "8px 12px", border: `1px solid ${C.green}33`, display: "flex", alignItems: "center", gap: 10 }}>
+                  <div key={o.id} style={{ background: C.card, borderRadius: 8, padding: "8px 12px", border: `1px solid ${C.green}55`, boxShadow: "0 1px 4px #0000000d", display: "flex", alignItems: "center", gap: 10 }}>
                     <div>
                       <div style={{ fontWeight: 700, fontSize: 13, color: C.text }}>{o.cliente_nombre}</div>
                       <div style={{ fontSize: 11, color: C.muted }}>
@@ -681,7 +682,7 @@ export default function TallerPage() {
             placeholder="🔍 Buscar por cliente, placa, OT..."
             style={{
               width: "100%", maxWidth: 420, padding: "9px 14px", marginBottom: 14,
-              background: C.card, border: `1px solid ${C.border}`, borderRadius: 9,
+              background: C.card, border: `1px solid ${C.border}`, borderRadius: 9, boxShadow: "0 1px 4px #0000000a",
               color: C.text, fontSize: 13, outline: "none", boxSizing: "border-box", display: "block",
             }}
           />
@@ -728,7 +729,7 @@ export default function TallerPage() {
         </div>
       )}
 
-      <div style={{ textAlign: "center", padding: "8px 0 20px", fontSize: 11, color: C.border }}>
+      <div style={{ textAlign: "center", padding: "8px 0 20px", fontSize: 11, color: C.muted }}>
         Auto-actualización cada 20 segundos
       </div>
     </div>
