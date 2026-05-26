@@ -1497,6 +1497,17 @@ export default function ClienteApp() {
                           {histDetalle.tecnico_nombre && (
                             <div style={{ fontSize:13, color:"#64748b", marginTop:4 }}>👨‍🔧 {histDetalle.tecnico_nombre}</div>
                           )}
+                          {/* Cliente — disponible inmediatamente sin esperar el fetch async */}
+                          {(histDetalle.cliente_nombre || histDetalleCompleto?.cliente?.nombre) && (
+                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:4 }}>
+                              👤 {histDetalle.cliente_nombre || histDetalleCompleto?.cliente?.nombre}
+                              {(histDetalle.cliente_telefono || histDetalleCompleto?.cliente?.telefono) && (
+                                <span style={{ marginLeft:6, color:"#60a5fa" }}>
+                                  · {histDetalle.cliente_telefono || histDetalleCompleto?.cliente?.telefono}
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {histDetalle.motivo_entrada && (
                             <div style={{ fontSize:12, color:"#94a3b8", marginTop:6 }}>📋 {histDetalle.motivo_entrada}</div>
                           )}
@@ -1989,31 +2000,4 @@ export default function ClienteApp() {
                                     {h.costo_total > 0
                                       ? <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
                                       : <span />}
-                                    <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>Ver detalle →</span>
-                                  </div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        </div>
-                      )
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
-
-            <footer className="footer">
-              <div style={{ fontSize:22 }}>🔧</div>
-              <div className="footer-brand">Sólido Auto Servicio</div>
-              <div>809-712-2027</div>
-            </footer>
-          </div>
-        </div>
-
-        {/* BOTÓN FLOTANTE WHATSAPP */}
-        <a href="https://wa.me/18097122027" target="_blank" className="wa-float">💬</a>
-      </div>
-    </>
-  );
-}
+                                    <span style=

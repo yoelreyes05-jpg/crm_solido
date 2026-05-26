@@ -2598,7 +2598,10 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
         .select(
           "id, orden_id, tipo_servicio, observaciones, fallas_identificadas, " +
           "trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, " +
-          "tecnico_nombre, created_at"
+          "mano_obra, repuestos, total, terminado, " +
+          "inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
+          "codigos_falla, descripcion, hallazgos, notas, tiempo_estimado, " +
+          "tecnico_nombre, usuario_nombre, created_at"
         )
         .in("orden_id", ordenIds)
         .order("created_at", { ascending: false });
@@ -2639,8 +2642,11 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
         }
 
-        // Soporte para columna "total" O "costo_total" (según migración)
-        const costoFinal = o.costo_total ?? o.total ?? 0;
+        // Soporte para columna "total" O "costo_total" (desde orden o diagnóstico)
+        const moAmount   = Number(diag?.mano_obra  || 0);
+        const repAmount  = Number(diag?.repuestos   || 0);
+        const diagTotal  = moAmount + repAmount || Number(diag?.total || 0);
+        const costoFinal = Number(o.costo_total || o.total || diagTotal || 0);
 
         return {
           id:                        `orden_${o.id}`,
@@ -2652,6 +2658,8 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           estado:                    o.estado || "RECIBIDO",
           numero_orden:              o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
           tipo_servicio:             diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+          descripcion:               o.descripcion || null,
+          motivo_entrada:            o.motivo_entrada || o.descripcion || null,
           observaciones:             diag?.observaciones || "",
           fallas_identificadas:      diag?.fallas_identificadas || "",
           trabajos_realizados:       diag?.trabajos_realizados || "",
@@ -2659,17 +2667,38 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           trabajos_realizados_items: trabajosItems,
           avances_recientes:         diag ? (avancesPorDiag[diag.id] || []) : [],
           costo_total:               costoFinal,
-          costo_mano_obra:           diag?.mano_obra    || 0,
-          costo_repuestos:           diag?.repuestos    || 0,
+          costo_mano_obra:           moAmount,
+          costo_repuestos:           repAmount,
           tecnico_nombre:            diag?.tecnico_nombre || null,
           fecha_servicio:            o.created_at,
           created_at:                o.created_at,
           // Nombres que espera la PWA en su vista de detalle:
           avances_data:              diag ? (avancesPorDiag[diag.id] || []) : [],
+          // Cliente (para imprimir expediente sin esperar detalle async)
+          cliente_nombre:            null, // se rellena abajo si hay cliente
+          cliente_telefono:          null,
           _activa:                   !["COMPLETADO","FACTURADO","ENTREGADO","CANCELADA"].includes(o.estado),
           _orden_id:                 o.id,
+          _cliente_id:               o.cliente_id || null,
         };
       });
+
+      // ── 6b. Enriquecer con nombre del cliente (batch único) ──
+      const clienteIds = [...new Set(todasOrdenes.map(o => o._cliente_id).filter(Boolean))];
+      if (clienteIds.length > 0) {
+        const { data: clientes } = await supabase
+          .from("clientes")
+          .select("id, nombre, telefono")
+          .in("id", clienteIds);
+        if (clientes && clientes.length > 0) {
+          const clienteMap = {};
+          clientes.forEach(c => { clienteMap[c.id] = c; });
+          todasOrdenes = todasOrdenes.map(o => {
+            const c = clienteMap[o._cliente_id];
+            return c ? { ...o, cliente_nombre: c.nombre || null, cliente_telefono: c.telefono || null } : o;
+          });
+        }
+      }
     }
   }
 
@@ -5113,42 +5142,4 @@ app.get("/export/inventario", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="inventario_${Date.now()}.csv"`);
     res.send("﻿" + csv);
   } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// GET /export/ordenes
-app.get("/export/ordenes", async (req, res) => {
-  try {
-    const { desde, hasta } = req.query;
-    let q = supabase.from("ordenes_trabajo").select("id,numero_orden,cliente_nombre,vehiculo_placa,vehiculo_marca,vehiculo_modelo,estado,tecnico_nombre,costo_total,created_at").order("created_at", { ascending: false });
-    if (desde) q = q.gte("created_at", desde);
-    if (hasta) q = q.lte("created_at", hasta + "T23:59:59");
-    const { data } = await q;
-    const csv = toCSV(data || [], [
-      { key: "id", label: "ID" },
-      { key: "numero_orden", label: "N° OT" },
-      { key: "cliente_nombre", label: "Cliente" },
-      { key: "vehiculo_placa", label: "Placa" },
-      { key: "vehiculo_marca", label: "Marca" },
-      { key: "vehiculo_modelo", label: "Modelo" },
-      { key: "estado", label: "Estado" },
-      { key: "tecnico_nombre", label: "Técnico" },
-      { key: "costo_total", label: "Costo Total" },
-      { key: "created_at", label: "Fecha" },
-    ]);
-    res.setHeader("Content-Type", "text/csv; charset=utf-8");
-    res.setHeader("Content-Disposition", `attachment; filename="ordenes_${Date.now()}.csv"`);
-    res.send("﻿" + csv);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// =====================================================
-// 🚀 INICIAR SERVIDOR
-// =====================================================
-const PORT = process.env.PORT || 3001;
-app.listen(PORT, () => {
-  console.log(`✅ SÓLIDO AUTO SERVICIO — servidor activo en puerto ${PORT}`);
-});
+    res.status(500).json({ error: e.mes
