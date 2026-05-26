@@ -2386,6 +2386,73 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
   }
 });
 
+// GET /vehiculo-historial/orden/:ordenId/detalle — detalle de una orden activa (no está en vehiculo_historial aún)
+// Usado por la PWA cuando hace click en un item de historial cuyo id empieza con "orden_"
+app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
+  try {
+    const ordenId = parseInt(req.params.ordenId, 10);
+    if (!ordenId) return res.status(400).json({ error: "ID inválido" });
+
+    const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
+
+    // 1. Orden de trabajo
+    const orden = await safe(() => supabase.from("ordenes_trabajo").select("*").eq("id", ordenId).maybeSingle());
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+    // 2. Diagnóstico más reciente de esa orden
+    const diag = await safe(() =>
+      supabase.from("diagnosticos").select("*").eq("orden_id", ordenId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    );
+
+    // 3. Avances de reparación
+    const avances = diag?.id
+      ? await safe(() => supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diag.id).order("created_at"))
+      : [];
+
+    // 4. Inspección vehicular
+    const inspeccion = await safe(() =>
+      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", ordenId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()
+    );
+
+    // 5. Cotización
+    const cotizacion = diag?.id
+      ? await safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diag.id).maybeSingle())
+      : null;
+
+    // 6. Historial de estados (audit trail)
+    const estado_historial = await safe(() =>
+      supabase.from("orden_trabajo_log").select("*").eq("orden_id", ordenId).order("created_at")
+    );
+
+    // 7. Vehículo y cliente
+    const vehiculo = orden.vehiculo_id
+      ? await safe(() => supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle())
+      : null;
+    const cliente = orden.cliente_id
+      ? await safe(() => supabase.from("clientes").select("nombre,telefono,email").eq("id", orden.cliente_id).maybeSingle())
+      : null;
+
+    res.json({
+      historial: null,         // No hay registro en vehiculo_historial (orden aún activa)
+      diagnostico: diag || null,
+      orden,
+      avances: Array.isArray(avances) ? avances : [],
+      cotizacion: cotizacion || null,
+      cotizacion_items: [],
+      factura: null,
+      factura_items: [],
+      estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
+      inspeccion: inspeccion || null,
+      cliente: cliente || null,
+      vehiculo: vehiculo || null,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente y web
 // Busca en AMBAS fuentes: órdenes activas + historial cerrado
 app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
@@ -2592,11 +2659,13 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           trabajos_realizados_items: trabajosItems,
           avances_recientes:         diag ? (avancesPorDiag[diag.id] || []) : [],
           costo_total:               costoFinal,
-          costo_mano_obra:           0,
-          costo_repuestos:           0,
+          costo_mano_obra:           diag?.mano_obra    || 0,
+          costo_repuestos:           diag?.repuestos    || 0,
           tecnico_nombre:            diag?.tecnico_nombre || null,
           fecha_servicio:            o.created_at,
           created_at:                o.created_at,
+          // Nombres que espera la PWA en su vista de detalle:
+          avances_data:              diag ? (avancesPorDiag[diag.id] || []) : [],
           _activa:                   !["COMPLETADO","FACTURADO","ENTREGADO","CANCELADA"].includes(o.estado),
           _orden_id:                 o.id,
         };

@@ -627,7 +627,12 @@ export default function ClienteApp() {
     setTab("histperm");
     setLoadingDetalle(true);
     try {
-      const res  = await fetch(`${API}/vehiculo-historial/${h.id}/detalle`);
+      // Las órdenes activas tienen id "orden_XX" — usan el endpoint de orden activa
+      const esOrdenActiva = typeof h.id === "string" && h.id.startsWith("orden_");
+      const url = esOrdenActiva
+        ? `${API}/vehiculo-historial/orden/${h._orden_id}/detalle`
+        : `${API}/vehiculo-historial/${h.id}/detalle`;
+      const res  = await fetch(url);
       const data = await res.json();
       if (res.ok) setHistDetalleCompleto(data);
     } catch {}
@@ -1931,27 +1936,61 @@ export default function ClienteApp() {
                           <div className="hist-timeline">
                             {historialPerm.map((h: any, idx: number) => {
                               const abierto = histDetalle?.id === h.id;
+                              const avancesResumen: any[] = Array.isArray(h.avances_data) ? h.avances_data : [];
                               return (
                                 <div
                                   key={h.id}
                                   className={`hist-item ${abierto ? "open" : ""}`}
                                   onClick={() => abrirDetalleHist(h)}
                                 >
-                                  <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
+                                  {/* Cabecera: tipo de servicio + estado */}
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
+                                    <div className="hist-servicio" style={{ flex:1 }}>{h.tipo_servicio || "Servicio"}</div>
+                                    {h.estado && (
+                                      <span style={{ fontSize:10, fontWeight:700, padding:"2px 8px", borderRadius:20, marginLeft:8, whiteSpace:"nowrap",
+                                        background: h._activa ? "rgba(59,130,246,0.15)" : "rgba(52,211,153,0.12)",
+                                        color:      h._activa ? "#60a5fa"              : "#34d399" }}>
+                                        {h.estado.replace(/_/g," ")}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Fecha + técnico + badge */}
                                   <div className="hist-meta">
                                     {h.fecha_servicio ? new Date(h.fecha_servicio).toLocaleDateString("es-DO",{year:"numeric",month:"short",day:"numeric"}) : "—"}
-                                    {h.tecnico_nombre && ` · ${h.tecnico_nombre}`}
+                                    {h.tecnico_nombre && ` · 👨‍🔧 ${h.tecnico_nombre}`}
+                                    {h.numero_orden && <span style={{ marginLeft:6, color:"#475569" }}>#{h.numero_orden}</span>}
                                     {idx === 0 && <span className="hist-badge">Más reciente</span>}
                                   </div>
-                                  {h.costo_total > 0 && (
-                                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center" }}>
-                                      <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
-                                      <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>Ver detalle →</span>
+
+                                  {/* Fallas identificadas (resumen) */}
+                                  {h.fallas_identificadas && (
+                                    <div style={{ fontSize:12, color:"#fbbf24", background:"rgba(251,191,36,0.06)", borderRadius:7, padding:"5px 8px", marginTop:6, lineHeight:1.5 }}>
+                                      ⚠️ {String(h.fallas_identificadas).substring(0, 120)}{String(h.fallas_identificadas).length > 120 ? "…" : ""}
                                     </div>
                                   )}
-                                  {!h.costo_total && (
-                                    <div style={{ fontSize:11, color:"#475569", fontWeight:600, textAlign:"right" }}>Ver detalle →</div>
+
+                                  {/* Trabajos realizados (resumen) */}
+                                  {h.trabajos_realizados && !h.fallas_identificadas && (
+                                    <div style={{ fontSize:12, color:"#94a3b8", marginTop:6, lineHeight:1.5 }}>
+                                      🔧 {String(h.trabajos_realizados).substring(0, 120)}{String(h.trabajos_realizados).length > 120 ? "…" : ""}
+                                    </div>
                                   )}
+
+                                  {/* Avances recientes (máx 2) */}
+                                  {avancesResumen.slice(0, 2).map((a: any, ai: number) => (
+                                    <div key={ai} style={{ fontSize:11, color:"#64748b", marginTop:4, paddingLeft:8, borderLeft:"2px solid rgba(99,102,241,0.3)" }}>
+                                      {a.descripcion?.substring(0, 80)}{(a.descripcion?.length ?? 0) > 80 ? "…" : ""}
+                                    </div>
+                                  ))}
+
+                                  {/* Costo + Ver detalle */}
+                                  <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:8 }}>
+                                    {h.costo_total > 0
+                                      ? <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
+                                      : <span />}
+                                    <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>Ver detalle →</span>
+                                  </div>
                                 </div>
                               );
                             })}
