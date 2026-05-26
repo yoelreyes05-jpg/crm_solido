@@ -2444,148 +2444,145 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
 
 // =====================================================
 // 🔍 HELPER COMPARTIDO — Consulta historial por placa
-// Replica EXACTAMENTE la lógica de la PWA del cliente:
-// - Busca en /vehiculos con match normalizado (sin guiones/espacios)
-// - Trae TODAS las órdenes del vehículo (sin filtro de estado)
-// - Trae TODOS los diagnósticos del vehículo
-// - Trae historial cerrado (vehiculo_historial) con wildcard
+// Replica EXACTAMENTE la lógica de la PWA del cliente.
+// COLUMNAS: solo las que realmente existen en cada tabla.
 // =====================================================
 async function consultarHistorialPorPlaca(placa) {
-  // Normalizar: mayúsculas, sin espacios ni guiones (para comparar flexible)
+  // Normalizar: mayúsculas, sin espacios ni guiones
   const placaNorm = placa.toUpperCase().replace(/[\s\-_]/g, "").trim();
 
-  // ── 1. Historial cerrado (vehiculo_historial) — wildcard para tolerar guiones en BD ──
-  const { data: histData } = await supabase
-    .from("vehiculo_historial")
-    .select(
-      "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
-      "numero_orden, diagnostico_general, inspeccion_mecanica, inspeccion_electrica, " +
-      "inspeccion_electronica, codigos_falla, fallas_identificadas, observaciones, " +
-      "trabajos_realizados, mano_de_obra_detalle, cotizacion_data, avances_data, " +
-      "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, created_at"
-    )
-    .or(`placa.ilike.${placaNorm},placa.ilike.${placaNorm.replace(/([A-Z]{1,2})(\d+)/, "$1-$2")}`)
-    .order("created_at", { ascending: false });
-
-  // ── 2. Buscar vehículo igual que la PWA: traer todos y filtrar client-side por placa normalizada ──
-  const { data: todosVehiculos } = await supabase
+  // ── 1. Buscar vehículo — igual que la PWA: traer todos y filtrar client-side ──
+  const { data: todosVehiculos, error: vErr } = await supabase
     .from("vehiculos")
-    .select("id, marca, modelo, placa, ano, color, cliente_id")
-    .order("id", { ascending: false });
+    .select("id, marca, modelo, placa, ano, color, cliente_id");
+  if (vErr) console.error("🤖 TG[vehiculos]:", vErr.message);
 
-  const vehiculoActivo = (todosVehiculos || []).find(v =>
+  const vehiculo = (todosVehiculos || []).find(v =>
     v.placa?.toUpperCase().replace(/[\s\-_]/g, "") === placaNorm
   );
 
-  // ── 3. Traer TODAS las órdenes del vehículo (sin filtro de estado — igual que la PWA) ──
+  // ── 2. Historial cerrado (vehiculo_historial) — búsqueda flexible ──
+  const placaConGuion = placaNorm.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2");
+  const { data: histData, error: hErr } = await supabase
+    .from("vehiculo_historial")
+    .select(
+      "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, numero_orden, " +
+      "fallas_identificadas, observaciones, trabajos_realizados, mano_de_obra_detalle, " +
+      "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, " +
+      "avances_data, cotizacion_data, created_at"
+    )
+    .or(`placa.ilike.${placaNorm},placa.ilike.${placaConGuion}`)
+    .order("created_at", { ascending: false });
+  if (hErr) console.error("🤖 TG[historial]:", hErr.message);
+
+  // ── 3. Todas las órdenes del vehículo SIN filtro de estado (igual que la PWA) ──
   let todasOrdenes = [];
-  let todosDiags   = [];
 
-  if (vehiculoActivo) {
-    const [ordenesRes, diagsRes] = await Promise.all([
-      // Igual que la PWA: todas las órdenes sin filtrar por estado
-      supabase
-        .from("ordenes_trabajo")
-        .select("id, descripcion, estado, status, numero_orden, created_at, updated_at, total, vehiculo_id, vehiculo_info")
-        .eq("vehiculo_id", vehiculoActivo.id)
-        .order("created_at", { ascending: false }),
-      // Igual que la PWA: todos los diagnósticos del vehículo
-      supabase
+  if (vehiculo) {
+    // ⚠️  Solo columnas que existen realmente en ordenes_trabajo
+    const { data: ordenes, error: oErr } = await supabase
+      .from("ordenes_trabajo")
+      .select("id, descripcion, estado, numero_orden, created_at, total")
+      .eq("vehiculo_id", vehiculo.id)
+      .order("created_at", { ascending: false });
+    if (oErr) console.error("🤖 TG[ordenes]:", oErr.message);
+
+    if (ordenes && ordenes.length > 0) {
+      const ordenIds = ordenes.map(o => o.id);
+
+      // ── 4. Diagnósticos por orden_id (NOT vehiculo_id — más seguro) ──
+      const { data: diags, error: dErr } = await supabase
         .from("diagnosticos")
-        .select("id, orden_id, vehiculo_id, tipo_servicio, observaciones, fallas_identificadas, " +
-          "trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, tecnico_nombre, estado, created_at")
-        .eq("vehiculo_id", vehiculoActivo.id)
-        .order("created_at", { ascending: false }),
-    ]);
-
-    todasOrdenes = ordenesRes.data || [];
-    todosDiags   = diagsRes.data   || [];
-
-    // ── 4. Para cada orden, enriquecer con su diagnóstico y avances ──
-    const diagPorOrden = {};
-    todosDiags.forEach(d => { diagPorOrden[d.orden_id] = d; });
-
-    // Traer avances de todos los diagnósticos relevantes en una sola query
-    const diagIds = todosDiags.map(d => d.id);
-    let avancesPorDiag = {};
-    if (diagIds.length > 0) {
-      const { data: avancesAll } = await supabase
-        .from("avances_reparacion")
-        .select("diagnostico_id, descripcion, created_at, tecnico_nombre")
-        .in("diagnostico_id", diagIds)
+        .select(
+          "id, orden_id, tipo_servicio, observaciones, fallas_identificadas, " +
+          "trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, " +
+          "tecnico_nombre, created_at"
+        )
+        .in("orden_id", ordenIds)
         .order("created_at", { ascending: false });
-      (avancesAll || []).forEach(a => {
-        if (!avancesPorDiag[a.diagnostico_id]) avancesPorDiag[a.diagnostico_id] = [];
-        avancesPorDiag[a.diagnostico_id].push(a);
-      });
-    }
+      if (dErr) console.error("🤖 TG[diagnosticos]:", dErr.message);
 
-    // ── 5. Construir entradas enriquecidas para cada orden ──
-    todasOrdenes = todasOrdenes.map(o => {
-      const diag = diagPorOrden[o.id] || null;
+      const diagPorOrden = {};
+      (diags || []).forEach(d => { diagPorOrden[d.orden_id] = d; });
 
-      let trabajosItems = [];
-      const rawItems = diag?.trabajos_realizados_items;
-      if (Array.isArray(rawItems)) trabajosItems = rawItems;
-      else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
-        try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
+      // ── 5. Avances de todos los diagnósticos de una vez ──
+      const diagIds = (diags || []).map(d => d.id);
+      let avancesPorDiag = {};
+      if (diagIds.length > 0) {
+        const { data: avancesAll, error: aErr } = await supabase
+          .from("avances_reparacion")
+          .select("diagnostico_id, descripcion, created_at, tecnico_nombre")
+          .in("diagnostico_id", diagIds)
+          .order("created_at", { ascending: false });
+        if (aErr) console.error("🤖 TG[avances]:", aErr.message);
+        (avancesAll || []).forEach(a => {
+          if (!avancesPorDiag[a.diagnostico_id]) avancesPorDiag[a.diagnostico_id] = [];
+          if (avancesPorDiag[a.diagnostico_id].length < 4)
+            avancesPorDiag[a.diagnostico_id].push(a);
+        });
       }
 
-      const avances = diag ? (avancesPorDiag[diag.id] || []).slice(0, 4) : [];
+      // ── 6. Construir entradas enriquecidas por orden ──
+      todasOrdenes = ordenes.map(o => {
+        const diag = diagPorOrden[o.id] || null;
 
-      return {
-        id:                        `orden_${o.id}`,
-        placa:                     vehiculoActivo.placa,
-        marca:                     vehiculoActivo.marca,
-        modelo:                    vehiculoActivo.modelo,
-        ano:                       vehiculoActivo.ano,
-        color:                     vehiculoActivo.color,
-        estado:                    o.estado || o.status || "RECIBIDO",
-        numero_orden:              o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-        tipo_servicio:             diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
-        observaciones:             diag?.observaciones || "",
-        fallas_identificadas:      diag?.fallas_identificadas || "",
-        trabajos_realizados:       diag?.trabajos_realizados || "",
-        mano_de_obra_detalle:      diag?.mano_de_obra_detalle || "",
-        trabajos_realizados_items: trabajosItems,
-        avances_recientes:         avances,
-        costo_total:               o.total || 0,
-        costo_mano_obra:           0,
-        costo_repuestos:           0,
-        tecnico_nombre:            diag?.tecnico_nombre || null,
-        fecha_servicio:            o.created_at,
-        created_at:                o.created_at,
-        _activa:                   !["COMPLETADO","FACTURADO","ENTREGADO"].includes(o.estado),
-        _orden_id:                 o.id,
-      };
-    });
+        let trabajosItems = [];
+        const rawItems = diag?.trabajos_realizados_items;
+        if (Array.isArray(rawItems)) trabajosItems = rawItems;
+        else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+          try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
+        }
+
+        return {
+          id:                        `orden_${o.id}`,
+          placa:                     vehiculo.placa,
+          marca:                     vehiculo.marca,
+          modelo:                    vehiculo.modelo,
+          ano:                       vehiculo.ano,
+          color:                     vehiculo.color,
+          estado:                    o.estado || "RECIBIDO",
+          numero_orden:              o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+          tipo_servicio:             diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+          observaciones:             diag?.observaciones || "",
+          fallas_identificadas:      diag?.fallas_identificadas || "",
+          trabajos_realizados:       diag?.trabajos_realizados || "",
+          mano_de_obra_detalle:      diag?.mano_de_obra_detalle || "",
+          trabajos_realizados_items: trabajosItems,
+          avances_recientes:         diag ? (avancesPorDiag[diag.id] || []) : [],
+          costo_total:               o.total || 0,
+          costo_mano_obra:           0,
+          costo_repuestos:           0,
+          tecnico_nombre:            diag?.tecnico_nombre || null,
+          fecha_servicio:            o.created_at,
+          created_at:                o.created_at,
+          _activa:                   !["COMPLETADO","FACTURADO","ENTREGADO","CANCELADA"].includes(o.estado),
+          _orden_id:                 o.id,
+        };
+      });
+    }
   }
 
-  // ── 6. Combinar: órdenes (activas primero, luego cerradas) + historial cerrado ──
-  // Deduplicar historial cerrado si ya hay una orden con el mismo número_orden
+  // ── 7. Combinar: órdenes + historial cerrado (sin duplicados por numero_orden) ──
   const numerosDeOrdenes = new Set(todasOrdenes.map(o => o.numero_orden).filter(Boolean));
   const histFiltrado = (histData || []).filter(h =>
     !h.numero_orden || !numerosDeOrdenes.has(h.numero_orden)
   );
-
   const historial = [...todasOrdenes, ...histFiltrado];
 
+  console.log(`🤖 TG[placa:${placaNorm}] vehiculo=${vehiculo?.id ?? "no"} ordenes=${todasOrdenes.length} historial=${histFiltrado.length}`);
+
   if (historial.length === 0) {
-    if (vehiculoActivo) {
-      // El vehículo existe pero aún no tiene servicios — igual que la PWA
+    if (vehiculo) {
       return {
         found: true,
-        vehiculo: {
-          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca,
-          modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color,
-        },
+        vehiculo: { placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
         ultimo_estado: "RECIBIDO",
         historial: [{
-          id: `veh_${vehiculoActivo.id}`,
-          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca,
-          modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color,
+          id: `veh_${vehiculo.id}`, placa: vehiculo.placa,
+          marca: vehiculo.marca, modelo: vehiculo.modelo,
+          ano: vehiculo.ano, color: vehiculo.color,
           estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
-          created_at: new Date().toISOString(), _activa: true,
+          created_at: new Date().toISOString(), _activa: false,
         }],
       };
     }
@@ -2596,11 +2593,11 @@ async function consultarHistorialPorPlaca(placa) {
   return {
     found: true,
     vehiculo: {
-      placa: ref.placa || vehiculoActivo?.placa || placaNorm,
-      marca: ref.marca || vehiculoActivo?.marca || "",
-      modelo: ref.modelo || vehiculoActivo?.modelo || "",
-      ano: ref.ano || vehiculoActivo?.ano || null,
-      color: ref.color || vehiculoActivo?.color || null,
+      placa:  ref.placa  || vehiculo?.placa  || placaNorm,
+      marca:  ref.marca  || vehiculo?.marca  || "",
+      modelo: ref.modelo || vehiculo?.modelo || "",
+      ano:    ref.ano    || vehiculo?.ano    || null,
+      color:  ref.color  || vehiculo?.color  || null,
     },
     ultimo_estado: ref.estado,
     historial,
