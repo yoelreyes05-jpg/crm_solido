@@ -2455,8 +2455,10 @@ async function consultarHistorialPorPlaca(placa) {
     .from("vehiculo_historial")
     .select(
       "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
+      "numero_orden, " +
       "diagnostico_general, inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
       "codigos_falla, fallas_identificadas, observaciones, trabajos_realizados, " +
+      "mano_de_obra_detalle, cotizacion_data, avances_data, " +
       "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, created_at"
     )
     .ilike("placa", placaNorm)
@@ -2473,37 +2475,74 @@ async function consultarHistorialPorPlaca(placa) {
   if (vehiculoActivo) {
     const { data: ordenes } = await supabase
       .from("ordenes_trabajo")
-      .select("id, descripcion, estado, status, created_at, updated_at, total")
+      .select("id, descripcion, estado, status, numero_orden, created_at, updated_at, total")
       .eq("vehiculo_id", vehiculoActivo.id)
       .not("estado", "in", "(COMPLETADO,FACTURADO,ENTREGADO)")
       .order("created_at", { ascending: false });
 
     if (ordenes && ordenes.length > 0) {
-      const { data: diag } = await supabase
-        .from("diagnosticos")
-        .select("tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, tecnico_nombre, estado")
-        .eq("orden_id", ordenes[0].id)
-        .maybeSingle();
+      // Obtener diagnóstico y avances en paralelo para la orden más reciente
+      const [{ data: diag }, { data: avancesData }] = await Promise.all([
+        supabase
+          .from("diagnosticos")
+          .select("id, tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, tecnico_nombre, estado")
+          .eq("orden_id", ordenes[0].id)
+          .maybeSingle(),
+        supabase
+          .from("avances_reparacion")
+          .select("descripcion, created_at, tecnico_nombre")
+          .eq("diagnostico_id",
+            // subconsulta inline — se resuelve tras conocer diag.id
+            // se completará abajo con el ID real
+            -1  // placeholder, se reemplaza inmediatamente
+          )
+          .order("created_at", { ascending: false })
+          .limit(3),
+      ]);
+
+      // Re-fetch avances usando el ID real del diagnóstico
+      let avances = [];
+      if (diag?.id) {
+        const { data: av } = await supabase
+          .from("avances_reparacion")
+          .select("descripcion, created_at, tecnico_nombre")
+          .eq("diagnostico_id", diag.id)
+          .order("created_at", { ascending: false })
+          .limit(3);
+        avances = av || [];
+      }
+
+      // Parsear trabajos_realizados_items si viene como JSON string
+      let trabajosItems = [];
+      const rawItems = diag?.trabajos_realizados_items;
+      if (Array.isArray(rawItems)) trabajosItems = rawItems;
+      else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
+        try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
+      }
 
       ordenesActivas = ordenes.map(o => ({
-        id:                   `orden_${o.id}`,
-        placa:                vehiculoActivo.placa,
-        marca:                vehiculoActivo.marca,
-        modelo:               vehiculoActivo.modelo,
-        ano:                  vehiculoActivo.ano,
-        color:                vehiculoActivo.color,
-        estado:               o.estado || o.status || "RECIBIDO",
-        tipo_servicio:        diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
-        observaciones:        diag?.observaciones || "",
-        fallas_identificadas: diag?.fallas_identificadas || "",
-        trabajos_realizados:  diag?.trabajos_realizados || "",
-        costo_total:          o.total || 0,
-        costo_mano_obra:      0,
-        costo_repuestos:      0,
-        tecnico_nombre:       diag?.tecnico_nombre || null,
-        fecha_servicio:       o.created_at,
-        created_at:           o.created_at,
-        _activa:              true,
+        id:                      `orden_${o.id}`,
+        placa:                   vehiculoActivo.placa,
+        marca:                   vehiculoActivo.marca,
+        modelo:                  vehiculoActivo.modelo,
+        ano:                     vehiculoActivo.ano,
+        color:                   vehiculoActivo.color,
+        estado:                  o.estado || o.status || "RECIBIDO",
+        numero_orden:            o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+        tipo_servicio:           diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+        observaciones:           diag?.observaciones || "",
+        fallas_identificadas:    diag?.fallas_identificadas || "",
+        trabajos_realizados:     diag?.trabajos_realizados || "",
+        mano_de_obra_detalle:    diag?.mano_de_obra_detalle || "",
+        trabajos_realizados_items: trabajosItems,
+        avances_recientes:       avances,   // array [{descripcion, created_at, tecnico_nombre}]
+        costo_total:             o.total || 0,
+        costo_mano_obra:         0,
+        costo_repuestos:         0,
+        tecnico_nombre:          diag?.tecnico_nombre || null,
+        fecha_servicio:          o.created_at,
+        created_at:              o.created_at,
+        _activa:                 true,
       }));
     }
   }
@@ -2575,9 +2614,21 @@ VISIÓN: Ser el taller automotriz de referencia en Santo Domingo, reconocido por
 
 CAFETERÍA: Contamos con Sólido Café Garage, donde los clientes pueden disfrutar de bebidas y comida mientras esperan su vehículo.
 
+CITAS Y AGENDAMIENTO:
+- Los clientes pueden agendar citas en línea en: https://crm-automotriz-3wde-production.up.railway.app/cita
+- Solo necesitan: placa, teléfono, tipo de servicio, fecha y hora deseada.
+- El taller confirma o cancela la cita. El cliente recibe una notificación push 1 hora antes.
+- También pueden llamar al 809-712-2027 para agendar.
+
+NOTIFICACIONES DE CAMBIO DE ACEITE:
+- El sistema envía alertas automáticas cuando se acerca la fecha del próximo cambio de aceite.
+- El cliente debe activar las notificaciones en: https://crm-automotriz-3wde-production.up.railway.app/cliente
+- Las alertas llegan directamente al teléfono como notificaciones de la app.
+
 REGLAS PARA RESPONDER:
 - Responde siempre en español, de forma amable, breve y profesional.
 - Si el cliente pregunta por el estado de su vehículo, pídele que escriba su placa (ej: A123456).
+- Si preguntan por agendar una cita, dales el enlace: https://crm-automotriz-3wde-production.up.railway.app/cita
 - Si preguntan por presupuestos específicos o reparaciones complejas, diles que un técnico los contactará pronto.
 - No inventes precios exactos. Puedes decir que los precios varían según el vehículo y el diagnóstico.
 - Si no sabes algo con certeza, sugiere llamar al 809-712-2027.
@@ -2660,17 +2711,82 @@ app.post("/telegram/webhook", async (req, res) => {
 
     await tgTyping(chatId);
 
-    // ── /start o saludo ────────────────────────────────────────────────────
-    if (texto === "/start" || /^(hola|buenas|hey|buenos|buen dia|buen día)$/i.test(texto)) {
+    // ── /start, /ayuda o saludo ───────────────────────────────────────────
+    const esMenuTrigger =
+      texto === "/start" ||
+      texto === "/ayuda" ||
+      texto === "/menu"  ||
+      texto === "."      ||
+      /^(hola|hi|hey|alo|aló|hello|buenas|buenos|buen dia|buen día|buen día|como estas|cómo estás|como estás|cómo estas|qué tal|que tal|buenas tardes|buenas noches|buenas días|buenas dias)$/i.test(texto);
+
+    if (esMenuTrigger) {
       await tgSend(chatId,
-        `👋 ¡Hola, <b>${nombre}</b>! Soy <b>SólidoBot</b>, el asistente de Sólido Auto Servicio.\n\n` +
-        `Puedo ayudarte con:\n\n` +
-        `🔍 <b>Estado de tu vehículo</b>\n   → Escríbeme tu placa (ej: <code>A123456</code>)\n\n` +
-        `🔩 <b>Repuestos disponibles</b>\n   → Escribe <b>repuestos</b>\n\n` +
-        `☕ <b>Menú cafetería</b>\n   → Escribe <b>menú</b>\n\n` +
-        `🛠️ <b>Nuestros servicios</b>\n   → Escribe <b>servicios</b>\n\n` +
-        `📞 <b>Contacto y horarios</b>\n   → Escribe <b>contacto</b>\n\n` +
-        `O simplemente escríbeme tu consulta y te respondo. 😊`
+        `👋 ¡Hola, <b>${nombre}</b>! Soy <b>SólidoBot</b>, el asistente virtual de Sólido Auto Servicio.\n\n` +
+        `¿En qué puedo ayudarte hoy?\n\n` +
+        `🚗 <b>Estado de tu vehículo</b>\n   → Escríbeme tu placa (ej: <code>A123456</code>)\n\n` +
+        `📅 <b>Agendar una cita</b>\n   → Usa el botón <b>📅 Agendar Cita</b>\n\n` +
+        `🔩 <b>Repuestos disponibles</b>\n   → Usa el botón <b>🔩 Repuestos</b>\n\n` +
+        `☕ <b>Menú cafetería</b>\n   → Usa el botón <b>☕ Menú</b>\n\n` +
+        `🛠️ <b>Nuestros servicios</b>\n   → Usa el botón <b>🛠️ Servicios</b>\n\n` +
+        `📞 <b>Contacto y horarios</b>\n   → Usa el botón <b>📞 Contacto</b>\n\n` +
+        `O simplemente escríbeme tu consulta. 😊`,
+        {
+          reply_markup: JSON.stringify({
+            keyboard: [
+              [{ text: "🚗 Mi Vehículo" }, { text: "📅 Agendar Cita" }],
+              [{ text: "🔩 Repuestos"   }, { text: "☕ Menú"          }],
+              [{ text: "🛠️ Servicios"  }, { text: "📞 Contacto"      }],
+              [{ text: "💬 Hablar con asesor" }],
+            ],
+            resize_keyboard: true,
+            one_time_keyboard: false,
+          }),
+        }
+      );
+      return;
+    }
+
+    // ── Botón "Mi Vehículo" ───────────────────────────────────────────────
+    if (/^🚗 mi vehículo$/i.test(texto) || /^(mi vehículo|mi vehiculo|ver estado|consultar estado|estado vehiculo)$/i.test(texto)) {
+      await tgSend(chatId,
+        `🚗 Por favor escríbeme la <b>placa</b> de tu vehículo.\n` +
+        `Ejemplo: <code>A123456</code> o <code>AB12345</code>`
+      );
+      return;
+    }
+
+    // ── Botón / intención "Agendar Cita" ────────────────────────────────────
+    if (
+      /^📅 agendar cita$/i.test(texto) ||
+      /\b(agendar|reservar|cita|appointment|quiero una cita|necesito una cita|sacar turno|turno|agendarme)\b/i.test(texto)
+    ) {
+      const PWA_URL = "https://crm-automotriz-3wde-production.up.railway.app/cita";
+      await tgSend(chatId,
+        `📅 <b>Agendar tu cita en Sólido Auto Servicio</b>\n\n` +
+        `Puedes reservar tu cita directamente desde nuestro portal en línea:\n\n` +
+        `👉 <a href="${PWA_URL}">Agendar mi cita aquí</a>\n\n` +
+        `Solo necesitas:\n` +
+        `• Tu número de placa\n` +
+        `• Tu teléfono de contacto\n` +
+        `• El tipo de servicio que necesitas\n` +
+        `• Fecha y hora de tu preferencia\n\n` +
+        `⏰ Te recordaremos tu cita <b>1 hora antes</b> por notificación.\n\n` +
+        `También puedes llamarnos directamente al <b>809-712-2027</b> para reservar. 😊`
+      );
+      return;
+    }
+
+    // ── Consulta sobre cambio de aceite / mantenimiento próximo ─────────────
+    if (/\b(cambio.?de.?aceite|aceite|aceites|oil change|mantenimiento proximo|próximo mantenimiento|cuando.?toca|me toca)\b/i.test(texto)) {
+      await tgSend(chatId,
+        `🛢️ <b>Cambio de Aceite y Mantenimiento</b>\n\n` +
+        `Nuestro sistema monitorea el historial de tu vehículo y te enviará una <b>notificación automática</b> cuando se acerque la fecha de tu próximo cambio de aceite. 🔔\n\n` +
+        `Para activar estas alertas, visita nuestra app:\n` +
+        `👉 <a href="https://crm-automotriz-3wde-production.up.railway.app/cliente">Ver estado de mi vehículo</a>\n` +
+        `y presiona el botón <b>🔔 Activar Notificaciones</b>.\n\n` +
+        `Si ya se te acercó el mantenimiento, <b>agenda tu cita ahora</b>:\n` +
+        `📅 <a href="https://crm-automotriz-3wde-production.up.railway.app/cita">Reservar cita</a>\n\n` +
+        `📞 También puedes llamarnos al <b>809-712-2027</b>.`
       );
       return;
     }
@@ -2695,49 +2811,99 @@ app.post("/telegram/webhook", async (req, res) => {
       const ultimo = historial[0];
 
       const ESTADO_INFO = {
-        RECIBIDO:        { icon: "📋", label: "Recibido" },
-        DIAGNOSTICO:     { icon: "🔍", label: "En Diagnóstico" },
-        COTIZADO:        { icon: "📄", label: "Cotizado" },
-        APROBADO:        { icon: "✅", label: "Aprobado" },
-        EN_REPARACION:   { icon: "🔧", label: "En Reparación" },
-        CONTROL_CALIDAD: { icon: "🔎", label: "Control de Calidad" },
-        LISTO:           { icon: "🎉", label: "Listo para entrega" },
-        COMPLETADO:      { icon: "✅", label: "Completado" },
-        FACTURADO:       { icon: "🧾", label: "Facturado" },
-        ENTREGADO:       { icon: "🏁", label: "Entregado" },
+        RECIBIDO:             { icon: "📋", label: "Recibido — en espera de diagnóstico",     tip: "Hemos recibido tu vehículo. Pronto un técnico comenzará el diagnóstico." },
+        DIAGNOSTICO:          { icon: "🔬", label: "En Diagnóstico",                           tip: "Nuestro técnico está evaluando tu vehículo en este momento." },
+        ESPERANDO_APROBACION: { icon: "⏳", label: "Esperando tu aprobación",                  tip: "Ya tenemos el diagnóstico listo. Necesitamos tu autorización para proceder con la reparación." },
+        REPARACION:           { icon: "🔧", label: "En Reparación",                            tip: "Tu vehículo está siendo reparado por nuestro equipo técnico." },
+        CONTROL_CALIDAD:      { icon: "🔎", label: "Control de Calidad",                       tip: "La reparación está casi lista. Estamos haciendo la revisión final de calidad." },
+        LISTO:                { icon: "🎉", label: "¡Listo para entrega!",                     tip: "¡Tu vehículo está listo! Puedes pasar a recogerlo en nuestro taller." },
+        ENTREGADO:            { icon: "🏁", label: "Entregado",                                tip: "Vehículo entregado. ¡Gracias por confiar en Sólido Auto Servicio!" },
+        CANCELADA:            { icon: "❌", label: "Cancelada",                                tip: "Esta orden fue cancelada. Para más información llámanos." },
       };
 
-      const estadoInfo = ESTADO_INFO[ultimo?.estado] || { icon: "🔧", label: (ultimo?.estado || "En proceso").replace(/_/g, " ") };
+      const estadoInfo = ESTADO_INFO[ultimo?.estado] || { icon: "🔧", label: (ultimo?.estado || "En proceso").replace(/_/g, " "), tip: "" };
 
-      // ── Mensaje 1: encabezado + último servicio (igual que la PWA) ────
+      // ── Mensaje 1: encabezado + estado + detalles ────────────────────
       let msg1 = `🚗 <b>${vehiculo.marca} ${vehiculo.modelo}</b>`;
       if (vehiculo.ano)   msg1 += ` (${vehiculo.ano})`;
       if (vehiculo.color) msg1 += ` · ${vehiculo.color}`;
-      msg1 += `\n🏷️ Placa: <code>${vehiculo.placa}</code>\n`;
-      msg1 += `\n${estadoInfo.icon} <b>Estado: ${estadoInfo.label}</b>\n`;
+      msg1 += `\n🏷️ Placa: <code>${vehiculo.placa}</code>`;
+      if (ultimo?.numero_orden) msg1 += `  |  📋 <b>${ultimo.numero_orden}</b>`;
+      msg1 += `\n\n${estadoInfo.icon} <b>${estadoInfo.label}</b>\n`;
+      if (estadoInfo.tip) msg1 += `<i>${estadoInfo.tip}</i>\n`;
 
       if (ultimo) {
         if (ultimo.tipo_servicio && ultimo.tipo_servicio !== "Vehículo registrado") {
-          msg1 += `🔧 Servicio: ${ultimo.tipo_servicio}\n`;
+          msg1 += `\n🔧 Servicio: ${ultimo.tipo_servicio}\n`;
         }
         const fechaUlt = ultimo.fecha_servicio
           ? new Date(ultimo.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" })
           : null;
-        if (fechaUlt)                 msg1 += `📅 Fecha: ${fechaUlt}\n`;
-        if (ultimo.tecnico_nombre)    msg1 += `👨‍🔧 Técnico: ${ultimo.tecnico_nombre}\n`;
-        if (ultimo.costo_total > 0)   msg1 += `💰 Total: RD$ ${Number(ultimo.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}\n`;
-        if (ultimo.trabajos_realizados)
-          msg1 += `\n🛠️ <b>Trabajos Realizados</b>\n${ultimo.trabajos_realizados.substring(0, 400)}\n`;
+        if (fechaUlt)              msg1 += `📅 Fecha: ${fechaUlt}\n`;
+        if (ultimo.tecnico_nombre) msg1 += `👨‍🔧 Técnico: ${ultimo.tecnico_nombre}\n`;
+
+        // ── Fallas identificadas ──
         if (ultimo.fallas_identificadas)
-          msg1 += `\n⚠️ <b>Fallas Identificadas</b>\n${ultimo.fallas_identificadas.substring(0, 250)}\n`;
-        if (ultimo.observaciones)
-          msg1 += `\n📝 <b>Observaciones</b>\n${ultimo.observaciones.substring(0, 250)}\n`;
+          msg1 += `\n⚠️ <b>Diagnóstico</b>\n${ultimo.fallas_identificadas.substring(0, 300)}\n`;
+
+        // ── Mano de obra / trabajos a realizar ──
+        const moDetalle = ultimo.mano_de_obra_detalle || "";
+        const trabajosItems = Array.isArray(ultimo.trabajos_realizados_items) ? ultimo.trabajos_realizados_items : [];
+        if (moDetalle) {
+          const lineas = moDetalle.split("\n").filter(l => l.trim()).slice(0, 6);
+          if (lineas.length > 0) {
+            msg1 += `\n🔩 <b>Trabajos a Realizar</b>\n`;
+            lineas.forEach(l => { msg1 += `  ✓ ${l.trim()}\n`; });
+          }
+        } else if (trabajosItems.length > 0) {
+          msg1 += `\n🔩 <b>Trabajos</b>\n`;
+          trabajosItems.slice(0, 5).forEach(t => {
+            const check = t.estado === "REALIZADO" ? "✅" : "🔧";
+            msg1 += `  ${check} ${t.nombre || t.descripcion || "—"}\n`;
+          });
+        } else if (ultimo.trabajos_realizados) {
+          msg1 += `\n🛠️ <b>Trabajos</b>\n${ultimo.trabajos_realizados.substring(0, 350)}\n`;
+        }
+
+        // ── Avances recientes (solo en órdenes activas) ──
+        const avances = Array.isArray(ultimo.avances_recientes) ? ultimo.avances_recientes : [];
+        if (avances.length > 0) {
+          msg1 += `\n📋 <b>Últimos Avances</b>\n`;
+          avances.forEach(a => {
+            const fav = a.created_at
+              ? new Date(a.created_at).toLocaleDateString("es-DO", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+              : "";
+            msg1 += `  • <i>${fav}</i> — ${(a.descripcion || "").substring(0, 120)}\n`;
+          });
+        }
+
+        // ── Costo ──
+        if (ultimo.costo_total > 0)
+          msg1 += `\n💰 Total: <b>RD$ ${Number(ultimo.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</b>\n`;
+
+        // ── Observaciones y NCF ──
+        if (ultimo.observaciones && !ultimo._activa)
+          msg1 += `\n📝 ${ultimo.observaciones.substring(0, 200)}\n`;
         if (ultimo.ncf)
-          msg1 += `\n🧾 NCF: ${ultimo.ncf}\n`;
+          msg1 += `🧾 NCF: ${ultimo.ncf}\n`;
+
+        // ── Llamada a la acción específica por estado ──
         if (ultimo._activa) {
-          msg1 += ultimo.estado === "LISTO"
-            ? `\n🎉 <b>¡Tu vehículo está listo para entrega!</b>`
-            : `\n⏳ Seguimos trabajando en tu vehículo.`;
+          const estado = ultimo.estado;
+          if (estado === "LISTO") {
+            msg1 += `\n🎉 <b>¡Tu vehículo está listo para retirarlo!</b>\n`;
+            msg1 += `📍 Pasa por nuestro taller en Santo Domingo.\n`;
+            const waLink = `https://wa.me/18097122027?text=${encodeURIComponent(`Hola, vengo a retirar mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}`;
+            msg1 += `💬 <a href="${waLink}">Confirmar por WhatsApp</a>`;
+          } else if (estado === "ESPERANDO_APROBACION") {
+            msg1 += `\n📲 <b>¿Apruebas la reparación?</b>\n`;
+            msg1 += `Llámanos al <b>809-712-2027</b> o escríbenos:\n`;
+            msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, apruebo la reparación de mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Aprobar por WhatsApp</a>`;
+          } else if (estado === "CONTROL_CALIDAD") {
+            msg1 += `\n🔎 Estamos en la revisión final. Tu vehículo estará listo muy pronto.`;
+          } else {
+            msg1 += `\n⏳ <i>Seguimos trabajando para ti. Te avisaremos cuando esté listo.</i>`;
+          }
         }
       }
 
@@ -2768,7 +2934,7 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Repuestos ──────────────────────────────────────────────────────────
-    if (/repuest|pieza|piezas|invent/i.test(texto)) {
+    if (/repuest|pieza|piezas|invent|🔩/i.test(texto)) {
       const { data: rep } = await supabase
         .from("inventario").select("name, price, stock, code")
         .gt("stock", 0).order("name").limit(20);
@@ -2792,7 +2958,7 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Menú cafetería ─────────────────────────────────────────────────────
-    if (/menú|menu|café|cafe|cafeter|comer|bebid|comid/i.test(texto)) {
+    if (/menú|menu|café|cafe|cafeter|comer|bebid|comid|☕/i.test(texto)) {
       const { data: prods } = await supabase
         .from("cafeteria_productos").select("nombre, precio, categoria, stock")
         .or("activo.is.null,activo.eq.true")
@@ -2816,7 +2982,7 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Servicios ──────────────────────────────────────────────────────────
-    if (/servicio|hacen|ofrecen|trabajo|reparaci|manten|diagnos/i.test(texto)) {
+    if (/servicio|hacen|ofrecen|trabajo|reparaci|manten|diagnos|🛠️/i.test(texto)) {
       await tgSend(chatId,
         `🛠️ <b>Nuestros Servicios</b>\n\n` +
         `• Diagnóstico Computarizado (Scanner)\n` +
@@ -2834,7 +3000,7 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Contacto y horarios ────────────────────────────────────────────────
-    if (/contacto|horario|hora|abierto|abren|cierran|direcci|dónde|donde|ubicaci/i.test(texto)) {
+    if (/contacto|horario|hora|abierto|abren|cierran|direcci|dónde|donde|ubicaci|📞/i.test(texto)) {
       await tgSend(chatId,
         `📍 <b>Sólido Auto Servicio</b>\n\n` +
         `📞 Teléfono: <b>809-712-2027</b>\n` +
@@ -2849,7 +3015,7 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Escalación a humano ────────────────────────────────────────────────
-    if (/hablar|persona|humano|agente|técnico|tecnico|presupuest|cotizaci|precio de|cuánto cuesta|cuanto cuesta/i.test(texto)) {
+    if (/hablar|persona|humano|agente|técnico|tecnico|presupuest|cotizaci|precio de|cuánto cuesta|cuanto cuesta|💬 hablar/i.test(texto)) {
       await tgSend(chatId,
         `👨‍🔧 Entendido, <b>${nombre}</b>. Te conectaré con nuestro equipo.\n\n` +
         `📞 Llámanos: <b>809-712-2027</b>\n` +
