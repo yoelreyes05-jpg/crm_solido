@@ -2444,75 +2444,86 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
 
 // =====================================================
 // 🔍 HELPER COMPARTIDO — Consulta historial por placa
-// Misma lógica que GET /vehiculo-historial/placa/:placa
-// Usada por el endpoint HTTP y el bot de Telegram
+// Replica EXACTAMENTE la lógica de la PWA del cliente:
+// - Busca en /vehiculos con match normalizado (sin guiones/espacios)
+// - Trae TODAS las órdenes del vehículo (sin filtro de estado)
+// - Trae TODOS los diagnósticos del vehículo
+// - Trae historial cerrado (vehiculo_historial) con wildcard
 // =====================================================
 async function consultarHistorialPorPlaca(placa) {
-  const placaNorm = placa.toUpperCase().replace(/\s+/g, "").trim();
+  // Normalizar: mayúsculas, sin espacios ni guiones (para comparar flexible)
+  const placaNorm = placa.toUpperCase().replace(/[\s\-_]/g, "").trim();
 
-  // 1. Historial cerrado (vehiculo_historial)
+  // ── 1. Historial cerrado (vehiculo_historial) — wildcard para tolerar guiones en BD ──
   const { data: histData } = await supabase
     .from("vehiculo_historial")
     .select(
       "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, " +
-      "numero_orden, " +
-      "diagnostico_general, inspeccion_mecanica, inspeccion_electrica, inspeccion_electronica, " +
-      "codigos_falla, fallas_identificadas, observaciones, trabajos_realizados, " +
-      "mano_de_obra_detalle, cotizacion_data, avances_data, " +
+      "numero_orden, diagnostico_general, inspeccion_mecanica, inspeccion_electrica, " +
+      "inspeccion_electronica, codigos_falla, fallas_identificadas, observaciones, " +
+      "trabajos_realizados, mano_de_obra_detalle, cotizacion_data, avances_data, " +
       "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, created_at"
     )
-    .ilike("placa", placaNorm)
+    .or(`placa.ilike.${placaNorm},placa.ilike.${placaNorm.replace(/([A-Z]{1,2})(\d+)/, "$1-$2")}`)
     .order("created_at", { ascending: false });
 
-  // 2. Vehículo activo + órdenes activas
-  const { data: vehiculoActivo } = await supabase
+  // ── 2. Buscar vehículo igual que la PWA: traer todos y filtrar client-side por placa normalizada ──
+  const { data: todosVehiculos } = await supabase
     .from("vehiculos")
     .select("id, marca, modelo, placa, ano, color, cliente_id")
-    .ilike("placa", placaNorm)
-    .maybeSingle();
+    .order("id", { ascending: false });
 
-  let ordenesActivas = [];
+  const vehiculoActivo = (todosVehiculos || []).find(v =>
+    v.placa?.toUpperCase().replace(/[\s\-_]/g, "") === placaNorm
+  );
+
+  // ── 3. Traer TODAS las órdenes del vehículo (sin filtro de estado — igual que la PWA) ──
+  let todasOrdenes = [];
+  let todosDiags   = [];
+
   if (vehiculoActivo) {
-    const { data: ordenes } = await supabase
-      .from("ordenes_trabajo")
-      .select("id, descripcion, estado, status, numero_orden, created_at, updated_at, total")
-      .eq("vehiculo_id", vehiculoActivo.id)
-      .not("estado", "in", "(COMPLETADO,FACTURADO,ENTREGADO)")
-      .order("created_at", { ascending: false });
+    const [ordenesRes, diagsRes] = await Promise.all([
+      // Igual que la PWA: todas las órdenes sin filtrar por estado
+      supabase
+        .from("ordenes_trabajo")
+        .select("id, descripcion, estado, status, numero_orden, created_at, updated_at, total, vehiculo_id, vehiculo_info")
+        .eq("vehiculo_id", vehiculoActivo.id)
+        .order("created_at", { ascending: false }),
+      // Igual que la PWA: todos los diagnósticos del vehículo
+      supabase
+        .from("diagnosticos")
+        .select("id, orden_id, vehiculo_id, tipo_servicio, observaciones, fallas_identificadas, " +
+          "trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, tecnico_nombre, estado, created_at")
+        .eq("vehiculo_id", vehiculoActivo.id)
+        .order("created_at", { ascending: false }),
+    ]);
 
-    if (ordenes && ordenes.length > 0) {
-      // Obtener diagnóstico y avances en paralelo para la orden más reciente
-      const [{ data: diag }, { data: avancesData }] = await Promise.all([
-        supabase
-          .from("diagnosticos")
-          .select("id, tipo_servicio, observaciones, fallas_identificadas, trabajos_realizados, mano_de_obra_detalle, trabajos_realizados_items, tecnico_nombre, estado")
-          .eq("orden_id", ordenes[0].id)
-          .maybeSingle(),
-        supabase
-          .from("avances_reparacion")
-          .select("descripcion, created_at, tecnico_nombre")
-          .eq("diagnostico_id",
-            // subconsulta inline — se resuelve tras conocer diag.id
-            // se completará abajo con el ID real
-            -1  // placeholder, se reemplaza inmediatamente
-          )
-          .order("created_at", { ascending: false })
-          .limit(3),
-      ]);
+    todasOrdenes = ordenesRes.data || [];
+    todosDiags   = diagsRes.data   || [];
 
-      // Re-fetch avances usando el ID real del diagnóstico
-      let avances = [];
-      if (diag?.id) {
-        const { data: av } = await supabase
-          .from("avances_reparacion")
-          .select("descripcion, created_at, tecnico_nombre")
-          .eq("diagnostico_id", diag.id)
-          .order("created_at", { ascending: false })
-          .limit(3);
-        avances = av || [];
-      }
+    // ── 4. Para cada orden, enriquecer con su diagnóstico y avances ──
+    const diagPorOrden = {};
+    todosDiags.forEach(d => { diagPorOrden[d.orden_id] = d; });
 
-      // Parsear trabajos_realizados_items si viene como JSON string
+    // Traer avances de todos los diagnósticos relevantes en una sola query
+    const diagIds = todosDiags.map(d => d.id);
+    let avancesPorDiag = {};
+    if (diagIds.length > 0) {
+      const { data: avancesAll } = await supabase
+        .from("avances_reparacion")
+        .select("diagnostico_id, descripcion, created_at, tecnico_nombre")
+        .in("diagnostico_id", diagIds)
+        .order("created_at", { ascending: false });
+      (avancesAll || []).forEach(a => {
+        if (!avancesPorDiag[a.diagnostico_id]) avancesPorDiag[a.diagnostico_id] = [];
+        avancesPorDiag[a.diagnostico_id].push(a);
+      });
+    }
+
+    // ── 5. Construir entradas enriquecidas para cada orden ──
+    todasOrdenes = todasOrdenes.map(o => {
+      const diag = diagPorOrden[o.id] || null;
+
       let trabajosItems = [];
       const rawItems = diag?.trabajos_realizados_items;
       if (Array.isArray(rawItems)) trabajosItems = rawItems;
@@ -2520,46 +2531,59 @@ async function consultarHistorialPorPlaca(placa) {
         try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
       }
 
-      ordenesActivas = ordenes.map(o => ({
-        id:                      `orden_${o.id}`,
-        placa:                   vehiculoActivo.placa,
-        marca:                   vehiculoActivo.marca,
-        modelo:                  vehiculoActivo.modelo,
-        ano:                     vehiculoActivo.ano,
-        color:                   vehiculoActivo.color,
-        estado:                  o.estado || o.status || "RECIBIDO",
-        numero_orden:            o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-        tipo_servicio:           diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
-        observaciones:           diag?.observaciones || "",
-        fallas_identificadas:    diag?.fallas_identificadas || "",
-        trabajos_realizados:     diag?.trabajos_realizados || "",
-        mano_de_obra_detalle:    diag?.mano_de_obra_detalle || "",
+      const avances = diag ? (avancesPorDiag[diag.id] || []).slice(0, 4) : [];
+
+      return {
+        id:                        `orden_${o.id}`,
+        placa:                     vehiculoActivo.placa,
+        marca:                     vehiculoActivo.marca,
+        modelo:                    vehiculoActivo.modelo,
+        ano:                       vehiculoActivo.ano,
+        color:                     vehiculoActivo.color,
+        estado:                    o.estado || o.status || "RECIBIDO",
+        numero_orden:              o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+        tipo_servicio:             diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
+        observaciones:             diag?.observaciones || "",
+        fallas_identificadas:      diag?.fallas_identificadas || "",
+        trabajos_realizados:       diag?.trabajos_realizados || "",
+        mano_de_obra_detalle:      diag?.mano_de_obra_detalle || "",
         trabajos_realizados_items: trabajosItems,
-        avances_recientes:       avances,   // array [{descripcion, created_at, tecnico_nombre}]
-        costo_total:             o.total || 0,
-        costo_mano_obra:         0,
-        costo_repuestos:         0,
-        tecnico_nombre:          diag?.tecnico_nombre || null,
-        fecha_servicio:          o.created_at,
-        created_at:              o.created_at,
-        _activa:                 true,
-      }));
-    }
+        avances_recientes:         avances,
+        costo_total:               o.total || 0,
+        costo_mano_obra:           0,
+        costo_repuestos:           0,
+        tecnico_nombre:            diag?.tecnico_nombre || null,
+        fecha_servicio:            o.created_at,
+        created_at:                o.created_at,
+        _activa:                   !["COMPLETADO","FACTURADO","ENTREGADO"].includes(o.estado),
+        _orden_id:                 o.id,
+      };
+    });
   }
 
-  // 3. Combinar: órdenes activas primero, luego historial cerrado
-  const historial = [...ordenesActivas, ...(histData || [])];
+  // ── 6. Combinar: órdenes (activas primero, luego cerradas) + historial cerrado ──
+  // Deduplicar historial cerrado si ya hay una orden con el mismo número_orden
+  const numerosDeOrdenes = new Set(todasOrdenes.map(o => o.numero_orden).filter(Boolean));
+  const histFiltrado = (histData || []).filter(h =>
+    !h.numero_orden || !numerosDeOrdenes.has(h.numero_orden)
+  );
+
+  const historial = [...todasOrdenes, ...histFiltrado];
 
   if (historial.length === 0) {
     if (vehiculoActivo) {
+      // El vehículo existe pero aún no tiene servicios — igual que la PWA
       return {
         found: true,
-        vehiculo: { placa: vehiculoActivo.placa, marca: vehiculoActivo.marca, modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color },
+        vehiculo: {
+          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca,
+          modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color,
+        },
         ultimo_estado: "RECIBIDO",
         historial: [{
           id: `veh_${vehiculoActivo.id}`,
-          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca, modelo: vehiculoActivo.modelo,
-          ano: vehiculoActivo.ano, color: vehiculoActivo.color,
+          placa: vehiculoActivo.placa, marca: vehiculoActivo.marca,
+          modelo: vehiculoActivo.modelo, ano: vehiculoActivo.ano, color: vehiculoActivo.color,
           estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
           created_at: new Date().toISOString(), _activa: true,
         }],
@@ -2571,7 +2595,13 @@ async function consultarHistorialPorPlaca(placa) {
   const ref = historial[0];
   return {
     found: true,
-    vehiculo: { placa: ref.placa, marca: ref.marca, modelo: ref.modelo, ano: ref.ano, color: ref.color },
+    vehiculo: {
+      placa: ref.placa || vehiculoActivo?.placa || placaNorm,
+      marca: ref.marca || vehiculoActivo?.marca || "",
+      modelo: ref.modelo || vehiculoActivo?.modelo || "",
+      ano: ref.ano || vehiculoActivo?.ano || null,
+      color: ref.color || vehiculoActivo?.color || null,
+    },
     ultimo_estado: ref.estado,
     historial,
   };
@@ -2660,14 +2690,40 @@ async function tgTyping(chatId) {
 }
 
 // Extrae una placa dominicana del texto (mensaje exacto O embebido en una oración)
-// Formatos soportados: A123456 | AB12345 | 1234567 | A-12-3456 | "mi placa es A123456"
+// Formatos soportados: A123456 | AB12345 | A-123456 | A 123456 | A-12-3456
+// También detecta frases como "mi placa es A123456", "placa: A-123", "tengo el A123456"
 function extraerPlaca(txt) {
-  const limpio = txt.toUpperCase().replace(/[\s\-_]/g, "");
-  // Coincidencia exacta primero (el usuario solo escribió la placa)
-  if (/^[A-Z]{1,2}\d{4,7}$/.test(limpio) || /^\d{6,7}$/.test(limpio)) return limpio;
-  // Buscar dentro del texto (ej: "mi placa es A123456 gracias")
-  const m = txt.toUpperCase().match(/\b([A-Z]{1,2}[\s\-]?\d{4,7}|\d{6,7})\b/);
-  if (m) return m[1].replace(/[\s\-]/g, "");
+  if (!txt || typeof txt !== "string") return null;
+  const upper = txt.toUpperCase().trim();
+
+  // Normalizar para comparación: quitar guiones, espacios y guiones bajos
+  const limpio = upper.replace(/[\s\-_]/g, "");
+
+  // ── Coincidencia exacta: el usuario SOLO escribió la placa ──
+  // Formatos RD: 1-2 letras + 4-7 dígitos  |  6-7 dígitos solos (motos/históricos)
+  if (/^[A-Z]{1,2}\d{4,7}$/.test(limpio)) return limpio;
+  if (/^\d{5,7}$/.test(limpio))           return limpio;
+
+  // ── Buscar placa embebida en texto natural ──
+  // Ej: "mi placa es A-123456", "el carro A123456 está listo", "placa: AB12345"
+  const patron = /(?:placa[:\s]*|número[:\s]*|numero[:\s]*|vehículo[:\s]*|vehiculo[:\s]*|el\s+|mi\s+)?([A-Z]{1,2}[\s\-]?\d{4,7}|\d{5,7})\b/gi;
+  const matches = [...upper.matchAll(patron)];
+  for (const m of matches) {
+    const candidato = m[1].replace(/[\s\-]/g, "");
+    if (/^[A-Z]{1,2}\d{4,7}$/.test(candidato) || /^\d{5,7}$/.test(candidato)) {
+      return candidato;
+    }
+  }
+
+  // ── Fallback: buscar cualquier patrón de placa en el texto ──
+  const fallback = upper.match(/\b([A-Z]{1,2}[\s\-]?\d{4,7}|\d{5,7})\b/);
+  if (fallback) {
+    const candidato = fallback[1].replace(/[\s\-]/g, "");
+    if (/^[A-Z]{1,2}\d{4,7}$/.test(candidato) || /^\d{5,7}$/.test(candidato)) {
+      return candidato;
+    }
+  }
+
   return null;
 }
 
@@ -2810,124 +2866,132 @@ app.post("/telegram/webhook", async (req, res) => {
       const { vehiculo, historial } = resultado;
       const ultimo = historial[0];
 
+      // ── Tabla de estados completa (igual que la PWA cliente) ──
       const ESTADO_INFO = {
-        RECIBIDO:             { icon: "📋", label: "Recibido — en espera de diagnóstico",     tip: "Hemos recibido tu vehículo. Pronto un técnico comenzará el diagnóstico." },
-        DIAGNOSTICO:          { icon: "🔬", label: "En Diagnóstico",                           tip: "Nuestro técnico está evaluando tu vehículo en este momento." },
-        ESPERANDO_APROBACION: { icon: "⏳", label: "Esperando tu aprobación",                  tip: "Ya tenemos el diagnóstico listo. Necesitamos tu autorización para proceder con la reparación." },
-        REPARACION:           { icon: "🔧", label: "En Reparación",                            tip: "Tu vehículo está siendo reparado por nuestro equipo técnico." },
-        CONTROL_CALIDAD:      { icon: "🔎", label: "Control de Calidad",                       tip: "La reparación está casi lista. Estamos haciendo la revisión final de calidad." },
-        LISTO:                { icon: "🎉", label: "¡Listo para entrega!",                     tip: "¡Tu vehículo está listo! Puedes pasar a recogerlo en nuestro taller." },
-        ENTREGADO:            { icon: "🏁", label: "Entregado",                                tip: "Vehículo entregado. ¡Gracias por confiar en Sólido Auto Servicio!" },
-        CANCELADA:            { icon: "❌", label: "Cancelada",                                tip: "Esta orden fue cancelada. Para más información llámanos." },
+        RECIBIDO:             { icon: "📋", label: "Recibido",            tip: "Hemos recibido tu vehículo. Pronto un técnico comenzará el diagnóstico.", activo: true  },
+        DIAGNOSTICO:          { icon: "🔬", label: "En Diagnóstico",       tip: "Nuestro técnico está evaluando tu vehículo en este momento.",             activo: true  },
+        ESPERANDO_APROBACION: { icon: "⏳", label: "Esperando aprobación", tip: "Diagnóstico listo. Necesitamos tu autorización para continuar.",          activo: true  },
+        REPARACION:           { icon: "🔧", label: "En Reparación",        tip: "Tu vehículo está siendo reparado por nuestro equipo técnico.",            activo: true  },
+        CONTROL_CALIDAD:      { icon: "🔎", label: "Control de Calidad",   tip: "Revisión final de calidad en proceso. Casi listo.",                       activo: true  },
+        LISTO:                { icon: "🎉", label: "¡Listo para retirar!", tip: "Tu vehículo está listo. Puedes pasar a recogerlo.",                       activo: true  },
+        ENTREGADO:            { icon: "🏁", label: "Entregado",            tip: "Vehículo entregado. ¡Gracias por confiar en Sólido Auto Servicio!",       activo: false },
+        COMPLETADO:           { icon: "✅", label: "Completado",           tip: "Servicio completado satisfactoriamente.",                                 activo: false },
+        FACTURADO:            { icon: "🧾", label: "Facturado",            tip: "Servicio facturado y finalizado.",                                        activo: false },
+        CANCELADA:            { icon: "❌", label: "Cancelada",            tip: "Esta orden fue cancelada.",                                               activo: false },
+        EN_PROCESO:           { icon: "🔧", label: "En Proceso",           tip: "Tu vehículo está siendo atendido.",                                       activo: true  },
       };
+      const getEI = (estado) => ESTADO_INFO[estado] || { icon: "🔧", label: (estado || "En proceso").replace(/_/g, " "), tip: "", activo: true };
 
-      const estadoInfo = ESTADO_INFO[ultimo?.estado] || { icon: "🔧", label: (ultimo?.estado || "En proceso").replace(/_/g, " "), tip: "" };
+      const estadoInfo = getEI(ultimo?.estado);
+      const esActiva   = ultimo?._activa ?? estadoInfo.activo;
 
-      // ── Mensaje 1: encabezado + estado + detalles ────────────────────
-      let msg1 = `🚗 <b>${vehiculo.marca} ${vehiculo.modelo}</b>`;
+      // ── Mensaje 1: encabezado + estado actual + detalles del último servicio ──
+      let msg1 = `🚗 <b>${vehiculo.marca || ""} ${vehiculo.modelo || ""}</b>`.trim();
       if (vehiculo.ano)   msg1 += ` (${vehiculo.ano})`;
       if (vehiculo.color) msg1 += ` · ${vehiculo.color}`;
       msg1 += `\n🏷️ Placa: <code>${vehiculo.placa}</code>`;
       if (ultimo?.numero_orden) msg1 += `  |  📋 <b>${ultimo.numero_orden}</b>`;
-      msg1 += `\n\n${estadoInfo.icon} <b>${estadoInfo.label}</b>\n`;
-      if (estadoInfo.tip) msg1 += `<i>${estadoInfo.tip}</i>\n`;
+      msg1 += `\n\n${estadoInfo.icon} <b>${estadoInfo.label}</b>`;
+      if (estadoInfo.tip) msg1 += `\n<i>${estadoInfo.tip}</i>`;
 
-      if (ultimo) {
-        if (ultimo.tipo_servicio && ultimo.tipo_servicio !== "Vehículo registrado") {
-          msg1 += `\n🔧 Servicio: ${ultimo.tipo_servicio}\n`;
+      if (ultimo && ultimo.tipo_servicio && ultimo.tipo_servicio !== "Vehículo registrado") {
+        msg1 += `\n\n🔧 <b>Servicio:</b> ${ultimo.tipo_servicio}`;
+      }
+
+      const fechaUlt = ultimo?.fecha_servicio
+        ? new Date(ultimo.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" })
+        : null;
+      if (fechaUlt)                   msg1 += `\n📅 ${fechaUlt}`;
+      if (ultimo?.tecnico_nombre)     msg1 += `  ·  👨‍🔧 ${ultimo.tecnico_nombre}`;
+
+      // Diagnóstico / fallas
+      if (ultimo?.fallas_identificadas)
+        msg1 += `\n\n⚠️ <b>Diagnóstico</b>\n${ultimo.fallas_identificadas.substring(0, 280)}`;
+
+      // Trabajos — mano de obra detalle > items estructurados > campo texto
+      const moDetalle    = ultimo?.mano_de_obra_detalle || "";
+      const trabajosItems = Array.isArray(ultimo?.trabajos_realizados_items) ? ultimo.trabajos_realizados_items : [];
+      if (moDetalle) {
+        const lineas = moDetalle.split("\n").filter(l => l.trim()).slice(0, 6);
+        if (lineas.length) {
+          msg1 += `\n\n🔩 <b>Trabajos</b>`;
+          lineas.forEach(l => { msg1 += `\n  ✓ ${l.trim()}`; });
         }
-        const fechaUlt = ultimo.fecha_servicio
-          ? new Date(ultimo.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" })
-          : null;
-        if (fechaUlt)              msg1 += `📅 Fecha: ${fechaUlt}\n`;
-        if (ultimo.tecnico_nombre) msg1 += `👨‍🔧 Técnico: ${ultimo.tecnico_nombre}\n`;
+      } else if (trabajosItems.length) {
+        msg1 += `\n\n🔩 <b>Trabajos</b>`;
+        trabajosItems.slice(0, 5).forEach(t => {
+          const chk = t.estado === "REALIZADO" ? "✅" : "🔧";
+          msg1 += `\n  ${chk} ${t.nombre || t.descripcion || "—"}`;
+        });
+      } else if (ultimo?.trabajos_realizados) {
+        msg1 += `\n\n🛠️ <b>Trabajos</b>\n${ultimo.trabajos_realizados.substring(0, 300)}`;
+      }
 
-        // ── Fallas identificadas ──
-        if (ultimo.fallas_identificadas)
-          msg1 += `\n⚠️ <b>Diagnóstico</b>\n${ultimo.fallas_identificadas.substring(0, 300)}\n`;
+      // Avances recientes
+      const avances = Array.isArray(ultimo?.avances_recientes) ? ultimo.avances_recientes : [];
+      if (avances.length) {
+        msg1 += `\n\n📋 <b>Últimos Avances</b>`;
+        avances.forEach(a => {
+          const fav = a.created_at
+            ? new Date(a.created_at).toLocaleString("es-DO", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
+            : "";
+          msg1 += `\n  • <i>${fav}</i> — ${(a.descripcion || "").substring(0, 100)}`;
+        });
+      }
 
-        // ── Mano de obra / trabajos a realizar ──
-        const moDetalle = ultimo.mano_de_obra_detalle || "";
-        const trabajosItems = Array.isArray(ultimo.trabajos_realizados_items) ? ultimo.trabajos_realizados_items : [];
-        if (moDetalle) {
-          const lineas = moDetalle.split("\n").filter(l => l.trim()).slice(0, 6);
-          if (lineas.length > 0) {
-            msg1 += `\n🔩 <b>Trabajos a Realizar</b>\n`;
-            lineas.forEach(l => { msg1 += `  ✓ ${l.trim()}\n`; });
-          }
-        } else if (trabajosItems.length > 0) {
-          msg1 += `\n🔩 <b>Trabajos</b>\n`;
-          trabajosItems.slice(0, 5).forEach(t => {
-            const check = t.estado === "REALIZADO" ? "✅" : "🔧";
-            msg1 += `  ${check} ${t.nombre || t.descripcion || "—"}\n`;
-          });
-        } else if (ultimo.trabajos_realizados) {
-          msg1 += `\n🛠️ <b>Trabajos</b>\n${ultimo.trabajos_realizados.substring(0, 350)}\n`;
-        }
+      // Costo
+      if (ultimo?.costo_total > 0)
+        msg1 += `\n\n💰 <b>Total: RD$ ${Number(ultimo.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</b>`;
 
-        // ── Avances recientes (solo en órdenes activas) ──
-        const avances = Array.isArray(ultimo.avances_recientes) ? ultimo.avances_recientes : [];
-        if (avances.length > 0) {
-          msg1 += `\n📋 <b>Últimos Avances</b>\n`;
-          avances.forEach(a => {
-            const fav = a.created_at
-              ? new Date(a.created_at).toLocaleDateString("es-DO", { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" })
-              : "";
-            msg1 += `  • <i>${fav}</i> — ${(a.descripcion || "").substring(0, 120)}\n`;
-          });
-        }
+      // Observaciones / NCF (historial cerrado)
+      if (ultimo?.observaciones && !esActiva)
+        msg1 += `\n📝 ${ultimo.observaciones.substring(0, 180)}`;
+      if (ultimo?.ncf)
+        msg1 += `\n🧾 NCF: ${ultimo.ncf}`;
 
-        // ── Costo ──
-        if (ultimo.costo_total > 0)
-          msg1 += `\n💰 Total: <b>RD$ ${Number(ultimo.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</b>\n`;
-
-        // ── Observaciones y NCF ──
-        if (ultimo.observaciones && !ultimo._activa)
-          msg1 += `\n📝 ${ultimo.observaciones.substring(0, 200)}\n`;
-        if (ultimo.ncf)
-          msg1 += `🧾 NCF: ${ultimo.ncf}\n`;
-
-        // ── Llamada a la acción específica por estado ──
-        if (ultimo._activa) {
-          const estado = ultimo.estado;
-          if (estado === "LISTO") {
-            msg1 += `\n🎉 <b>¡Tu vehículo está listo para retirarlo!</b>\n`;
-            msg1 += `📍 Pasa por nuestro taller en Santo Domingo.\n`;
-            const waLink = `https://wa.me/18097122027?text=${encodeURIComponent(`Hola, vengo a retirar mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}`;
-            msg1 += `💬 <a href="${waLink}">Confirmar por WhatsApp</a>`;
-          } else if (estado === "ESPERANDO_APROBACION") {
-            msg1 += `\n📲 <b>¿Apruebas la reparación?</b>\n`;
-            msg1 += `Llámanos al <b>809-712-2027</b> o escríbenos:\n`;
-            msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, apruebo la reparación de mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Aprobar por WhatsApp</a>`;
-          } else if (estado === "CONTROL_CALIDAD") {
-            msg1 += `\n🔎 Estamos en la revisión final. Tu vehículo estará listo muy pronto.`;
-          } else {
-            msg1 += `\n⏳ <i>Seguimos trabajando para ti. Te avisaremos cuando esté listo.</i>`;
-          }
+      // CTA por estado
+      if (esActiva) {
+        const estado = ultimo?.estado;
+        if (estado === "LISTO") {
+          msg1 += `\n\n🎉 <b>¡Tu vehículo te espera!</b> Pasa a buscarlo.\n`;
+          msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, voy a buscar mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Avisar por WhatsApp</a>`;
+        } else if (estado === "ESPERANDO_APROBACION") {
+          msg1 += `\n\n📲 <b>¿Apruebas la reparación?</b> Contáctanos:\n`;
+          msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, apruebo la reparación de mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Aprobar por WhatsApp</a>`;
+        } else if (estado === "CONTROL_CALIDAD") {
+          msg1 += `\n\n🔎 <i>Revisión final en curso. Tu vehículo estará listo muy pronto.</i>`;
+        } else if (["RECIBIDO","DIAGNOSTICO","REPARACION"].includes(estado)) {
+          msg1 += `\n\n⏳ <i>Seguimos trabajando para ti. Te avisaremos cuando esté listo.</i>`;
         }
       }
 
       await tgSend(chatId, msg1);
 
-      // ── Mensaje 2: timeline de historial (igual que la PWA, si hay >1 visita) ──
+      // ── Mensaje 2: timeline historial completo (si tiene >1 visita) ──
       if (historial.length > 1) {
-        let msg2 = `📚 <b>Historial de Servicios (${historial.length} visitas)</b>\n`;
-        historial.forEach((h, i) => {
-          const ei = ESTADO_INFO[h.estado] || { icon: "🔧", label: (h.estado || "Completado").replace(/_/g, " ") };
-          const fecha = h.fecha_servicio
-            ? new Date(h.fecha_servicio).toLocaleDateString("es-DO", { year: "numeric", month: "short", day: "numeric" })
+        // Dividir en bloques si hay muchos para no exceder límite Telegram (4096 chars)
+        const BLOQUES_MAX = 10;
+        let msg2 = `📚 <b>Historial de Servicios — ${historial.length} visita${historial.length !== 1 ? "s" : ""}</b>\n`;
+        historial.slice(0, BLOQUES_MAX).forEach((h, i) => {
+          const ei    = getEI(h.estado);
+          const fecha = (h.fecha_servicio || h.created_at)
+            ? new Date(h.fecha_servicio || h.created_at).toLocaleDateString("es-DO", { year: "numeric", month: "short", day: "numeric" })
             : "—";
-          msg2 += `\n<b>${i + 1}. ${h.tipo_servicio || "Servicio"}</b>  ${ei.icon} ${ei.label}\n`;
-          msg2 += `   📅 ${fecha}`;
-          if (h.tecnico_nombre) msg2 += ` · 👨‍🔧 ${h.tecnico_nombre}`;
+          const isActH = h._activa ?? ei.activo;
+          msg2 += `\n${isActH ? "🟢" : "⚫"} <b>${i + 1}. ${h.tipo_servicio || h.descripcion || "Servicio"}</b>\n`;
+          msg2 += `   ${ei.icon} ${ei.label}  ·  📅 ${fecha}`;
+          if (h.numero_orden) msg2 += `  ·  ${h.numero_orden}`;
+          if (h.tecnico_nombre) msg2 += `\n   👨‍🔧 ${h.tecnico_nombre}`;
           if (h.costo_total > 0)
             msg2 += `\n   💰 RD$ ${Number(h.costo_total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}`;
           msg2 += "\n";
         });
+        if (historial.length > BLOQUES_MAX)
+          msg2 += `\n<i>... y ${historial.length - BLOQUES_MAX} visitas más en el historial.</i>\n`;
         msg2 += `\n📞 ¿Alguna pregunta? Llámanos al <b>809-712-2027</b>.`;
         await tgSend(chatId, msg2);
       } else {
-        await tgSend(chatId, `📞 ¿Alguna consulta adicional? Llámanos al <b>809-712-2027</b>.`);
+        await tgSend(chatId, `📞 ¿Alguna consulta? Llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`);
       }
 
       return;
