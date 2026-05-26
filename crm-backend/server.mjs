@@ -2739,26 +2739,26 @@ function extraerPlaca(txt) {
   const limpio = upper.replace(/[\s\-_]/g, "");
 
   // ── Coincidencia exacta: el usuario SOLO escribió la placa ──
-  // Formatos RD: 1-2 letras + 4-7 dígitos  |  6-7 dígitos solos (motos/históricos)
-  if (/^[A-Z]{1,2}\d{4,7}$/.test(limpio)) return limpio;
-  if (/^\d{5,7}$/.test(limpio))           return limpio;
+  // Formatos RD: 1-2 letras + 3-7 dígitos  |  3-7 dígitos solos
+  if (/^[A-Z]{1,2}\d{3,7}$/.test(limpio)) return limpio;
+  if (/^\d{3,7}$/.test(limpio))           return limpio;
 
   // ── Buscar placa embebida en texto natural ──
   // Ej: "mi placa es A-123456", "el carro A123456 está listo", "placa: AB12345"
-  const patron = /(?:placa[:\s]*|número[:\s]*|numero[:\s]*|vehículo[:\s]*|vehiculo[:\s]*|el\s+|mi\s+)?([A-Z]{1,2}[\s\-]?\d{4,7}|\d{5,7})\b/gi;
+  const patron = /(?:placa[:\s]*|número[:\s]*|numero[:\s]*|vehículo[:\s]*|vehiculo[:\s]*|el\s+|mi\s+)?([A-Z]{1,2}[\s\-]?\d{3,7}|\d{3,7})\b/gi;
   const matches = [...upper.matchAll(patron)];
   for (const m of matches) {
     const candidato = m[1].replace(/[\s\-]/g, "");
-    if (/^[A-Z]{1,2}\d{4,7}$/.test(candidato) || /^\d{5,7}$/.test(candidato)) {
+    if (/^[A-Z]{1,2}\d{3,7}$/.test(candidato) || /^\d{3,7}$/.test(candidato)) {
       return candidato;
     }
   }
 
   // ── Fallback: buscar cualquier patrón de placa en el texto ──
-  const fallback = upper.match(/\b([A-Z]{1,2}[\s\-]?\d{4,7}|\d{5,7})\b/);
+  const fallback = upper.match(/\b([A-Z]{1,2}[\s\-]?\d{3,7}|\d{3,7})\b/);
   if (fallback) {
     const candidato = fallback[1].replace(/[\s\-]/g, "");
-    if (/^[A-Z]{1,2}\d{4,7}$/.test(candidato) || /^\d{5,7}$/.test(candidato)) {
+    if (/^[A-Z]{1,2}\d{3,7}$/.test(candidato) || /^\d{3,7}$/.test(candidato)) {
       return candidato;
     }
   }
