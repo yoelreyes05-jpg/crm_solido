@@ -2445,52 +2445,87 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
 // =====================================================
 // 🔍 HELPER COMPARTIDO — Consulta historial por placa
 // Replica EXACTAMENTE la lógica de la PWA del cliente.
-// COLUMNAS: solo las que realmente existen en cada tabla.
+// Usa select("*") para órdenes — evita fallos por columnas que pueden
+// tener distintos nombres según la migración que esté aplicada.
 // =====================================================
-async function consultarHistorialPorPlaca(placa) {
+async function consultarHistorialPorPlaca(placa, _debug = false) {
+  const dbgLog = [];
+  const dbg = (msg) => { console.log("🤖 TG_DBG:", msg); dbgLog.push(msg); };
+
   // Normalizar: mayúsculas, sin espacios ni guiones
   const placaNorm = placa.toUpperCase().replace(/[\s\-_]/g, "").trim();
+  dbg(`placa_input="${placa}" → normalizada="${placaNorm}"`);
 
   // ── 1. Buscar vehículo — igual que la PWA: traer todos y filtrar client-side ──
   const { data: todosVehiculos, error: vErr } = await supabase
     .from("vehiculos")
     .select("id, marca, modelo, placa, ano, color, cliente_id");
-  if (vErr) console.error("🤖 TG[vehiculos]:", vErr.message);
+  if (vErr) {
+    console.error("🤖 TG[vehiculos]:", vErr.message);
+    dbg(`ERROR vehiculos: ${vErr.message}`);
+  }
+  dbg(`vehiculos_en_bd=${(todosVehiculos || []).length}`);
 
   const vehiculo = (todosVehiculos || []).find(v =>
     v.placa?.toUpperCase().replace(/[\s\-_]/g, "") === placaNorm
   );
+  dbg(`vehiculo_encontrado=${vehiculo ? `id=${vehiculo.id} placa="${vehiculo.placa}"` : "NO"}`);
 
   // ── 2. Historial cerrado (vehiculo_historial) — búsqueda flexible ──
   const placaConGuion = placaNorm.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2");
   const { data: histData, error: hErr } = await supabase
     .from("vehiculo_historial")
-    .select(
-      "id, placa, marca, modelo, ano, color, fecha_servicio, tipo_servicio, numero_orden, " +
-      "fallas_identificadas, observaciones, trabajos_realizados, mano_de_obra_detalle, " +
-      "costo_total, costo_mano_obra, costo_repuestos, estado, tecnico_nombre, ncf, " +
-      "avances_data, cotizacion_data, created_at"
-    )
+    .select("*")
     .or(`placa.ilike.${placaNorm},placa.ilike.${placaConGuion}`)
     .order("created_at", { ascending: false });
-  if (hErr) console.error("🤖 TG[historial]:", hErr.message);
+  if (hErr) {
+    console.error("🤖 TG[historial]:", hErr.message);
+    dbg(`ERROR historial: ${hErr.message}`);
+  }
+  dbg(`vehiculo_historial_rows=${(histData || []).length}`);
 
   // ── 3. Todas las órdenes del vehículo SIN filtro de estado (igual que la PWA) ──
+  // Usamos select("*") para no fallar si alguna columna tiene distinto nombre en BD.
   let todasOrdenes = [];
 
   if (vehiculo) {
-    // ⚠️  Solo columnas que existen realmente en ordenes_trabajo
-    const { data: ordenes, error: oErr } = await supabase
+    // Intento principal: filtrar por vehiculo_id
+    let ordenesRaw = null;
+    const { data: ordPrimary, error: oErr } = await supabase
       .from("ordenes_trabajo")
-      .select("id, descripcion, estado, numero_orden, created_at, total")
+      .select("*")
       .eq("vehiculo_id", vehiculo.id)
       .order("created_at", { ascending: false });
-    if (oErr) console.error("🤖 TG[ordenes]:", oErr.message);
 
-    if (ordenes && ordenes.length > 0) {
-      const ordenIds = ordenes.map(o => o.id);
+    if (oErr) {
+      console.error("🤖 TG[ordenes]:", oErr.message);
+      dbg(`ERROR ordenes vehiculo_id: ${oErr.message}`);
+      // Fallback: traer todas del cliente y filtrar por vehiculo_id en memoria
+      if (vehiculo.cliente_id) {
+        dbg(`Fallback por cliente_id=${vehiculo.cliente_id}`);
+        const { data: ordFb, error: oErrFb } = await supabase
+          .from("ordenes_trabajo")
+          .select("*")
+          .eq("cliente_id", vehiculo.cliente_id)
+          .order("created_at", { ascending: false });
+        if (oErrFb) {
+          dbg(`ERROR fallback: ${oErrFb.message}`);
+        } else {
+          ordenesRaw = (ordFb || []).filter(o =>
+            String(o.vehiculo_id) === String(vehiculo.id)
+          );
+          dbg(`fallback_ordenes=${ordenesRaw.length}`);
+        }
+      }
+    } else {
+      ordenesRaw = ordPrimary || [];
+      dbg(`ordenes_encontradas=${ordenesRaw.length}`);
+    }
 
-      // ── 4. Diagnósticos por orden_id (NOT vehiculo_id — más seguro) ──
+    if (ordenesRaw && ordenesRaw.length > 0) {
+      const ordenIds = ordenesRaw.map(o => o.id);
+
+      // ── 4. Diagnósticos por orden_id ──
       const { data: diags, error: dErr } = await supabase
         .from("diagnosticos")
         .select(
@@ -2500,7 +2535,11 @@ async function consultarHistorialPorPlaca(placa) {
         )
         .in("orden_id", ordenIds)
         .order("created_at", { ascending: false });
-      if (dErr) console.error("🤖 TG[diagnosticos]:", dErr.message);
+      if (dErr) {
+        console.error("🤖 TG[diagnosticos]:", dErr.message);
+        dbg(`ERROR diagnosticos: ${dErr.message}`);
+      }
+      dbg(`diagnosticos_encontrados=${(diags || []).length}`);
 
       const diagPorOrden = {};
       (diags || []).forEach(d => { diagPorOrden[d.orden_id] = d; });
@@ -2523,7 +2562,7 @@ async function consultarHistorialPorPlaca(placa) {
       }
 
       // ── 6. Construir entradas enriquecidas por orden ──
-      todasOrdenes = ordenes.map(o => {
+      todasOrdenes = ordenesRaw.map(o => {
         const diag = diagPorOrden[o.id] || null;
 
         let trabajosItems = [];
@@ -2532,6 +2571,9 @@ async function consultarHistorialPorPlaca(placa) {
         else if (typeof rawItems === "string" && rawItems.trim().startsWith("[")) {
           try { trabajosItems = JSON.parse(rawItems); } catch { trabajosItems = []; }
         }
+
+        // Soporte para columna "total" O "costo_total" (según migración)
+        const costoFinal = o.costo_total ?? o.total ?? 0;
 
         return {
           id:                        `orden_${o.id}`,
@@ -2549,7 +2591,7 @@ async function consultarHistorialPorPlaca(placa) {
           mano_de_obra_detalle:      diag?.mano_de_obra_detalle || "",
           trabajos_realizados_items: trabajosItems,
           avances_recientes:         diag ? (avancesPorDiag[diag.id] || []) : [],
-          costo_total:               o.total || 0,
+          costo_total:               costoFinal,
           costo_mano_obra:           0,
           costo_repuestos:           0,
           tecnico_nombre:            diag?.tecnico_nombre || null,
@@ -2764,6 +2806,45 @@ app.post("/telegram/webhook", async (req, res) => {
 
     await tgTyping(chatId);
 
+    // ── Comando /debug PLACA — diagnóstico visible en Telegram ────────────
+    const debugMatch = texto.match(/^\/debug\s+(.+)$/i);
+    if (debugMatch) {
+      const placaTest = debugMatch[1].trim();
+      const placaNormTest = placaTest.toUpperCase().replace(/[\s\-_]/g, "");
+      let info = `🔍 <b>DEBUG: "${placaTest}" → "${placaNormTest}"</b>\n\n`;
+
+      // 1. Vehiculos
+      const { data: vAll, error: vE } = await supabase
+        .from("vehiculos").select("id, placa, marca, modelo, cliente_id");
+      if (vE) info += `❌ vehiculos: ${vE.message}\n`;
+      else {
+        info += `✅ vehiculos en BD: ${(vAll || []).length}\n`;
+        const vMatch = (vAll || []).find(v =>
+          v.placa?.toUpperCase().replace(/[\s\-_]/g, "") === placaNormTest
+        );
+        if (vMatch) {
+          info += `✅ Vehículo: id=${vMatch.id} placa="${vMatch.placa}" ${vMatch.marca} ${vMatch.modelo}\n`;
+          // 2. Ordenes
+          const { data: ords, error: oE } = await supabase
+            .from("ordenes_trabajo").select("id, estado, vehiculo_id, created_at")
+            .eq("vehiculo_id", vMatch.id);
+          if (oE) info += `❌ ordenes (vehiculo_id): ${oE.message}\n`;
+          else info += `✅ órdenes encontradas: ${(ords || []).length}\n${(ords || []).map(o => `   • id=${o.id} estado="${o.estado}"`).join("\n")}\n`;
+          // 3. Historial
+          const { data: hist, error: hE } = await supabase
+            .from("vehiculo_historial").select("id, placa, estado")
+            .or(`placa.ilike.${placaNormTest},placa.ilike.${placaNormTest.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2")}`);
+          if (hE) info += `❌ historial: ${hE.message}\n`;
+          else info += `✅ historial filas: ${(hist || []).length}\n`;
+        } else {
+          info += `❌ Vehículo NO encontrado para esa placa\n`;
+          info += `📋 Placas en BD: ${(vAll || []).slice(0, 10).map(v => `"${v.placa}"`).join(", ")}`;
+        }
+      }
+      await tgSend(chatId, info);
+      return;
+    }
+
     // ── /start, /ayuda o saludo ───────────────────────────────────────────
     const esMenuTrigger =
       texto === "/start" ||
@@ -2854,8 +2935,10 @@ app.post("/telegram/webhook", async (req, res) => {
       if (!resultado.found) {
         await tgSend(chatId,
           `❓ No encontré registros para la placa <b>${placaDetectada}</b> en nuestro sistema.\n\n` +
-          `Si acabas de dejar tu vehículo, puede que aún estemos procesando la información.\n` +
-          `Para verificar, llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`
+          `¿Es correcta la placa? Escríbela sin guiones ni espacios.\n` +
+          `Ej: <code>A123456</code> o <code>AB12345</code>\n\n` +
+          `Si el número es correcto, puedes usar <code>/debug ${placaDetectada}</code> para diagnóstico,\n` +
+          `o llámanos al <b>809-712-2027</b>.`
         );
         return;
       }
