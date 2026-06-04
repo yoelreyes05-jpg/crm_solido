@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
+import AsistenteIA from "@/components/AsistenteIA";
 
 const PERMISOS = {
   gerente:    ["dashboard","clientes","vehiculos","ordenes","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento","taller","aprobacion","permisos"],
@@ -397,6 +398,7 @@ if (esPublica) return (
           <div>{children}</div>
         </main>
 
+        <AsistenteIA />
       </body>
     </html>
   );
