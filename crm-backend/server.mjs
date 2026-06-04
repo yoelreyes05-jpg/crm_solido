@@ -5142,11 +5142,6 @@ app.get("/export/inventario", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="inventario_${Date.now()}.csv"`);
     res.send("\ufeff" + csv);
   } catch (e) {
-<<<<<<< HEAD
-    res.status(500).json({ error: e.message })
-  }
-});
-=======
     res.status(500).json({ error: e.message });
   }
 });
@@ -5595,4 +5590,3 @@ const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
   console.log(`\ud83d\udd25 SÓLIDO AUTO SERVICIO — Servidor activo en puerto \${PORT}`);
 });
-//>>>>>>> 5eee77e (fix: completar cliente/page.tsx truncado + asistente IA)
