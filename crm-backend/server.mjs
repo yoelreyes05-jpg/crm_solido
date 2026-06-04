@@ -5142,4 +5142,6 @@ app.get("/export/inventario", async (req, res) => {
     res.setHeader("Content-Disposition", `attachment; filename="inventario_${Date.now()}.csv"`);
     res.send("﻿" + csv);
   } catch (e) {
-    res.status(500).json({ error: e.mes
+    res.status(500).json({ error: e.message })
+  }
+});
