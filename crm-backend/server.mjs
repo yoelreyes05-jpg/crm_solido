@@ -5408,75 +5408,141 @@ const IA_TOOLS = [
 async function ejecutarHerramientaIA(nombre, args) {
   try {
     switch (nombre) {
+
       case "buscar_facturas": {
         let q = supabase
           .from("facturas")
-          .select("id, numero_factura, cliente_nombre, total, metodo_pago, estado, created_at, ncf")
+          .select("id, ncf, ncf_tipo, cliente_nombre, total, metodo_pago, estado, created_at")
           .order("created_at", { ascending: false })
           .limit(args.limit || 10);
         if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
-        if (args.numero_factura) q = q.ilike("numero_factura", `%${args.numero_factura}%`);
-        if (args.fecha_desde)   q = q.gte("created_at", args.fecha_desde);
-        if (args.fecha_hasta)   q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
+        if (args.numero_factura) {
+          // Buscar por NCF o por ID numérico
+          const num = parseInt(args.numero_factura.replace(/\D/g, ""), 10);
+          if (!isNaN(num)) q = q.eq("id", num);
+          else q = q.ilike("ncf", `%${args.numero_factura}%`);
+        }
+        if (args.fecha_desde) q = q.gte("created_at", args.fecha_desde);
+        if (args.fecha_hasta) q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
         const { data, error } = await q;
         if (error) return { error: error.message };
         return { facturas: data, total_encontradas: data?.length || 0 };
       }
+
       case "buscar_ordenes": {
+        // Buscar cliente por nombre primero si se proporcionó
+        let clienteIds = null;
+        if (args.cliente_nombre) {
+          const { data: clis } = await supabase
+            .from("clientes").select("id, nombre").ilike("nombre", `%${args.cliente_nombre}%`).limit(10);
+          clienteIds = clis?.map(c => c.id) || [];
+          if (clienteIds.length === 0) return { ordenes: [], total_encontradas: 0, nota: `No se encontró cliente con nombre "${args.cliente_nombre}"` };
+        }
+        // Buscar vehículo por placa si se proporcionó
+        let vehiculoIds = null;
+        if (args.placa) {
+          const { data: vehs } = await supabase
+            .from("vehiculos").select("id, placa, marca, modelo").ilike("placa", `%${args.placa}%`).limit(5);
+          vehiculoIds = vehs?.map(v => v.id) || [];
+          if (vehiculoIds.length === 0) return { ordenes: [], total_encontradas: 0, nota: `No se encontró vehículo con placa "${args.placa}"` };
+        }
         let q = supabase
           .from("ordenes_trabajo")
-          .select("id, numero_orden, estado, descripcion, total, cliente_nombre, vehiculo_placa, vehiculo_marca, vehiculo_modelo, created_at, tecnico_nombre")
+          .select("id, numero_orden, estado, descripcion, total, cliente_id, vehiculo_id, created_at, tecnico_asignado_id, motivo_entrada")
           .order("created_at", { ascending: false })
           .limit(args.limit || 10);
-        if (args.placa)          q = q.ilike("vehiculo_placa", `%${args.placa}%`);
-        if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
-        if (args.estado)         q = q.ilike("estado", args.estado);
-        if (args.fecha_desde)    q = q.gte("created_at", args.fecha_desde);
-        if (args.fecha_hasta)    q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
-        const { data, error } = await q;
+        if (clienteIds)  q = q.in("cliente_id", clienteIds);
+        if (vehiculoIds) q = q.in("vehiculo_id", vehiculoIds);
+        if (args.estado) q = q.ilike("estado", args.estado);
+        if (args.fecha_desde) q = q.gte("created_at", args.fecha_desde);
+        if (args.fecha_hasta) q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
+        const { data: ordenes, error } = await q;
         if (error) return { error: error.message };
-        return { ordenes: data, total_encontradas: data?.length || 0 };
+        // Enriquecer con nombres de clientes y vehículos
+        const allClienteIds = [...new Set((ordenes || []).map(o => o.cliente_id).filter(Boolean))];
+        const allVehIds     = [...new Set((ordenes || []).map(o => o.vehiculo_id).filter(Boolean))];
+        const [cRes, vRes]  = await Promise.all([
+          allClienteIds.length ? supabase.from("clientes").select("id, nombre, telefono").in("id", allClienteIds) : { data: [] },
+          allVehIds.length     ? supabase.from("vehiculos").select("id, placa, marca, modelo, ano").in("id", allVehIds) : { data: [] },
+        ]);
+        const cMap = Object.fromEntries((cRes.data || []).map(c => [c.id, c]));
+        const vMap = Object.fromEntries((vRes.data || []).map(v => [v.id, v]));
+        const enriched = (ordenes || []).map(o => ({
+          ...o,
+          cliente_nombre:  cMap[o.cliente_id]?.nombre || "Sin cliente",
+          cliente_telefono:cMap[o.cliente_id]?.telefono || "",
+          vehiculo_info:   vMap[o.vehiculo_id] ? `${vMap[o.vehiculo_id].marca} ${vMap[o.vehiculo_id].modelo} (${vMap[o.vehiculo_id].placa})` : "Sin vehículo",
+          vehiculo_placa:  vMap[o.vehiculo_id]?.placa || "",
+        }));
+        return { ordenes: enriched, total_encontradas: enriched.length };
       }
+
       case "buscar_clientes": {
         let q = supabase
           .from("clientes")
-          .select("id, nombre, telefono, email, cedula, created_at")
+          .select("id, nombre, telefono, email, rnc, activo, created_at")
+          .eq("activo", true)
           .limit(15);
-        if (args.nombre)   q = q.ilike("nombre", `%${args.nombre}%`);
-        if (args.telefono) q = q.ilike("telefono", `%${args.telefono}%`);
-        if (args.cedula)   q = q.ilike("cedula", `%${args.cedula}%`);
+        if (args.nombre)   q = q.ilike("nombre",   `%${args.nombre}%`);
+        if (args.telefono) q = q.ilike("telefono",  `%${args.telefono}%`);
+        if (args.cedula)   q = q.ilike("rnc",       `%${args.cedula}%`);
         const { data, error } = await q;
         if (error) return { error: error.message };
         return { clientes: data, total_encontrados: data?.length || 0 };
       }
+
       case "consultar_inventario": {
-        let q = supabase
+        const { data: allInv, error } = await supabase
           .from("inventario")
-          .select("id, nombre, codigo, precio, stock, stock_minimo, categoria")
-          .order("nombre")
-          .limit(25);
-        if (args.nombre) q = q.ilike("nombre", `%${args.nombre}%`);
-        if (args.codigo) q = q.ilike("codigo", `%${args.codigo}%`);
-        const { data, error } = await q;
+          .select("id, name, code, price, stock, min_stock, categoria")
+          .order("name")
+          .limit(200);
         if (error) return { error: error.message };
-        const resultado = args.stock_bajo
-          ? data?.filter(r => (r.stock || 0) <= (r.stock_minimo || 0))
-          : data;
-        return { repuestos: resultado, total: resultado?.length || 0 };
+        let resultado = allInv || [];
+        if (args.nombre) {
+          // Normalizar: quitar guiones y espacios para comparación flexible
+          const normalize = s => s.toLowerCase().replace(/[-\s]/g, "");
+          const term = normalize(args.nombre);
+          resultado = resultado.filter(r => normalize(r.name || "").includes(term) || normalize(r.code || "").includes(term));
+        }
+        if (args.codigo) {
+          resultado = resultado.filter(r => (r.code || "").toLowerCase().includes(args.codigo.toLowerCase()));
+        }
+        if (args.stock_bajo) resultado = resultado.filter(r => (r.stock || 0) <= (r.min_stock || 0));
+        if (resultado.length === 0) return { repuestos: [], total: 0, nota: `No se encontró ningún repuesto con ese criterio. Intenta con otro término.` };
+        return {
+          repuestos: resultado.slice(0, 25).map(r => ({ ...r, nombre: r.name, codigo: r.code, precio: r.price, stock_minimo: r.min_stock })),
+          total: resultado.length
+        };
       }
+
       case "cuentas_por_cobrar": {
         let q = supabase
           .from("cuentas_cobrar")
-          .select("id, cliente_nombre, monto_total, monto_pagado, saldo_pendiente, fecha_vencimiento, estado, created_at")
+          .select("id, cliente_id, descripcion, monto_original, monto_pagado, fecha_vencimiento, estado, created_at")
           .order("fecha_vencimiento", { ascending: true })
           .limit(20);
-        if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
-        if (args.solo_vencidas)  q = q.eq("estado", "VENCIDA");
+        if (args.solo_vencidas) q = q.eq("estado", "VENCIDA");
         const { data, error } = await q;
         if (error) return { error: error.message };
-        const totalPendiente = data?.reduce((a, r) => a + Number(r.saldo_pendiente || 0), 0) || 0;
-        return { cuentas: data, total_cuentas: data?.length || 0, total_pendiente_RD: totalPendiente.toFixed(2) };
+        // Enriquecer con nombre de cliente
+        const ids = [...new Set((data || []).map(r => r.cliente_id).filter(Boolean))];
+        const { data: clis } = ids.length ? await supabase.from("clientes").select("id, nombre").in("id", ids) : { data: [] };
+        const cMap = Object.fromEntries((clis || []).map(c => [c.id, c.nombre]));
+        const enriched = (data || []).map(r => ({
+          ...r,
+          cliente_nombre:   cMap[r.cliente_id] || "Sin cliente",
+          saldo_pendiente:  (Number(r.monto_original) - Number(r.monto_pagado || 0)).toFixed(2),
+        }));
+        if (args.cliente_nombre) {
+          const filtrado = enriched.filter(r => r.cliente_nombre.toLowerCase().includes(args.cliente_nombre.toLowerCase()));
+          const total = filtrado.reduce((a, r) => a + Number(r.saldo_pendiente), 0);
+          return { cuentas: filtrado, total_cuentas: filtrado.length, total_pendiente_RD: total.toFixed(2) };
+        }
+        const total = enriched.reduce((a, r) => a + Number(r.saldo_pendiente), 0);
+        return { cuentas: enriched, total_cuentas: enriched.length, total_pendiente_RD: total.toFixed(2) };
       }
+
       case "resumen_ventas": {
         const hoy   = new Date().toISOString().slice(0, 10);
         const desde = args.fecha_desde || hoy;
@@ -5492,36 +5558,51 @@ async function ejecutarHerramientaIA(nombre, args) {
         data?.forEach(r => { const m = r.metodo_pago || "N/A"; porMetodo[m] = (porMetodo[m] || 0) + Number(r.total || 0); });
         return { periodo: `${desde} → ${hasta}`, cantidad_facturas: data?.length || 0, total_facturado_RD: totalFacturado.toFixed(2), por_metodo_pago: porMetodo };
       }
+
       case "historial_vehiculo": {
         const placa = (args.placa || "").toUpperCase().trim();
-        const { data: veh } = await supabase.from("vehiculos").select("id, marca, modelo, ano, color, cliente_nombre").ilike("placa", placa).maybeSingle();
+        const { data: veh } = await supabase.from("vehiculos").select("id, marca, modelo, ano, color, placa, cliente_id").ilike("placa", placa).maybeSingle();
         if (!veh) return { error: `No se encontró vehículo con placa ${placa}` };
+        const { data: cli } = veh.cliente_id ? await supabase.from("clientes").select("nombre, telefono").eq("id", veh.cliente_id).maybeSingle() : { data: null };
         const { data: ordenes } = await supabase
           .from("ordenes_trabajo")
-          .select("id, numero_orden, estado, descripcion, total, created_at, tecnico_nombre")
+          .select("id, numero_orden, estado, descripcion, total, created_at")
           .eq("vehiculo_id", veh.id)
           .order("created_at", { ascending: false })
           .limit(20);
         return {
-          vehiculo: veh,
+          vehiculo: { ...veh, cliente_nombre: cli?.nombre || "Sin cliente", cliente_telefono: cli?.telefono || "" },
           historial: ordenes || [],
           total_visitas: ordenes?.length || 0,
           total_facturado_RD: (ordenes?.reduce((a, o) => a + Number(o.total || 0), 0) || 0).toFixed(2),
         };
       }
+
       case "ordenes_del_dia": {
         const fecha = args.fecha || new Date().toISOString().slice(0, 10);
         const { data, error } = await supabase
           .from("ordenes_trabajo")
-          .select("id, numero_orden, estado, cliente_nombre, vehiculo_placa, vehiculo_marca, vehiculo_modelo, descripcion, tecnico_nombre, total, created_at")
+          .select("id, numero_orden, estado, descripcion, cliente_id, vehiculo_id, total, created_at")
           .gte("created_at", fecha)
           .lte("created_at", fecha + "T23:59:59")
           .order("created_at", { ascending: false });
         if (error) return { error: error.message };
+        const allCIds = [...new Set((data || []).map(o => o.cliente_id).filter(Boolean))];
+        const allVIds = [...new Set((data || []).map(o => o.vehiculo_id).filter(Boolean))];
+        const [cR, vR] = await Promise.all([
+          allCIds.length ? supabase.from("clientes").select("id, nombre").in("id", allCIds) : { data: [] },
+          allVIds.length ? supabase.from("vehiculos").select("id, placa, marca, modelo").in("id", allVIds) : { data: [] },
+        ]);
+        const cM = Object.fromEntries((cR.data || []).map(c => [c.id, c.nombre]));
+        const vM = Object.fromEntries((vR.data || []).map(v => [v.id, `${v.marca} ${v.modelo} (${v.placa})`]));
         const porEstado = {};
-        data?.forEach(o => { porEstado[o.estado] = (porEstado[o.estado] || 0) + 1; });
-        return { fecha, ordenes: data || [], total: data?.length || 0, por_estado: porEstado };
+        const enriched = (data || []).map(o => {
+          porEstado[o.estado] = (porEstado[o.estado] || 0) + 1;
+          return { ...o, cliente_nombre: cM[o.cliente_id] || "Sin cliente", vehiculo_info: vM[o.vehiculo_id] || "Sin vehículo" };
+        });
+        return { fecha, ordenes: enriched, total: enriched.length, por_estado: porEstado };
       }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -5537,8 +5618,15 @@ app.post("/api/ia/asistente", async (req, res) => {
     if (!OAI_KEY)          return res.status(500).json({ error: "OPENAI_API_KEY no configurada." });
 
     const systemPrompt = `Eres el asistente interno de Sólido Auto Servicio SRL, taller automotriz en Santo Domingo, República Dominicana.
-Tu función es ayudar al personal a encontrar información rápida: facturas, órdenes, clientes, inventario, cuentas por cobrar.
-REGLAS: Responde siempre en español. Usa las herramientas para consultar datos REALES antes de responder. Para montos usa "RD$ X,XXX.XX". Nunca inventes datos.`;
+Tu función es ayudar al personal a encontrar información rápida.
+
+REGLAS ESTRICTAS:
+1. SIEMPRE usa las herramientas disponibles para consultar datos antes de responder. Nunca respondas de memoria.
+2. Si una herramienta devuelve 0 resultados, di claramente "No encontré ningún registro con ese criterio" — NO digas que no puedes acceder.
+3. Si la herramienta devuelve datos, preséntales de forma clara y concisa.
+4. Para inventario: busca por palabras clave, ej. "aceite" para encontrar "Aceite 5W-30".
+5. Para montos usa formato "RD$ X,XXX.XX".
+6. Responde siempre en español dominicano, breve y directo.`;
 
     const mensajes = [
       { role: "system", content: systemPrompt },
