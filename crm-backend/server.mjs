@@ -5140,8 +5140,459 @@ app.get("/export/inventario", async (req, res) => {
     ]);
     res.setHeader("Content-Type", "text/csv; charset=utf-8");
     res.setHeader("Content-Disposition", `attachment; filename="inventario_${Date.now()}.csv"`);
-    res.send("﻿" + csv);
+    res.send("\ufeff" + csv);
   } catch (e) {
+<<<<<<< HEAD
     res.status(500).json({ error: e.message })
   }
 });
+=======
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ✉️  ASISTENTE DE CORREO — POST /asistente-correo
+// ══════════════════════════════════════════════════════════════════════════════
+
+const SYSTEM_PROMPT_CORREO = `
+Eres el asistente de correo oficial de SÓLIDO AUTO SERVICIO, un taller automotriz profesional ubicado en Santo Domingo, República Dominicana.
+
+INFORMACIÓN DE LA EMPRESA:
+- Nombre: Sólido Auto Servicio
+- Teléfono: 809-712-2027 | WhatsApp: +1 (809) 712-2027
+- Ubicación: Santo Domingo, República Dominicana
+- Horario: Lun-Vie 7:30 AM – 6:00 PM | Sáb 8:00 AM – 2:00 PM | Dom Cerrado
+- Misión: Brindar servicio de mantenimiento automotriz de calidad, con equipo de profesionales guiados por la mejora continua.
+- Visión: Ser un taller reconocido por excelencia, institucionalidad y adaptación a nuevas tecnologías automotrices.
+
+SERVICIOS:
+- Diagnóstico mecánico, eléctrico y electrónico
+- Reparación de motor, transmisión, suspensión, frenos
+- Diagnóstico con escáner especializado
+- Mantenimiento preventivo (aceite, filtros, correas, etc.)
+- Control de calidad post-reparación con prueba de manejo
+- Lavado y limpieza interior del vehículo
+
+PROCESO DE SERVICIO (9 etapas principales):
+1. Recepción y registro del vehículo con checklist obligatorio
+2. Diagnóstico técnico completo (mecánico, eléctrico, electrónico)
+3. Cotización detallada (mano de obra + repuestos + tiempo estimado)
+4. Aprobación del cliente (OBLIGATORIA antes de iniciar cualquier trabajo)
+5. Ejecución de la reparación con registro de avances
+6. Control de calidad y prueba del vehículo
+7. Limpieza y preparación para entrega
+8. Facturación con comprobante fiscal (NCF dominicano)
+9. Entrega con firma de conformidad del cliente
+
+POLÍTICAS CLAVE:
+- Ningún trabajo inicia sin aprobación expresa del cliente
+- Todo vehículo recibe checklist de inspección firmado al ingreso
+- Emitimos comprobantes fiscales (B02 consumidor final, B14 crédito fiscal)
+- Los clientes pueden consultar el estado de su vehículo por placa en nuestra plataforma digital
+
+TONO Y ESTILO:
+- Profesional, cálido y cordial
+- Español formal dominicano (tratar de "usted")
+- Sin tecnicismos innecesarios
+- Firma siempre: "Equipo de Sólido Auto Servicio"
+- Incluir siempre teléfono y horario al final
+
+INSTRUCCIONES:
+1. Genera SOLO el cuerpo del correo (desde saludo hasta firma)
+2. Adapta el tono según el tipo de correo
+3. Para reclamos: empatía primero, luego solución concreta
+4. Para cotizaciones: explicar proceso y solicitar que llamen para coordinar
+5. Formato texto plano con saltos de línea (sin markdown)
+`.trim();
+
+app.post("/asistente-correo", async (req, res) => {
+  try {
+    const {
+      correo_entrante = "",
+      tipo_correo     = "general",
+      nombre_cliente  = "",
+      datos_orden     = null,
+
+      tono            = "profesional",
+    } = req.body;
+
+    const apiKey = process.env.OPENAI_API_KEY;
+    if (!apiKey) return res.status(500).json({ error: "OPENAI_API_KEY no configurada en el servidor" });
+
+    const TIPOS = {
+      cotizacion:  "El cliente solicita información sobre costos o una cotización de servicio.",
+      estado:      "El cliente pregunta sobre el estado actual de su vehículo en reparación.",
+      reclamo:     "El cliente expresa una queja o insatisfacción. Responde con empatía y propón solución concreta.",
+      cita:        "El cliente solicita o confirma una cita. Indica que se coordina por teléfono y da el número.",
+      seguimiento: "Correo de seguimiento post-servicio para verificar satisfacción del cliente.",
+      nuevo:       "Composición de correo nuevo desde cero para contactar a un cliente.",
+      general:     "Correo general — responde de manera cordial y profesional.",
+    };
+
+    let contextoOrden = "";
+    if (datos_orden) {
+      contextoOrden = `
+DATOS DE LA ORDEN (úsalos si son relevantes):
+  Placa: ${datos_orden.placa || "—"} | Vehículo: ${datos_orden.vehiculo || "—"}
+  Orden: ${datos_orden.numero_orden || "—"} | Estado: ${datos_orden.estado || "—"}
+  Técnico: ${datos_orden.tecnico || "—"}
+  Observaciones: ${datos_orden.observaciones || "—"}`;
+    }
+
+    const userPrompt = [
+      `TIPO: \${tipo_correo.toUpperCase()} — \${TIPOS[tipo_correo] || TIPOS.general}`,
+      `TONO: \${tono}`,
+      nombre_cliente ? `CLIENTE: \${nombre_cliente}` : "",
+      contextoOrden,
+      correo_entrante
+        ? `CORREO ENTRANTE (responder):\n---\n\${correo_entrante}\n---`
+        : "COMPONER CORREO NUEVO (sin correo entrante).",
+      "\nGenera el correo de respuesta profesional en español:",
+    ].filter(Boolean).join("\n");
+
+    const { default: OpenAI } = await import("openai");
+    const openai = new OpenAI({ apiKey });
+
+    const completion = await openai.chat.completions.create({
+      model:       "gpt-4o-mini",
+      max_tokens:  1200,
+      temperature: 0.6,
+      messages: [
+        { role: "system", content: SYSTEM_PROMPT_CORREO },
+        { role: "user",   content: userPrompt },
+      ],
+    });
+
+    const respuesta = completion.choices[0]?.message?.content?.trim() || "";
+    const tokens    = completion.usage?.total_tokens || 0;
+
+    res.json({ respuesta, tipo_correo, tokens });
+
+  } catch (err) {
+    console.error("\u274c Asistente correo:", err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
+
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🤖 ASISTENTE IA GENERAL — /api/ia/asistente
+// ══════════════════════════════════════════════════════════════════════════════
+
+const IA_TOOLS = [
+  {
+    type: "function",
+    function: {
+      name: "buscar_facturas",
+      description: "Busca facturas por nombre de cliente, número de factura o rango de fechas.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nombre: { type: "string", description: "Nombre parcial o completo del cliente" },
+          numero_factura:  { type: "string", description: "Número de factura" },
+          fecha_desde:     { type: "string", description: "Fecha inicio YYYY-MM-DD" },
+          fecha_hasta:     { type: "string", description: "Fecha fin YYYY-MM-DD" },
+          limit:           { type: "number", description: "Máximo de resultados (default 10)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_ordenes",
+      description: "Busca órdenes de trabajo por placa, cliente, estado o fecha.",
+      parameters: {
+        type: "object",
+        properties: {
+          placa:          { type: "string", description: "Placa del vehículo" },
+          cliente_nombre: { type: "string", description: "Nombre del cliente" },
+          estado:         { type: "string", description: "Estado de la orden" },
+          fecha_desde:    { type: "string", description: "Fecha inicio YYYY-MM-DD" },
+          fecha_hasta:    { type: "string", description: "Fecha fin YYYY-MM-DD" },
+          limit:          { type: "number", description: "Máximo de resultados (default 10)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_clientes",
+      description: "Busca clientes por nombre, teléfono o cédula.",
+      parameters: {
+        type: "object",
+        properties: {
+          nombre:   { type: "string", description: "Nombre parcial o completo" },
+          telefono: { type: "string", description: "Teléfono del cliente" },
+          cedula:   { type: "string", description: "Cédula o RNC" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "consultar_inventario",
+      description: "Consulta el inventario de repuestos: stock, precio, repuestos con stock bajo.",
+      parameters: {
+        type: "object",
+        properties: {
+          nombre:      { type: "string", description: "Nombre parcial del repuesto" },
+          codigo:      { type: "string", description: "Código del repuesto" },
+          stock_bajo:  { type: "boolean", description: "Si true, solo repuestos con stock bajo mínimo" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "cuentas_por_cobrar",
+      description: "Consulta cuentas pendientes de cobro y montos adeudados.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nombre: { type: "string", description: "Nombre del cliente (opcional)" },
+          solo_vencidas:  { type: "boolean", description: "Solo cuentas vencidas" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "resumen_ventas",
+      description: "Resumen de facturación de un período: total, cantidad, métodos de pago.",
+      parameters: {
+        type: "object",
+        properties: {
+          fecha_desde: { type: "string", description: "Fecha inicio YYYY-MM-DD" },
+          fecha_hasta: { type: "string", description: "Fecha fin YYYY-MM-DD" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "historial_vehiculo",
+      description: "Historial completo de servicios de un vehículo por su placa.",
+      parameters: {
+        type: "object",
+        properties: {
+          placa: { type: "string", description: "Placa del vehículo" },
+        },
+        required: ["placa"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ordenes_del_dia",
+      description: "Lista todas las órdenes de trabajo de hoy o de una fecha específica.",
+      parameters: {
+        type: "object",
+        properties: {
+          fecha: { type: "string", description: "Fecha YYYY-MM-DD (default hoy)" },
+        },
+        required: [],
+      },
+    },
+  },
+];
+
+async function ejecutarHerramientaIA(nombre, args) {
+  try {
+    switch (nombre) {
+      case "buscar_facturas": {
+        let q = supabase
+          .from("facturas")
+          .select("id, numero_factura, cliente_nombre, total, metodo_pago, estado, created_at, ncf")
+          .order("created_at", { ascending: false })
+          .limit(args.limit || 10);
+        if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
+        if (args.numero_factura) q = q.ilike("numero_factura", `%${args.numero_factura}%`);
+        if (args.fecha_desde)   q = q.gte("created_at", args.fecha_desde);
+        if (args.fecha_hasta)   q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return { facturas: data, total_encontradas: data?.length || 0 };
+      }
+      case "buscar_ordenes": {
+        let q = supabase
+          .from("ordenes_trabajo")
+          .select("id, numero_orden, estado, descripcion, total, cliente_nombre, vehiculo_placa, vehiculo_marca, vehiculo_modelo, created_at, tecnico_nombre")
+          .order("created_at", { ascending: false })
+          .limit(args.limit || 10);
+        if (args.placa)          q = q.ilike("vehiculo_placa", `%${args.placa}%`);
+        if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
+        if (args.estado)         q = q.ilike("estado", args.estado);
+        if (args.fecha_desde)    q = q.gte("created_at", args.fecha_desde);
+        if (args.fecha_hasta)    q = q.lte("created_at", args.fecha_hasta + "T23:59:59");
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return { ordenes: data, total_encontradas: data?.length || 0 };
+      }
+      case "buscar_clientes": {
+        let q = supabase
+          .from("clientes")
+          .select("id, nombre, telefono, email, cedula, created_at")
+          .limit(15);
+        if (args.nombre)   q = q.ilike("nombre", `%${args.nombre}%`);
+        if (args.telefono) q = q.ilike("telefono", `%${args.telefono}%`);
+        if (args.cedula)   q = q.ilike("cedula", `%${args.cedula}%`);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return { clientes: data, total_encontrados: data?.length || 0 };
+      }
+      case "consultar_inventario": {
+        let q = supabase
+          .from("inventario")
+          .select("id, nombre, codigo, precio, stock, stock_minimo, categoria")
+          .order("nombre")
+          .limit(25);
+        if (args.nombre) q = q.ilike("nombre", `%${args.nombre}%`);
+        if (args.codigo) q = q.ilike("codigo", `%${args.codigo}%`);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        const resultado = args.stock_bajo
+          ? data?.filter(r => (r.stock || 0) <= (r.stock_minimo || 0))
+          : data;
+        return { repuestos: resultado, total: resultado?.length || 0 };
+      }
+      case "cuentas_por_cobrar": {
+        let q = supabase
+          .from("cuentas_cobrar")
+          .select("id, cliente_nombre, monto_total, monto_pagado, saldo_pendiente, fecha_vencimiento, estado, created_at")
+          .order("fecha_vencimiento", { ascending: true })
+          .limit(20);
+        if (args.cliente_nombre) q = q.ilike("cliente_nombre", `%${args.cliente_nombre}%`);
+        if (args.solo_vencidas)  q = q.eq("estado", "VENCIDA");
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        const totalPendiente = data?.reduce((a, r) => a + Number(r.saldo_pendiente || 0), 0) || 0;
+        return { cuentas: data, total_cuentas: data?.length || 0, total_pendiente_RD: totalPendiente.toFixed(2) };
+      }
+      case "resumen_ventas": {
+        const hoy   = new Date().toISOString().slice(0, 10);
+        const desde = args.fecha_desde || hoy;
+        const hasta = args.fecha_hasta || hoy;
+        const { data, error } = await supabase
+          .from("facturas")
+          .select("total, metodo_pago, estado, created_at")
+          .gte("created_at", desde)
+          .lte("created_at", hasta + "T23:59:59");
+        if (error) return { error: error.message };
+        const totalFacturado = data?.reduce((a, r) => a + Number(r.total || 0), 0) || 0;
+        const porMetodo = {};
+        data?.forEach(r => { const m = r.metodo_pago || "N/A"; porMetodo[m] = (porMetodo[m] || 0) + Number(r.total || 0); });
+        return { periodo: `${desde} → ${hasta}`, cantidad_facturas: data?.length || 0, total_facturado_RD: totalFacturado.toFixed(2), por_metodo_pago: porMetodo };
+      }
+      case "historial_vehiculo": {
+        const placa = (args.placa || "").toUpperCase().trim();
+        const { data: veh } = await supabase.from("vehiculos").select("id, marca, modelo, ano, color, cliente_nombre").ilike("placa", placa).maybeSingle();
+        if (!veh) return { error: `No se encontró vehículo con placa ${placa}` };
+        const { data: ordenes } = await supabase
+          .from("ordenes_trabajo")
+          .select("id, numero_orden, estado, descripcion, total, created_at, tecnico_nombre")
+          .eq("vehiculo_id", veh.id)
+          .order("created_at", { ascending: false })
+          .limit(20);
+        return {
+          vehiculo: veh,
+          historial: ordenes || [],
+          total_visitas: ordenes?.length || 0,
+          total_facturado_RD: (ordenes?.reduce((a, o) => a + Number(o.total || 0), 0) || 0).toFixed(2),
+        };
+      }
+      case "ordenes_del_dia": {
+        const fecha = args.fecha || new Date().toISOString().slice(0, 10);
+        const { data, error } = await supabase
+          .from("ordenes_trabajo")
+          .select("id, numero_orden, estado, cliente_nombre, vehiculo_placa, vehiculo_marca, vehiculo_modelo, descripcion, tecnico_nombre, total, created_at")
+          .gte("created_at", fecha)
+          .lte("created_at", fecha + "T23:59:59")
+          .order("created_at", { ascending: false });
+        if (error) return { error: error.message };
+        const porEstado = {};
+        data?.forEach(o => { porEstado[o.estado] = (porEstado[o.estado] || 0) + 1; });
+        return { fecha, ordenes: data || [], total: data?.length || 0, por_estado: porEstado };
+      }
+      default:
+        return { error: `Herramienta desconocida: ${nombre}` };
+    }
+  } catch (e) {
+    return { error: e.message };
+  }
+}
+
+app.post("/api/ia/asistente", async (req, res) => {
+  try {
+    const { pregunta, historial = [] } = req.body;
+    if (!pregunta?.trim()) return res.status(400).json({ error: "El campo 'pregunta' es requerido." });
+    if (!OAI_KEY)          return res.status(500).json({ error: "OPENAI_API_KEY no configurada." });
+
+    const systemPrompt = `Eres el asistente interno de Sólido Auto Servicio SRL, taller automotriz en Santo Domingo, República Dominicana.
+Tu función es ayudar al personal a encontrar información rápida: facturas, órdenes, clientes, inventario, cuentas por cobrar.
+REGLAS: Responde siempre en español. Usa las herramientas para consultar datos REALES antes de responder. Para montos usa "RD$ X,XXX.XX". Nunca inventes datos.`;
+
+    const mensajes = [
+      { role: "system", content: systemPrompt },
+      ...historial.slice(-8),
+      { role: "user", content: pregunta.trim() },
+    ];
+
+    // Primera llamada — puede devolver tool_calls
+    let oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
+      body: JSON.stringify({ model: "gpt-4o-mini", messages: mensajes, tools: IA_TOOLS, tool_choice: "auto", max_tokens: 800, temperature: 0.3 }),
+    });
+    if (!oaiRes.ok) return res.status(502).json({ error: "Error al contactar OpenAI.", detalle: await oaiRes.text() });
+
+    let oaiData = await oaiRes.json();
+    let msg = oaiData.choices?.[0]?.message;
+
+    // Si la IA pidió herramientas, ejecutarlas y volver a llamar
+    if (msg?.tool_calls?.length) {
+      const extras = [msg];
+      for (const tc of msg.tool_calls) {
+        let args = {};
+        try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
+        const resultado = await ejecutarHerramientaIA(tc.function.name, args);
+        extras.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(resultado) });
+      }
+      oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
+        body: JSON.stringify({ model: "gpt-4o-mini", messages: [...mensajes, ...extras], max_tokens: 800, temperature: 0.3 }),
+      });
+      if (!oaiRes.ok) return res.status(502).json({ error: "Error al procesar resultados.", detalle: await oaiRes.text() });
+      oaiData = await oaiRes.json();
+      msg = oaiData.choices?.[0]?.message;
+    }
+
+    res.json({ respuesta: msg?.content?.trim() || "No pude generar una respuesta. Intenta de nuevo." });
+  } catch (err) {
+    console.error("🤖 /api/ia/asistente error:", err.message);
+    res.status(500).json({ error: "Error interno.", detalle: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 SERVIDOR
+// ══════════════════════════════════════════════════════════════════════════════
+const PORT = process.env.PORT || 4000;
+app.listen(PORT, () => {
+  console.log(`\ud83d\udd25 SÓLIDO AUTO SERVICIO — Servidor activo en puerto \${PORT}`);
+});
+//>>>>>>> 5eee77e (fix: completar cliente/page.tsx truncado + asistente IA)

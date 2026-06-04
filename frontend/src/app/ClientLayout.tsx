@@ -5,10 +5,11 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import Image from "next/image";
 import BusquedaGlobal from "@/components/BusquedaGlobal";
+import AsistenteIA from "@/components/AsistenteIA";
 
 const PERMISOS = {
-  gerente:   ["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad"],
-  secretaria:["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","facturacion","mantenimiento","contabilidad","inteligencia"],
+  gerente:   ["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","inventario","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","mantenimiento","inteligencia","contabilidad","asistente-correo"],
+  secretaria:["dashboard","recepcion","taller","aprobacion","clientes","vehiculos","inspeccion","facturacion","mantenimiento","contabilidad","inteligencia","asistente-correo"],
   tecnico:   ["taller","inspeccion","mantenimiento"],
   almacen:   ["inventario","suplidores","ventas"],
   cafeteria: ["cafeteria"],
@@ -28,8 +29,10 @@ const MENU = [
   { href: "/recepcion",     icon: "🚗", label: "Recepción",    key: "recepcion"     },
   { href: "/aprobacion",    icon: "✅", label: "Aprobaciones", key: "aprobacion"    },
   { href: "/usuarios",      icon: "👥", label: "Usuarios",     key: "usuarios"      },
-  { href: "/contabilidad",  icon: "💰", label: "Contabilidad", key: "contabilidad"  },
-  { href: "/configuracion", icon: "⚙️", label: "Configuración",key: "configuracion" },
+  { href: "/contabilidad",      icon: "💰", label: "Contabilidad",    key: "contabilidad"      },
+  { href: "/configuracion",     icon: "⚙️", label: "Configuración",   key: "configuracion"     },
+  // ── Herramientas IA ──────────────────────────────────────────────────
+  { href: "/asistente-correo",  icon: "✉️", label: "Asistente Correo",key: "asistente-correo"  },
 ];
 
 const RUTAS_PUBLICAS = ["/login", "/cliente"];
@@ -156,6 +159,7 @@ export default function ClientLayout({ children }) {
           {children}
         </main>
       </div>
+      <AsistenteIA />
     </div>
   );
 }

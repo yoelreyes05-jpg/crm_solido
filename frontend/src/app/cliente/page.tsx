@@ -2000,4 +2000,31 @@ export default function ClienteApp() {
                                     {h.costo_total > 0
                                       ? <span className="hist-cost">RD$ {Number(h.costo_total).toLocaleString("es-DO",{minimumFractionDigits:2})}</span>
                                       : <span />}
-                                    <span style=
+                                    <span style={{ fontSize:11, color:"#475569", fontWeight:600 }}>Ver detalle →</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
+
+            <footer className="footer">
+              <div style={{ fontSize:22 }}>🔧</div>
+              <div className="footer-brand">Sólido Auto Servicio</div>
+              <div>809-712-2027</div>
+            </footer>
+          </div>
+        </div>
+
+        {/* BOTÓN FLOTANTE WHATSAPP */}
+        <a href="https://wa.me/18097122027" target="_blank" className="wa-float">💬</a>
+      </div>
+    </>
+  );
+}
