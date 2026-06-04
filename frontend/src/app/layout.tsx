@@ -398,7 +398,7 @@ if (esPublica) return (
           <div>{children}</div>
         </main>
 
-        <AsistenteIA />
+        {["gerente", "secretaria"].includes(usuario?.rol) && <AsistenteIA />}
       </body>
     </html>
   );
