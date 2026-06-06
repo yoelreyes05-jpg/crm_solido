@@ -1059,8 +1059,7 @@ function CafeteriaRecetas() {
     <script>setTimeout(()=>window.print(),400);<\/script>
     </body></html>`;
 
-    const w = window.open("", "_blank", "width=680,height=720");
-    if (w) { w.document.write(html); w.document.close(); }
+    imprimirHTMLCafe(html);
   };
 
   return (
