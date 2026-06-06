@@ -4,10 +4,12 @@ import { useEffect, useState, useRef, useCallback } from "react";
 import { API_URL as API } from "@/config";
 
 const EMPRESA = {
-  nombre: "SÓLIDO AUTO SERVICIO",
+  nombre: "SÓLIDO CAFÉ GARAJE",
+  razon_social: "SÓLIDO AUTO SERVICIO SRL",
   telefono: "809-712-2027",
   rnc: "RNC: 000-000000-0",
-  direccion: "Santo Domingo, República Dominicana"
+  direccion: "Santo Domingo, República Dominicana",
+  logo: "/logo-cafe.png",
 };
 
 const NCF_LABEL_MAP: Record<string, string> = {
@@ -32,12 +34,13 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
     </tr>`).join("");
 
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
-  <title>Cafetería ${venta.ncf || ""}</title>
+  <title>${EMPRESA.nombre} — ${venta.ncf || "Factura"}</title>
   <style>
     *{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:24px;max-width:400px;margin:auto;}
     .header{text-align:center;border-bottom:3px solid #111;padding-bottom:14px;margin-bottom:16px;}
-    .logo{font-size:20px;font-weight:900;letter-spacing:1px;}
+    .logo-img{width:110px;height:auto;display:block;margin:0 auto 6px;}
+    .logo-txt{font-size:17px;font-weight:900;letter-spacing:1px;margin-top:4px;}
     .sub{font-size:11px;color:#555;margin-top:4px;line-height:1.6;}
     .ncf-box{background:#111;color:#fff;text-align:center;padding:8px;border-radius:6px;margin:12px 0;}
     .ncf-num{font-size:15px;font-weight:900;letter-spacing:2px;}
@@ -50,8 +53,11 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
     @media print{body{padding:8px;}}
   </style></head><body>
   <div class="header">
-    <div class="logo">☕ ${EMPRESA.nombre}</div>
-    <div class="sub">Tel: ${EMPRESA.telefono}<br/>${EMPRESA.rnc} | ${EMPRESA.direccion}</div>
+    <img src="${EMPRESA.logo}" alt="${EMPRESA.nombre}" class="logo-img"
+         onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='block'"/>
+    <div id="logo-fallback" style="display:none;font-size:26px;">☕</div>
+    <div class="logo-txt">${EMPRESA.nombre}</div>
+    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono} | ${EMPRESA.rnc}<br/>${EMPRESA.direccion}</div>
   </div>
   <div style="font-size:12px;margin-bottom:10px;">
     <b>Fecha:</b> ${fecha}<br/>
@@ -71,8 +77,7 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
   </div>
   <div class="footer">
     ¡Gracias por su visita!<br/>
-    <b>${EMPRESA.nombre}</b><br/>
-    ${EMPRESA.telefono}
+    <b>${EMPRESA.nombre}</b> · ${EMPRESA.telefono}
   </div>
   <script>window.onload=function(){window.print();}</script>
   </body></html>`;
@@ -264,7 +269,11 @@ export default function CafeteriaPage() {
 
   return (
     <div style={container}>
-      <h1 style={title}>☕ SOLIDO CAFE GARAGE — {EMPRESA.nombre}</h1>
+      <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 20 }}>
+        <img src={EMPRESA.logo} alt={EMPRESA.nombre} style={{ width: 56, height: 56, objectFit: "contain" }}
+          onError={(e: any) => { e.target.style.display = "none"; }} />
+        <h1 style={{ ...title, marginBottom: 0 }}>{EMPRESA.nombre}</h1>
+      </div>
 
       <div style={{ display: "flex", gap: 10, marginBottom: 20 }}>
         {[
@@ -272,6 +281,7 @@ export default function CafeteriaPage() {
           { k: "productos", l: "➕ Gestionar Productos" },
           { k: "cuadre",    l: "🏦 Cuadre" },
           { k: "receta",    l: "📋 Receta" },
+          { k: "historial", l: "📄 Historial" },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k)}
             style={{ ...tabBtn, background: tab === t.k ? "#111827" : "#fff", color: tab === t.k ? "#fff" : "#111" }}>
@@ -412,6 +422,8 @@ export default function CafeteriaPage() {
       {tab === "cuadre" && <CafeteriaCuadre usuario={typeof window !== "undefined" ? (() => { try { return JSON.parse(localStorage.getItem("usuario") || "{}"); } catch { return {}; } })() : {}} />}
 
       {tab === "receta" && <CafeteriaRecetas />}
+
+      {tab === "historial" && <CafeteriaHistorial />}
 
       {tab === "productos" && (
         <div style={{ maxWidth: 640 }}>
@@ -833,6 +845,278 @@ function CafeteriaCuadre({ usuario }: { usuario: any }) {
                         </button>
                       </td>
                     </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// 📄 HISTORIAL DE FACTURAS — Cafetería
+// Usa tablas existentes: cafeteria_ventas + cafeteria_detalle
+// ══════════════════════════════════════════════════════════
+
+const NCF_MAP: Record<string, string> = {
+  B01: "Crédito Fiscal", B02: "Consumidor Final",
+  B14: "Régimen Especial", B15: "Gubernamental",
+};
+
+function fmtFechaHist(d: string) {
+  if (!d) return "—";
+  return new Date(d).toLocaleString("es-DO", {
+    day: "2-digit", month: "2-digit", year: "2-digit",
+    hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo"
+  });
+}
+
+function imprimirFacturaHistorial(venta: any) {
+  const ncfLabel = NCF_MAP[venta.ncf_tipo] || venta.ncf_tipo || "B02";
+  const fecha = fmtFechaHist(venta.created_at);
+  const items: any[] = venta.cafeteria_detalle || [];
+  const lineas = items.map((i: any) => `
+    <tr>
+      <td style="padding:7px 6px;border-bottom:1px solid #eee;">${i.cafeteria_productos?.nombre || "Producto"}</td>
+      <td style="padding:7px 6px;border-bottom:1px solid #eee;text-align:center;">${i.cantidad}</td>
+      <td style="padding:7px 6px;border-bottom:1px solid #eee;text-align:right;">RD$ ${Number(i.precio).toFixed(2)}</td>
+      <td style="padding:7px 6px;border-bottom:1px solid #eee;text-align:right;font-weight:700;">RD$ ${(i.precio * i.cantidad).toFixed(2)}</td>
+    </tr>`).join("");
+
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+  <title>${EMPRESA.nombre} — ${venta.ncf || "Factura #" + venta.id}</title>
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box;}
+    body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:24px;max-width:400px;margin:auto;}
+    .header{text-align:center;border-bottom:3px solid #111;padding-bottom:14px;margin-bottom:16px;}
+    .logo-img{width:110px;height:auto;display:block;margin:0 auto 6px;}
+    .logo-txt{font-size:17px;font-weight:900;letter-spacing:1px;margin-top:4px;}
+    .sub{font-size:11px;color:#555;margin-top:4px;line-height:1.6;}
+    .ncf-box{background:#111;color:#fff;text-align:center;padding:8px;border-radius:6px;margin:12px 0;}
+    .ncf-num{font-size:15px;font-weight:900;letter-spacing:2px;}
+    table{width:100%;border-collapse:collapse;margin-bottom:12px;}
+    thead th{background:#111;color:#fff;padding:8px 6px;font-size:11px;text-align:left;}
+    .totales{border-top:2px solid #111;padding-top:8px;margin-top:4px;}
+    .t-total{display:flex;justify-content:space-between;font-size:18px;font-weight:900;padding:6px 0;}
+    .footer{text-align:center;margin-top:20px;font-size:11px;color:#777;border-top:1px dashed #ccc;padding-top:12px;line-height:1.8;}
+    @media print{body{padding:8px;}}
+  </style></head><body>
+  <div class="header">
+    <img src="${EMPRESA.logo}" alt="${EMPRESA.nombre}" class="logo-img"
+         onerror="this.style.display='none';document.getElementById('lf').style.display='block'"/>
+    <div id="lf" style="display:none;font-size:26px;">☕</div>
+    <div class="logo-txt">${EMPRESA.nombre}</div>
+    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono} | ${EMPRESA.rnc}<br/>${EMPRESA.direccion}</div>
+  </div>
+  <div style="font-size:12px;margin-bottom:10px;">
+    <b>Factura #:</b> ${venta.id}<br/>
+    <b>Fecha:</b> ${fecha}<br/>
+    <b>Método:</b> ${venta.metodo_pago || "—"}<br/>
+    <b>Comprobante:</b> ${venta.ncf_tipo || "B02"} — ${ncfLabel}
+  </div>
+  ${venta.ncf ? `<div class="ncf-box"><div style="font-size:9px;opacity:0.7;margin-bottom:2px;">COMPROBANTE FISCAL — ${ncfLabel}</div><div class="ncf-num">${venta.ncf}</div></div>` : ""}
+  <table>
+    <thead><tr>
+      <th>Descripción</th><th style="text-align:center;">Cant.</th>
+      <th style="text-align:right;">Precio</th><th style="text-align:right;">Total</th>
+    </tr></thead>
+    <tbody>${lineas}</tbody>
+  </table>
+  <div class="totales">
+    <div class="t-total"><span>TOTAL:</span><span>RD$ ${Number(venta.total).toFixed(2)}</span></div>
+  </div>
+  <div class="footer">¡Gracias por su visita!<br/><b>${EMPRESA.nombre}</b> · ${EMPRESA.telefono}</div>
+  <script>window.onload=function(){window.print();}<\/script>
+  </body></html>`;
+  imprimirHTMLCafe(html);
+}
+
+function CafeteriaHistorial() {
+  const hoy   = new Date().toISOString().slice(0, 10);
+  const ayer  = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+  const [ventas,   setVentas]   = useState<any[]>([]);
+  const [total,    setTotal]    = useState(0);
+  const [loading,  setLoading]  = useState(false);
+  const [desde,    setDesde]    = useState(hoy);
+  const [hasta,    setHasta]    = useState(hoy);
+  const [busqueda, setBusqueda] = useState("");
+  const [detalle,  setDetalle]  = useState<number | null>(null);
+
+  const cargar = useCallback(async (d: string, h: string) => {
+    setLoading(true);
+    try {
+      const r = await fetch(`${API}/cafeteria/historial?desde=${d}&hasta=${h}&page=1`);
+      const data = await r.json();
+      setVentas(Array.isArray(data.ventas) ? data.ventas : []);
+      setTotal(data.total || 0);
+    } catch { setVentas([]); setTotal(0); }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { cargar(desde, hasta); }, []);
+
+  const ventasFiltradas = ventas.filter((v: any) => {
+    if (!busqueda) return true;
+    const q = busqueda.toLowerCase();
+    return (
+      String(v.id).includes(q) ||
+      (v.ncf || "").toLowerCase().includes(q) ||
+      (v.metodo_pago || "").toLowerCase().includes(q)
+    );
+  });
+
+  // Resumen del período
+  const resumen = ventasFiltradas.reduce((acc: any, v: any) => {
+    acc.total += Number(v.total || 0);
+    acc[v.metodo_pago || "EFECTIVO"] = (acc[v.metodo_pago || "EFECTIVO"] || 0) + Number(v.total || 0);
+    return acc;
+  }, { total: 0 });
+
+  const metodoColor: Record<string, string> = {
+    EFECTIVO: "#10b981", TARJETA: "#3b82f6", TRANSFERENCIA: "#8b5cf6"
+  };
+
+  return (
+    <div style={{ maxWidth: 920 }}>
+      {/* Filtros */}
+      <div style={{ ...card, border: "2px solid #1d4ed8", marginBottom: 16 }}>
+        <h3 style={{ ...cardTitle, color: "#1e40af" }}>📄 Historial de Facturas</h3>
+        <div style={{ display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+          <div>
+            <label style={label}>Desde</label>
+            <input type="date" value={desde} onChange={e => setDesde(e.target.value)} style={{ ...input, marginBottom: 0, width: 160 }} />
+          </div>
+          <div>
+            <label style={label}>Hasta</label>
+            <input type="date" value={hasta} onChange={e => setHasta(e.target.value)} style={{ ...input, marginBottom: 0, width: 160 }} />
+          </div>
+          <button onClick={() => cargar(desde, hasta)} disabled={loading}
+            style={{ padding: "12px 22px", background: "#1d4ed8", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+            {loading ? "⏳ Cargando..." : "🔍 Buscar"}
+          </button>
+          {/* Atajos rápidos */}
+          <div style={{ display: "flex", gap: 6 }}>
+            {[
+              { l: "Hoy",  d: hoy,  h: hoy },
+              { l: "Ayer", d: ayer, h: ayer },
+              { l: "Este mes", d: hoy.slice(0,7) + "-01", h: hoy },
+            ].map(a => (
+              <button key={a.l} onClick={() => { setDesde(a.d); setHasta(a.h); cargar(a.d, a.h); }}
+                style={{ padding: "8px 12px", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 7, cursor: "pointer", fontSize: 12, fontWeight: 600 }}>
+                {a.l}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Buscador */}
+        <div style={{ marginTop: 12 }}>
+          <input value={busqueda} onChange={e => setBusqueda(e.target.value)}
+            placeholder="Buscar por # factura, NCF o método de pago..."
+            style={{ ...input, marginBottom: 0 }} />
+        </div>
+
+        {/* Resumen período */}
+        {ventasFiltradas.length > 0 && (
+          <div style={{ display: "flex", gap: 12, marginTop: 14, flexWrap: "wrap" }}>
+            <div style={{ background: "#1d4ed8", color: "#fff", borderRadius: 10, padding: "10px 18px", fontWeight: 800, fontSize: 15 }}>
+              💰 Total: RD$ {resumen.total.toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+            </div>
+            {["EFECTIVO", "TARJETA", "TRANSFERENCIA"].map(m => resumen[m] > 0 ? (
+              <div key={m} style={{ background: metodoColor[m] + "22", color: metodoColor[m], border: `1px solid ${metodoColor[m]}44`, borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
+                {m === "EFECTIVO" ? "💵" : m === "TARJETA" ? "💳" : "📲"} {m}: RD$ {resumen[m].toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+              </div>
+            ) : null)}
+            <div style={{ background: "#f1f5f9", color: "#374151", borderRadius: 10, padding: "10px 16px", fontWeight: 700, fontSize: 13 }}>
+              🧾 {ventasFiltradas.length} factura{ventasFiltradas.length !== 1 ? "s" : ""}
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Tabla de facturas */}
+      <div style={card}>
+        {loading ? (
+          <p style={{ color: "#888", textAlign: "center", padding: 30 }}>Cargando facturas...</p>
+        ) : ventasFiltradas.length === 0 ? (
+          <p style={{ color: "#aaa", textAlign: "center", padding: 30 }}>Sin facturas en el período seleccionado.</p>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  {["#", "Fecha", "Método", "NCF", "Ítems", "Total", ""].map(h => (
+                    <th key={h} style={{ textAlign: "left", padding: "10px 12px", background: "#eff6ff", fontSize: 12, fontWeight: 700, borderBottom: "2px solid #bfdbfe" }}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {ventasFiltradas.map((v: any) => {
+                  const items: any[] = v.cafeteria_detalle || [];
+                  const abierta = detalle === v.id;
+                  return (
+                    <>
+                      <tr key={v.id} style={{ cursor: "pointer", background: abierta ? "#eff6ff" : "transparent" }}
+                        onClick={() => setDetalle(abierta ? null : v.id)}>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontWeight: 700, fontSize: 13 }}>#{v.id}</td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 12 }}>{fmtFechaHist(v.created_at)}</td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0" }}>
+                          <span style={{ background: (metodoColor[v.metodo_pago] || "#6b7280") + "22",
+                                         color: metodoColor[v.metodo_pago] || "#6b7280",
+                                         borderRadius: 20, padding: "3px 10px", fontSize: 11, fontWeight: 700 }}>
+                            {v.metodo_pago || "—"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 11, color: "#888", fontFamily: "monospace" }}>
+                          {v.ncf || <span style={{ color: "#ccc" }}>—</span>}
+                        </td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontSize: 13, textAlign: "center" }}>{items.length}</td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0", fontWeight: 800, fontSize: 14 }}>
+                          RD$ {Number(v.total).toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+                        </td>
+                        <td style={{ padding: "10px 12px", borderBottom: "1px solid #f0f0f0" }}>
+                          <button onClick={e => { e.stopPropagation(); imprimirFacturaHistorial(v); }}
+                            style={{ padding: "5px 12px", background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 6, cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                            🖨️ Reimprimir
+                          </button>
+                        </td>
+                      </tr>
+                      {abierta && (
+                        <tr key={v.id + "-det"}>
+                          <td colSpan={7} style={{ padding: "0 12px 12px", background: "#f8faff", borderBottom: "2px solid #bfdbfe" }}>
+                            <div style={{ paddingTop: 10 }}>
+                              <div style={{ fontWeight: 700, fontSize: 12, color: "#1d4ed8", marginBottom: 8 }}>🛒 Detalle de la factura #{v.id}</div>
+                              {items.length === 0 ? (
+                                <p style={{ color: "#aaa", fontSize: 12 }}>Sin detalle disponible</p>
+                              ) : (
+                                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                                  <thead>
+                                    <tr>
+                                      {["Producto", "Cant.", "Precio unit.", "Subtotal"].map(h => (
+                                        <th key={h} style={{ textAlign: "left", padding: "6px 10px", background: "#dbeafe", fontSize: 11, fontWeight: 700 }}>{h}</th>
+                                      ))}
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {items.map((i: any) => (
+                                      <tr key={i.id}>
+                                        <td style={{ padding: "7px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{i.cafeteria_productos?.nombre || "Producto eliminado"}</td>
+                                        <td style={{ padding: "7px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13, textAlign: "center" }}>{i.cantidad}</td>
+                                        <td style={{ padding: "7px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>RD$ {Number(i.precio).toFixed(2)}</td>
+                                        <td style={{ padding: "7px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 700 }}>RD$ {(i.precio * i.cantidad).toFixed(2)}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   );
                 })}
               </tbody>

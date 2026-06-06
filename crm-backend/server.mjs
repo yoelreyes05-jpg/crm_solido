@@ -704,6 +704,31 @@ app.get("/cafeteria/ordenes", async (req, res) => {
   res.json(data || []);
 });
 
+// GET /cafeteria/historial?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&page=1
+// Ventas con sus ítems y nombres de productos (para historial de facturas)
+app.get("/cafeteria/historial", async (req, res) => {
+  try {
+    const { desde, hasta, page = 1 } = req.query;
+    const limit  = 50;
+    const offset = (parseInt(page) - 1) * limit;
+
+    let q = supabase
+      .from("cafeteria_ventas")
+      .select(`id, total, metodo_pago, ncf, ncf_tipo, created_at,
+               cafeteria_detalle(id, cantidad, precio,
+                 cafeteria_productos(id, nombre))`, { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(offset, offset + limit - 1);
+
+    if (desde) q = q.gte("created_at", desde + "T00:00:00");
+    if (hasta) q = q.lte("created_at", hasta + "T23:59:59");
+
+    const { data, error, count } = await q;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ventas: data || [], total: count || 0 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/cafeteria/ordenes", async (req, res) => {
   const { items, total, metodo_pago } = req.body;
   const { data: venta, error } = await supabase.from("cafeteria_ventas")
