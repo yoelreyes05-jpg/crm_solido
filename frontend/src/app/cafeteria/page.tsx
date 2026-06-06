@@ -1309,8 +1309,12 @@ function CafeteriaRecetas() {
       @media print{body{padding:8px;}}
     </style></head><body>
     <div class="header">
-      <div class="logo">☕ SÓLIDO AUTO SERVICIO</div>
-      <div class="sub">Cafetería · Control de Calidad · ${fecha}</div>
+      <img src="${EMPRESA.logo}" alt="${EMPRESA.nombre}"
+           style="width:90px;height:auto;display:block;margin:0 auto 6px;"
+           onerror="this.style.display='none';document.getElementById('rf').style.display='block'"/>
+      <div id="rf" style="display:none;font-size:26px;">☕</div>
+      <div class="logo">${EMPRESA.nombre}</div>
+      <div class="sub">${EMPRESA.razon_social} · Cafetería · Control de Calidad · ${fecha}</div>
     </div>
     <h2>${rec.nombre}</h2>
     ${rec.cafeteria_productos ? `<div class="badge">Producto: ${rec.cafeteria_productos.nombre} — RD$ ${Number(rec.cafeteria_productos.precio).toFixed(2)}</div>` : ""}
@@ -1338,7 +1342,7 @@ function CafeteriaRecetas() {
       <div style="text-align:center;"><div class="sig"></div><div>Supervisado por</div></div>
     </div>
 
-    <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>
+    <div class="footer">${EMPRESA.nombre} · ${EMPRESA.razon_social} · ${EMPRESA.telefono}<br/>
     Receta: ${rec.nombre} · Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
     <script>setTimeout(()=>window.print(),400);<\/script>
     </body></html>`;
