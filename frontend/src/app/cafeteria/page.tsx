@@ -271,6 +271,7 @@ export default function CafeteriaPage() {
           { k: "vender",    l: "🛒 Vender" },
           { k: "productos", l: "➕ Gestionar Productos" },
           { k: "cuadre",    l: "🏦 Cuadre" },
+          { k: "receta",    l: "📋 Receta" },
         ].map(t => (
           <button key={t.k} onClick={() => setTab(t.k)}
             style={{ ...tabBtn, background: tab === t.k ? "#111827" : "#fff", color: tab === t.k ? "#fff" : "#111" }}>
@@ -409,6 +410,8 @@ export default function CafeteriaPage() {
       )}
 
       {tab === "cuadre" && <CafeteriaCuadre usuario={typeof window !== "undefined" ? (() => { try { return JSON.parse(localStorage.getItem("usuario") || "{}"); } catch { return {}; } })() : {}} />}
+
+      {tab === "receta" && <CafeteriaRecetas />}
 
       {tab === "productos" && (
         <div style={{ maxWidth: 640 }}>
@@ -837,6 +840,602 @@ function CafeteriaCuadre({ usuario }: { usuario: any }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════
+// 📋 MÓDULO DE RECETAS — Cafetería
+// ══════════════════════════════════════════════════════════
+
+const UNIDADES = ["gr", "ml", "unidad", "lb", "oz", "taza", "litro", "kg", "sobre", "lata"];
+
+function costoReceta(ingredientes: any[]): number {
+  return ingredientes.reduce((acc: number, ri: any) => {
+    const costo = Number(ri.cafeteria_ingredientes?.costo_unitario || 0);
+    return acc + costo * Number(ri.cantidad || 0);
+  }, 0);
+}
+
+function CafeteriaRecetas() {
+  const [subTab, setSubTab] = useState<"recetas" | "ingredientes">("recetas");
+
+  // ── Estado Ingredientes ────────────────────────────────
+  const [ingredientes, setIngredientes] = useState<any[]>([]);
+  const [loadIngr, setLoadIngr]         = useState(false);
+  const [nuevoIngr, setNuevoIngr]       = useState({ nombre: "", unidad: "unidad", stock_actual: "", stock_minimo: "", costo_unitario: "", proveedor: "", notas: "" });
+  const [editIngrId, setEditIngrId]     = useState<number | null>(null);
+  const [editIngrForm, setEditIngrForm] = useState<any>({});
+
+  // ── Estado Recetas ─────────────────────────────────────
+  const [recetas, setRecetas]           = useState<any[]>([]);
+  const [productos, setProductos]       = useState<any[]>([]);
+  const [loadRec, setLoadRec]           = useState(false);
+  const [verRecetaId, setVerRecetaId]   = useState<number | null>(null);
+  const [editandoRec, setEditandoRec]   = useState<number | null>(null); // -1 = nueva
+  const [recForm, setRecForm]           = useState<any>({ nombre: "", descripcion: "", instrucciones: "", rendimiento: 1, tiempo_prep_min: "", producto_id: "" });
+  const [recIngrs, setRecIngrs]         = useState<any[]>([]); // ingredientes del form
+  const [guardando, setGuardando]       = useState(false);
+
+  const cargarIngredientes = async () => {
+    setLoadIngr(true);
+    try {
+      const r = await fetch(`${API}/cafeteria/ingredientes`);
+      const d = await r.json();
+      setIngredientes(Array.isArray(d) ? d : []);
+    } catch { setIngredientes([]); }
+    setLoadIngr(false);
+  };
+
+  const cargarRecetas = async () => {
+    setLoadRec(true);
+    try {
+      const [rRec, rProd] = await Promise.all([
+        fetch(`${API}/cafeteria/recetas`).then(r => r.json()),
+        fetch(`${API}/cafeteria/productos`).then(r => r.json()),
+      ]);
+      setRecetas(Array.isArray(rRec) ? rRec : []);
+      setProductos(Array.isArray(rProd) ? rProd : []);
+    } catch { setRecetas([]); }
+    setLoadRec(false);
+  };
+
+  useEffect(() => { cargarIngredientes(); cargarRecetas(); }, []);
+
+  // ── CRUD Ingredientes ──────────────────────────────────
+  const crearIngrediente = async () => {
+    if (!nuevoIngr.nombre) return alert("El nombre es requerido");
+    try {
+      const r = await fetch(`${API}/cafeteria/ingredientes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(nuevoIngr)
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setNuevoIngr({ nombre: "", unidad: "unidad", stock_actual: "", stock_minimo: "", costo_unitario: "", proveedor: "", notas: "" });
+      cargarIngredientes();
+    } catch { alert("Error al crear ingrediente"); }
+  };
+
+  const guardarEdicionIngr = async () => {
+    if (!editIngrId) return;
+    try {
+      const r = await fetch(`${API}/cafeteria/ingredientes/${editIngrId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(editIngrForm)
+      });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setEditIngrId(null); setEditIngrForm({});
+      cargarIngredientes();
+    } catch { alert("Error al guardar"); }
+  };
+
+  const archivarIngrediente = async (id: number, nombre: string) => {
+    if (!confirm(`¿Archivar el ingrediente "${nombre}"?`)) return;
+    try {
+      await fetch(`${API}/cafeteria/ingredientes/${id}`, { method: "DELETE" });
+      cargarIngredientes();
+    } catch { alert("Error al archivar"); }
+  };
+
+  // ── CRUD Recetas ───────────────────────────────────────
+  const iniciarNuevaReceta = () => {
+    setEditandoRec(-1);
+    setRecForm({ nombre: "", descripcion: "", instrucciones: "", rendimiento: 1, tiempo_prep_min: "", producto_id: "" });
+    setRecIngrs([]);
+    setVerRecetaId(null);
+  };
+
+  const iniciarEditarReceta = (rec: any) => {
+    setEditandoRec(rec.id);
+    setRecForm({ nombre: rec.nombre, descripcion: rec.descripcion || "", instrucciones: rec.instrucciones || "",
+                 rendimiento: rec.rendimiento, tiempo_prep_min: rec.tiempo_prep_min || "",
+                 producto_id: rec.producto_id || "" });
+    setRecIngrs((rec.cafeteria_receta_ingredientes || []).map((ri: any) => ({
+      ingrediente_id: ri.cafeteria_ingredientes?.id || ri.ingrediente_id,
+      nombre_ingr: ri.cafeteria_ingredientes?.nombre || "",
+      cantidad: ri.cantidad, unidad: ri.unidad || ri.cafeteria_ingredientes?.unidad || "unidad",
+      notas: ri.notas || ""
+    })));
+    setVerRecetaId(null);
+  };
+
+  const agregarIngredienteAForm = () => {
+    setRecIngrs(prev => [...prev, { ingrediente_id: "", nombre_ingr: "", cantidad: "", unidad: "gr", notas: "" }]);
+  };
+
+  const guardarReceta = async () => {
+    if (!recForm.nombre) return alert("El nombre de la receta es requerido");
+    if (recIngrs.some((i: any) => !i.ingrediente_id || !i.cantidad)) return alert("Completa todos los ingredientes (ingrediente y cantidad)");
+    setGuardando(true);
+    try {
+      const payload = { ...recForm, ingredientes: recIngrs };
+      const isNew = editandoRec === -1;
+      const url = isNew ? `${API}/cafeteria/recetas` : `${API}/cafeteria/recetas/${editandoRec}`;
+      const r = await fetch(url, { method: isNew ? "POST" : "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
+      const d = await r.json();
+      if (d.error) return alert(d.error);
+      setEditandoRec(null);
+      cargarRecetas();
+    } catch { alert("Error al guardar receta"); }
+    setGuardando(false);
+  };
+
+  const archivarReceta = async (id: number, nombre: string) => {
+    if (!confirm(`¿Archivar la receta "${nombre}"?`)) return;
+    try {
+      await fetch(`${API}/cafeteria/recetas/${id}`, { method: "DELETE" });
+      cargarRecetas();
+    } catch { alert("Error al archivar"); }
+  };
+
+  const recetaDetalle = recetas.find((r: any) => r.id === verRecetaId);
+
+  const imprimirReceta = (rec: any, ingrs: any[], costo: number) => {
+    const fecha = new Date().toLocaleDateString("es-DO", { day: "2-digit", month: "2-digit", year: "numeric" });
+    const filasIngr = ingrs.sort((a: any, b: any) => a.orden - b.orden).map((ri: any) => `
+      <tr>
+        <td style="padding:7px 8px;border-bottom:1px solid #eee;">${ri.cafeteria_ingredientes?.nombre || "—"}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #eee;text-align:center;">${ri.cantidad} ${ri.unidad || ri.cafeteria_ingredientes?.unidad || ""}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #eee;color:#888;">${ri.notas || ""}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #eee;text-align:right;">RD$ ${(Number(ri.cafeteria_ingredientes?.costo_unitario || 0) * Number(ri.cantidad)).toFixed(2)}</td>
+      </tr>`).join("");
+
+    const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/>
+    <title>Receta — ${rec.nombre}</title>
+    <style>
+      *{margin:0;padding:0;box-sizing:border-box;}
+      body{font-family:Arial,sans-serif;font-size:13px;color:#111;padding:28px;max-width:600px;margin:auto;}
+      .header{text-align:center;border-bottom:3px solid #7c3aed;padding-bottom:14px;margin-bottom:20px;}
+      .logo{font-size:18px;font-weight:900;color:#7c3aed;}
+      .sub{font-size:11px;color:#888;margin-top:4px;}
+      h2{font-size:20px;font-weight:900;margin-bottom:4px;}
+      .badge{display:inline-block;background:#f3f0ff;color:#7c3aed;border-radius:20px;padding:3px 12px;font-size:11px;font-weight:700;margin-bottom:12px;}
+      .sec{font-weight:700;font-size:11px;text-transform:uppercase;color:#7c3aed;letter-spacing:.5px;
+        margin:16px 0 6px;border-bottom:2px solid #ddd8fe;padding-bottom:3px;}
+      table{width:100%;border-collapse:collapse;margin-bottom:12px;}
+      thead th{background:#7c3aed;color:#fff;padding:7px 8px;font-size:11px;text-align:left;}
+      .instrucciones{background:#fafafa;border:1px solid #e5e7eb;border-radius:8px;padding:12px 14px;
+        font-size:13px;white-space:pre-wrap;line-height:1.7;color:#374141;}
+      .costo-box{display:flex;justify-content:space-between;padding:10px 14px;background:#f3f0ff;
+        border-radius:8px;font-weight:800;font-size:15px;color:#5b21b6;margin-top:8px;}
+      .footer{text-align:center;font-size:11px;color:#aaa;margin-top:28px;border-top:1px dashed #ddd;padding-top:12px;}
+      .sig{display:inline-block;border-top:1px solid #333;width:180px;text-align:center;font-size:11px;color:#555;padding-top:4px;margin-top:28px;}
+      @media print{body{padding:8px;}}
+    </style></head><body>
+    <div class="header">
+      <div class="logo">☕ SÓLIDO AUTO SERVICIO</div>
+      <div class="sub">Cafetería · Control de Calidad · ${fecha}</div>
+    </div>
+    <h2>${rec.nombre}</h2>
+    ${rec.cafeteria_productos ? `<div class="badge">Producto: ${rec.cafeteria_productos.nombre} — RD$ ${Number(rec.cafeteria_productos.precio).toFixed(2)}</div>` : ""}
+    <div style="font-size:12px;color:#555;margin-bottom:8px;">
+      Rinde <b>${rec.rendimiento}</b> unidad${rec.rendimiento !== 1 ? "es" : ""}
+      ${rec.tiempo_prep_min ? ` · Preparación: <b>${rec.tiempo_prep_min} min</b>` : ""}
+    </div>
+    ${rec.descripcion ? `<p style="color:#555;font-size:13px;margin-bottom:10px;">${rec.descripcion}</p>` : ""}
+
+    <div class="sec">🧂 Ingredientes</div>
+    <table>
+      <thead><tr>
+        <th>Ingrediente</th><th style="text-align:center;">Cantidad</th>
+        <th>Notas</th><th style="text-align:right;">Costo</th>
+      </tr></thead>
+      <tbody>${filasIngr}</tbody>
+    </table>
+    <div class="costo-box"><span>Costo total de la receta</span><span>RD$ ${costo.toFixed(2)}</span></div>
+
+    ${rec.instrucciones ? `<div class="sec">📝 Instrucciones de preparación</div>
+    <div class="instrucciones">${rec.instrucciones}</div>` : ""}
+
+    <div style="display:flex;justify-content:space-around;margin-top:12px;">
+      <div style="text-align:center;"><div class="sig"></div><div>Elaborado por</div></div>
+      <div style="text-align:center;"><div class="sig"></div><div>Supervisado por</div></div>
+    </div>
+
+    <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>
+    Receta: ${rec.nombre} · Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
+    <script>setTimeout(()=>window.print(),400);<\/script>
+    </body></html>`;
+
+    const w = window.open("", "_blank", "width=680,height=720");
+    if (w) { w.document.write(html); w.document.close(); }
+  };
+
+  return (
+    <div style={{ maxWidth: 920 }}>
+      {/* Sub-tabs */}
+      <div style={{ display: "flex", gap: 8, marginBottom: 20 }}>
+        {[
+          { k: "recetas",      l: "📋 Recetas" },
+          { k: "ingredientes", l: "🧂 Ingredientes" },
+        ].map(t => (
+          <button key={t.k} onClick={() => setSubTab(t.k as any)}
+            style={{ padding: "8px 18px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer",
+                     fontWeight: 600, fontSize: 13,
+                     background: subTab === t.k ? "#7c3aed" : "#fff",
+                     color: subTab === t.k ? "#fff" : "#374151" }}>
+            {t.l}
+          </button>
+        ))}
+      </div>
+
+      {/* ── INGREDIENTES ── */}
+      {subTab === "ingredientes" && (
+        <div>
+          {/* Formulario nuevo ingrediente */}
+          <div style={{ ...card, border: "2px solid #7c3aed", marginBottom: 20 }}>
+            <h3 style={{ ...cardTitle, color: "#5b21b6" }}>🧂 Nuevo Ingrediente</h3>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <label style={label}>Nombre *</label>
+                <input value={nuevoIngr.nombre} onChange={e => setNuevoIngr({ ...nuevoIngr, nombre: e.target.value })}
+                  placeholder="Ej: Café molido, Leche entera..." style={input} />
+              </div>
+              <div>
+                <label style={label}>Unidad *</label>
+                <select value={nuevoIngr.unidad} onChange={e => setNuevoIngr({ ...nuevoIngr, unidad: e.target.value })} style={input}>
+                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={label}>Costo por unidad (RD$)</label>
+                <input type="number" value={nuevoIngr.costo_unitario} onChange={e => setNuevoIngr({ ...nuevoIngr, costo_unitario: e.target.value })}
+                  placeholder="0.00" style={input} />
+              </div>
+              <div>
+                <label style={label}>Stock actual</label>
+                <input type="number" value={nuevoIngr.stock_actual} onChange={e => setNuevoIngr({ ...nuevoIngr, stock_actual: e.target.value })}
+                  placeholder="0" style={input} />
+              </div>
+              <div>
+                <label style={label}>Stock mínimo</label>
+                <input type="number" value={nuevoIngr.stock_minimo} onChange={e => setNuevoIngr({ ...nuevoIngr, stock_minimo: e.target.value })}
+                  placeholder="0" style={input} />
+              </div>
+              <div>
+                <label style={label}>Proveedor</label>
+                <input value={nuevoIngr.proveedor} onChange={e => setNuevoIngr({ ...nuevoIngr, proveedor: e.target.value })}
+                  placeholder="Opcional" style={input} />
+              </div>
+              <div>
+                <label style={label}>Notas</label>
+                <input value={nuevoIngr.notas} onChange={e => setNuevoIngr({ ...nuevoIngr, notas: e.target.value })}
+                  placeholder="Opcional" style={input} />
+              </div>
+            </div>
+            <button onClick={crearIngrediente} style={{ ...btnPrimary, background: "#7c3aed", marginTop: 4 }}>
+              ✓ Guardar Ingrediente
+            </button>
+          </div>
+
+          {/* Lista ingredientes */}
+          <div style={card}>
+            <h3 style={cardTitle}>🧂 Ingredientes registrados ({ingredientes.length})</h3>
+            {loadIngr ? <p style={{ color: "#888" }}>Cargando...</p> : (
+              <div style={{ overflowX: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr>
+                      {["Ingrediente", "Unidad", "Stock actual", "Stock mín.", "Costo/u", "Proveedor", ""].map(h => (
+                        <th key={h} style={{ textAlign: "left", padding: "8px 10px", background: "#f3f0ff", fontSize: 12, fontWeight: 700, borderBottom: "2px solid #ddd8fe" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {ingredientes.map((ing: any) => (
+                      <tr key={ing.id}>
+                        {editIngrId === ing.id ? (
+                          <>
+                            <td colSpan={6} style={{ padding: "10px", background: "#f3f0ff" }}>
+                              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
+                                <input value={editIngrForm.nombre || ""} onChange={e => setEditIngrForm({ ...editIngrForm, nombre: e.target.value })} style={{ ...input, marginBottom: 0 }} placeholder="Nombre" />
+                                <select value={editIngrForm.unidad || "unidad"} onChange={e => setEditIngrForm({ ...editIngrForm, unidad: e.target.value })} style={{ ...input, marginBottom: 0 }}>
+                                  {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                                </select>
+                                <input type="number" value={editIngrForm.stock_actual ?? ""} onChange={e => setEditIngrForm({ ...editIngrForm, stock_actual: e.target.value })} style={{ ...input, marginBottom: 0 }} placeholder="Stock" />
+                                <input type="number" value={editIngrForm.costo_unitario ?? ""} onChange={e => setEditIngrForm({ ...editIngrForm, costo_unitario: e.target.value })} style={{ ...input, marginBottom: 0 }} placeholder="Costo" />
+                              </div>
+                              <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                                <button onClick={guardarEdicionIngr} style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 7, padding: "7px 16px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>✓ Guardar</button>
+                                <button onClick={() => { setEditIngrId(null); setEditIngrForm({}); }} style={{ background: "#f1f5f9", color: "#555", border: "1px solid #ddd", borderRadius: 7, padding: "7px 12px", fontSize: 12, cursor: "pointer" }}>Cancelar</button>
+                              </div>
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13, fontWeight: 600 }}>{ing.nombre}</td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{ing.unidad}</td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13,
+                                         color: ing.stock_actual <= ing.stock_minimo ? "#ef4444" : "#10b981", fontWeight: 700 }}>
+                              {Number(ing.stock_actual).toFixed(2)}
+                            </td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>{Number(ing.stock_minimo).toFixed(2)}</td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>RD$ {Number(ing.costo_unitario).toFixed(2)}</td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0", fontSize: 13, color: "#888" }}>{ing.proveedor || "—"}</td>
+                            <td style={{ padding: "9px 10px", borderBottom: "1px solid #f0f0f0" }}>
+                              <div style={{ display: "flex", gap: 6 }}>
+                                <button onClick={() => { setEditIngrId(ing.id); setEditIngrForm({ ...ing }); }}
+                                  style={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 6, padding: "4px 10px", fontSize: 11, fontWeight: 700, cursor: "pointer" }}>✏️</button>
+                                <button onClick={() => archivarIngrediente(ing.id, ing.nombre)}
+                                  style={{ background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 6, padding: "4px 10px", fontSize: 11, cursor: "pointer" }}>📦</button>
+                              </div>
+                            </td>
+                          </>
+                        )}
+                      </tr>
+                    ))}
+                    {ingredientes.length === 0 && !loadIngr && (
+                      <tr><td colSpan={7} style={{ textAlign: "center", padding: 24, color: "#aaa" }}>Sin ingredientes registrados</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── RECETAS ── */}
+      {subTab === "recetas" && (
+        <div>
+          {/* FORM: nueva / editar receta */}
+          {editandoRec !== null && (
+            <div style={{ ...card, border: "2px solid #7c3aed", marginBottom: 20 }}>
+              <h3 style={{ ...cardTitle, color: "#5b21b6" }}>
+                {editandoRec === -1 ? "📋 Nueva Receta" : "✏️ Editar Receta"}
+              </h3>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={label}>Nombre de la receta *</label>
+                  <input value={recForm.nombre} onChange={e => setRecForm({ ...recForm, nombre: e.target.value })}
+                    placeholder="Ej: Café Negro, Jugo Natural..." style={input} />
+                </div>
+                <div>
+                  <label style={label}>Producto vinculado</label>
+                  <select value={recForm.producto_id} onChange={e => setRecForm({ ...recForm, producto_id: e.target.value })} style={input}>
+                    <option value="">— Sin vincular —</option>
+                    {productos.map((p: any) => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={label}>Rendimiento (unidades que produce)</label>
+                  <input type="number" value={recForm.rendimiento} onChange={e => setRecForm({ ...recForm, rendimiento: e.target.value })}
+                    min={1} style={input} />
+                </div>
+                <div>
+                  <label style={label}>Tiempo de preparación (min)</label>
+                  <input type="number" value={recForm.tiempo_prep_min} onChange={e => setRecForm({ ...recForm, tiempo_prep_min: e.target.value })}
+                    placeholder="Opcional" style={input} />
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={label}>Descripción</label>
+                  <input value={recForm.descripcion} onChange={e => setRecForm({ ...recForm, descripcion: e.target.value })}
+                    placeholder="Descripción breve del producto" style={input} />
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={label}>📝 Instrucciones de preparación (paso a paso)</label>
+                  <textarea value={recForm.instrucciones} onChange={e => setRecForm({ ...recForm, instrucciones: e.target.value })}
+                    placeholder={"1. Medir el café...\n2. Calentar el agua...\n3. Servir y entregar caliente."}
+                    rows={5} style={{ ...input, height: "auto", resize: "vertical" as any }} />
+                </div>
+              </div>
+
+              {/* Ingredientes de la receta */}
+              <div style={{ marginTop: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <span style={{ fontWeight: 700, fontSize: 14, color: "#374151" }}>🧂 Ingredientes</span>
+                  <button onClick={agregarIngredienteAForm}
+                    style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 7, padding: "6px 14px", fontSize: 12, fontWeight: 700, cursor: "pointer" }}>
+                    + Agregar ingrediente
+                  </button>
+                </div>
+
+                {recIngrs.length === 0 && (
+                  <p style={{ color: "#aaa", fontSize: 13, textAlign: "center", padding: "12px 0" }}>
+                    Sin ingredientes. Haz clic en "+ Agregar ingrediente".
+                  </p>
+                )}
+
+                {recIngrs.map((ri: any, idx: number) => (
+                  <div key={idx} style={{ display: "grid", gridTemplateColumns: "2fr 1fr 1fr 2fr auto", gap: 8, marginBottom: 8, alignItems: "flex-end" }}>
+                    <div>
+                      {idx === 0 && <label style={{ ...label, marginBottom: 4 }}>Ingrediente</label>}
+                      <select value={ri.ingrediente_id} onChange={e => {
+                        const ingr = ingredientes.find((i: any) => i.id === Number(e.target.value));
+                        setRecIngrs(prev => prev.map((r: any, i: number) => i === idx
+                          ? { ...r, ingrediente_id: e.target.value, nombre_ingr: ingr?.nombre || "", unidad: ingr?.unidad || "unidad" } : r));
+                      }} style={{ ...input, marginBottom: 0 }}>
+                        <option value="">— Seleccionar —</option>
+                        {ingredientes.map((i: any) => <option key={i.id} value={i.id}>{i.nombre}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      {idx === 0 && <label style={{ ...label, marginBottom: 4 }}>Cantidad</label>}
+                      <input type="number" value={ri.cantidad} onChange={e => setRecIngrs(prev => prev.map((r: any, i: number) => i === idx ? { ...r, cantidad: e.target.value } : r))}
+                        placeholder="0" style={{ ...input, marginBottom: 0 }} />
+                    </div>
+                    <div>
+                      {idx === 0 && <label style={{ ...label, marginBottom: 4 }}>Unidad</label>}
+                      <select value={ri.unidad} onChange={e => setRecIngrs(prev => prev.map((r: any, i: number) => i === idx ? { ...r, unidad: e.target.value } : r))}
+                        style={{ ...input, marginBottom: 0 }}>
+                        {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      {idx === 0 && <label style={{ ...label, marginBottom: 4 }}>Notas del ingrediente</label>}
+                      <input value={ri.notas} onChange={e => setRecIngrs(prev => prev.map((r: any, i: number) => i === idx ? { ...r, notas: e.target.value } : r))}
+                        placeholder="Ej: tamizado, frío..." style={{ ...input, marginBottom: 0 }} />
+                    </div>
+                    <button onClick={() => setRecIngrs(prev => prev.filter((_: any, i: number) => i !== idx))}
+                      style={{ background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 7,
+                               padding: "8px 10px", cursor: "pointer", alignSelf: "flex-end",
+                               marginBottom: 0, fontSize: 13, fontWeight: 700 }}>✕</button>
+                  </div>
+                ))}
+
+                {recIngrs.length > 0 && (
+                  <div style={{ background: "#f3f0ff", borderRadius: 8, padding: "10px 14px", marginTop: 8, fontSize: 13 }}>
+                    <span style={{ color: "#5b21b6", fontWeight: 700 }}>
+                      💰 Costo estimado de la receta: RD$ {costoReceta(recIngrs.map((ri: any) => ({
+                        cafeteria_ingredientes: ingredientes.find((i: any) => String(i.id) === String(ri.ingrediente_id)),
+                        cantidad: ri.cantidad
+                      }))).toFixed(2)}
+                    </span>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ display: "flex", gap: 10, marginTop: 18 }}>
+                <button onClick={guardarReceta} disabled={guardando}
+                  style={{ flex: 2, padding: "12px", background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 14 }}>
+                  {guardando ? "Guardando..." : "💾 Guardar Receta"}
+                </button>
+                <button onClick={() => { setEditandoRec(null); setRecIngrs([]); }}
+                  style={{ flex: 1, padding: "12px", background: "#6b7280", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Listado de recetas */}
+          <div style={card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={cardTitle}>📋 Recetas registradas ({recetas.length})</h3>
+              {editandoRec === null && (
+                <button onClick={iniciarNuevaReceta}
+                  style={{ background: "#7c3aed", color: "#fff", border: "none", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                  + Nueva Receta
+                </button>
+              )}
+            </div>
+
+            {loadRec ? <p style={{ color: "#888" }}>Cargando...</p> : recetas.length === 0 ? (
+              <p style={{ color: "#aaa", textAlign: "center", padding: 24 }}>Sin recetas. Crea la primera haciendo clic en "+ Nueva Receta".</p>
+            ) : (
+              recetas.map((rec: any) => {
+                const ingrs: any[] = rec.cafeteria_receta_ingredientes || [];
+                const costo = costoReceta(ingrs);
+                const precioProducto = rec.cafeteria_productos?.precio || 0;
+                const margen = precioProducto > 0 ? ((precioProducto - costo) / precioProducto * 100) : null;
+                const abierta = verRecetaId === rec.id;
+
+                return (
+                  <div key={rec.id} style={{ border: "1px solid #e5e7eb", borderRadius: 10, marginBottom: 12, overflow: "hidden" }}>
+                    {/* Cabecera */}
+                    <div style={{ display: "flex", alignItems: "center", gap: 12, padding: "12px 16px",
+                                  background: abierta ? "#f3f0ff" : "#fafafa", cursor: "pointer" }}
+                      onClick={() => setVerRecetaId(abierta ? null : rec.id)}>
+                      <span style={{ fontSize: 22 }}>📋</span>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontWeight: 800, fontSize: 15 }}>{rec.nombre}</div>
+                        <div style={{ fontSize: 12, color: "#888", marginTop: 2 }}>
+                          {rec.cafeteria_productos ? `Producto: ${rec.cafeteria_productos.nombre}` : "Sin producto vinculado"}
+                          {" · "}{ingrs.length} ingrediente{ingrs.length !== 1 ? "s" : ""}
+                          {rec.tiempo_prep_min ? ` · ${rec.tiempo_prep_min} min` : ""}
+                          {" · Rinde: "}{rec.rendimiento} u.
+                        </div>
+                      </div>
+                      <div style={{ textAlign: "right" }}>
+                        <div style={{ fontWeight: 700, fontSize: 14, color: "#7c3aed" }}>RD$ {costo.toFixed(2)}</div>
+                        {margen !== null && (
+                          <div style={{ fontSize: 11, color: margen >= 0 ? "#10b981" : "#ef4444", fontWeight: 600 }}>
+                            Margen: {margen.toFixed(1)}%
+                          </div>
+                        )}
+                      </div>
+                      <span style={{ color: "#7c3aed", fontSize: 18 }}>{abierta ? "▲" : "▼"}</span>
+                    </div>
+
+                    {/* Detalle expandido */}
+                    {abierta && (
+                      <div style={{ padding: "16px", borderTop: "1px solid #e5e7eb", background: "#fff" }}>
+                        {rec.descripcion && (
+                          <p style={{ color: "#555", fontSize: 13, marginBottom: 12 }}>{rec.descripcion}</p>
+                        )}
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
+                          {/* Ingredientes */}
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: "#374151", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8, borderBottom: "2px solid #ddd8fe", paddingBottom: 4 }}>
+                              🧂 Ingredientes
+                            </div>
+                            {ingrs.length === 0
+                              ? <p style={{ color: "#aaa", fontSize: 12 }}>Sin ingredientes registrados</p>
+                              : ingrs.sort((a: any, b: any) => a.orden - b.orden).map((ri: any) => (
+                              <div key={ri.id} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                                <span style={{ color: "#374151", fontWeight: 600 }}>{ri.cafeteria_ingredientes?.nombre || "—"}</span>
+                                <span style={{ color: "#7c3aed", fontWeight: 700 }}>
+                                  {ri.cantidad} {ri.unidad || ri.cafeteria_ingredientes?.unidad || ""}
+                                  {ri.notas ? <span style={{ color: "#aaa", fontWeight: 400 }}> — {ri.notas}</span> : null}
+                                </span>
+                              </div>
+                            ))}
+                            <div style={{ marginTop: 8, padding: "6px 0", borderTop: "2px solid #7c3aed", display: "flex", justifyContent: "space-between", fontWeight: 800 }}>
+                              <span>Costo total</span>
+                              <span style={{ color: "#7c3aed" }}>RD$ {costo.toFixed(2)}</span>
+                            </div>
+                          </div>
+
+                          {/* Instrucciones */}
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 12, color: "#374151", textTransform: "uppercase", letterSpacing: ".5px", marginBottom: 8, borderBottom: "2px solid #ddd8fe", paddingBottom: 4 }}>
+                              📝 Instrucciones
+                            </div>
+                            {rec.instrucciones
+                              ? <pre style={{ whiteSpace: "pre-wrap", fontSize: 13, color: "#374151", fontFamily: "inherit", lineHeight: 1.6 }}>{rec.instrucciones}</pre>
+                              : <p style={{ color: "#aaa", fontSize: 12 }}>Sin instrucciones registradas</p>
+                            }
+                          </div>
+                        </div>
+
+                        {/* Acciones */}
+                        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+                          <button onClick={() => imprimirReceta(rec, ingrs, costo)}
+                            style={{ background: "#f3f0ff", color: "#7c3aed", border: "1px solid #ddd8fe", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            🖨️ Imprimir
+                          </button>
+                          <button onClick={() => iniciarEditarReceta(rec)}
+                            style={{ background: "#eff6ff", color: "#1d4ed8", border: "1px solid #bfdbfe", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            ✏️ Editar
+                          </button>
+                          <button onClick={() => archivarReceta(rec.id, rec.nombre)}
+                            style={{ background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: 8, padding: "8px 18px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}>
+                            📦 Archivar
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

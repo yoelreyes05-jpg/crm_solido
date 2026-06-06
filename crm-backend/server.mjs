@@ -842,6 +842,158 @@ app.post("/cafeteria/cuadre", async (req, res) => {
 });
 
 // =====================================================
+// 📋 CAFETERÍA — RECETAS (v7)
+// =====================================================
+
+// ── Ingredientes ─────────────────────────────────────
+
+// GET /cafeteria/ingredientes
+app.get("/cafeteria/ingredientes", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("cafeteria_ingredientes")
+      .select("*")
+      .eq("activo", true)
+      .order("nombre");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /cafeteria/ingredientes
+app.post("/cafeteria/ingredientes", async (req, res) => {
+  try {
+    const { nombre, unidad, stock_actual, stock_minimo, costo_unitario, proveedor, notas } = req.body;
+    const { data, error } = await supabase
+      .from("cafeteria_ingredientes")
+      .insert([{ nombre, unidad: unidad || "unidad", stock_actual: Number(stock_actual || 0),
+                 stock_minimo: Number(stock_minimo || 0), costo_unitario: Number(costo_unitario || 0),
+                 proveedor: proveedor || null, notas: notas || null }])
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /cafeteria/ingredientes/:id
+app.put("/cafeteria/ingredientes/:id", async (req, res) => {
+  try {
+    const { nombre, unidad, stock_actual, stock_minimo, costo_unitario, proveedor, notas } = req.body;
+    const { data, error } = await supabase
+      .from("cafeteria_ingredientes")
+      .update({ nombre, unidad, stock_actual: Number(stock_actual || 0),
+                stock_minimo: Number(stock_minimo || 0), costo_unitario: Number(costo_unitario || 0),
+                proveedor: proveedor || null, notas: notas || null,
+                updated_at: new Date().toISOString() })
+      .eq("id", parseInt(req.params.id))
+      .select().single();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /cafeteria/ingredientes/:id  (soft delete)
+app.delete("/cafeteria/ingredientes/:id", async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("cafeteria_ingredientes")
+      .update({ activo: false, updated_at: new Date().toISOString() })
+      .eq("id", parseInt(req.params.id));
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ── Recetas ───────────────────────────────────────────
+
+// GET /cafeteria/recetas  — trae recetas con sus ingredientes
+app.get("/cafeteria/recetas", async (req, res) => {
+  try {
+    const { data: recetas, error } = await supabase
+      .from("cafeteria_recetas")
+      .select(`*, cafeteria_productos(id, nombre, precio),
+               cafeteria_receta_ingredientes(id, cantidad, unidad, notas, orden,
+                 cafeteria_ingredientes(id, nombre, unidad, costo_unitario))`)
+      .eq("activo", true)
+      .order("nombre");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(recetas);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /cafeteria/recetas  — crea receta + sus ingredientes
+app.post("/cafeteria/recetas", async (req, res) => {
+  try {
+    const { nombre, descripcion, instrucciones, rendimiento, tiempo_prep_min,
+            producto_id, ingredientes, created_by } = req.body;
+
+    const { data: receta, error: rErr } = await supabase
+      .from("cafeteria_recetas")
+      .insert([{ nombre, descripcion: descripcion || null, instrucciones: instrucciones || null,
+                 rendimiento: Number(rendimiento || 1), tiempo_prep_min: tiempo_prep_min ? Number(tiempo_prep_min) : null,
+                 producto_id: producto_id ? Number(producto_id) : null,
+                 created_by: created_by || "Sistema" }])
+      .select().single();
+    if (rErr) return res.status(500).json({ error: rErr.message });
+
+    if (Array.isArray(ingredientes) && ingredientes.length > 0) {
+      const rows = ingredientes.map((i, idx) => ({
+        receta_id: receta.id, ingrediente_id: Number(i.ingrediente_id),
+        cantidad: Number(i.cantidad), unidad: i.unidad || null,
+        notas: i.notas || null, orden: idx
+      }));
+      const { error: iErr } = await supabase.from("cafeteria_receta_ingredientes").insert(rows);
+      if (iErr) return res.status(500).json({ error: iErr.message });
+    }
+    res.json(receta);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PUT /cafeteria/recetas/:id  — actualiza receta y reemplaza ingredientes
+app.put("/cafeteria/recetas/:id", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { nombre, descripcion, instrucciones, rendimiento, tiempo_prep_min,
+            producto_id, ingredientes } = req.body;
+
+    const { error: rErr } = await supabase
+      .from("cafeteria_recetas")
+      .update({ nombre, descripcion: descripcion || null, instrucciones: instrucciones || null,
+                rendimiento: Number(rendimiento || 1),
+                tiempo_prep_min: tiempo_prep_min ? Number(tiempo_prep_min) : null,
+                producto_id: producto_id ? Number(producto_id) : null,
+                updated_at: new Date().toISOString() })
+      .eq("id", id);
+    if (rErr) return res.status(500).json({ error: rErr.message });
+
+    // Reemplazar ingredientes
+    await supabase.from("cafeteria_receta_ingredientes").delete().eq("receta_id", id);
+    if (Array.isArray(ingredientes) && ingredientes.length > 0) {
+      const rows = ingredientes.map((i, idx) => ({
+        receta_id: id, ingrediente_id: Number(i.ingrediente_id),
+        cantidad: Number(i.cantidad), unidad: i.unidad || null,
+        notas: i.notas || null, orden: idx
+      }));
+      const { error: iErr } = await supabase.from("cafeteria_receta_ingredientes").insert(rows);
+      if (iErr) return res.status(500).json({ error: iErr.message });
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /cafeteria/recetas/:id  (soft delete)
+app.delete("/cafeteria/recetas/:id", async (req, res) => {
+  try {
+    const { error } = await supabase
+      .from("cafeteria_recetas")
+      .update({ activo: false, updated_at: new Date().toISOString() })
+      .eq("id", parseInt(req.params.id));
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// =====================================================
 // 🔬 DIAGNÓSTICOS
 // =====================================================
 app.get("/diagnosticos", async (req, res) => {
