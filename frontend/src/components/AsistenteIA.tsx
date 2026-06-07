@@ -12,7 +12,7 @@ export default function AsistenteIA() {
   const [abierto,   setAbierto]   = useState(false);
   const [pregunta,  setPregunta]  = useState("");
   const [mensajes,  setMensajes]  = useState<Mensaje[]>([
-    { rol: "asistente", texto: "Hola 👋 Soy tu asistente de Sólido Auto Servicio. Puedo ayudarte a buscar facturas, órdenes, clientes, inventario y más. ¿En qué te ayudo?" },
+    { rol: "asistente", texto: "Hola 👋 Soy tu asistente de Sólido Auto Servicio. Tengo acceso en tiempo real a:\n\n🚗 Vehículos · 👤 Clientes · 📋 Órdenes · 🧾 Facturas · 📦 Inventario · 🏭 Suplidores · 💰 Contabilidad · 📊 Historial\n\n¿Qué necesitas?" },
   ]);
   const [cargando,  setCargando]  = useState(false);
   const endRef  = useRef<HTMLDivElement>(null);
@@ -63,10 +63,12 @@ export default function AsistenteIA() {
     setMensajes([{ rol: "asistente", texto: "Conversación reiniciada. ¿En qué te puedo ayudar?" }]);
 
   const sugerencias = [
-    "¿Cuánto facturamos hoy?",
-    "Busca la factura de Juan Pérez",
-    "¿Qué órdenes están abiertas?",
-    "¿Cuántos aceites 5W30 hay?",
+    "¿Cómo va el taller hoy?",
+    "¿Cuánto facturamos este mes?",
+    "¿Qué órdenes están listas para entregar?",
+    "¿Qué repuestos tienen stock bajo?",
+    "Historial del vehículo placa ABC123",
+    "¿Cuánto nos deben los clientes?",
   ];
 
   return (
@@ -203,7 +205,7 @@ export default function AsistenteIA() {
               value={pregunta}
               onChange={e => setPregunta(e.target.value)}
               onKeyDown={e => e.key === "Enter" && !e.shiftKey && enviar()}
-              placeholder="Pregunta algo sobre facturas, órdenes..."
+              placeholder="Ej: ¿Cómo va el taller? ¿Cuánto facturamos?"
               disabled={cargando}
               style={{
                 flex:         1,

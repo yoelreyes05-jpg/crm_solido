@@ -1493,11 +1493,11 @@ app.get("/dashboard/stats", async (req, res) => {
     const { data: ordenes } = await supabase.from("ordenes_trabajo").select("estado, created_at");
     const { data: clientes } = await supabase.from("clientes").select("id");
     const { data: vehiculos } = await supabase.from("vehiculos").select("id");
-    const { data: ventasHoy } = await supabase.from("ventas").select("total, created_at").gte("created_at", hoy.toISOString());
-    const { data: inventario } = await supabase.from("inventario").select("stock, min_stock");
+    const { data: facturasHoy } = await supabase.from("facturas").select("total").gte("created_at", hoy.toISOString()).neq("estado", "CANCELADA");
+    const { data: inventario } = await supabase.from("inventario").select("stock, min_stock, name");
     const { data: diagnosticos } = await supabase.from("diagnosticos").select("estado");
 
-    const ingresoHoy = (ventasHoy || []).reduce((s, v) => s + Number(v.total), 0);
+    const ingresoHoy = (facturasHoy || []).reduce((s, v) => s + Number(v.total), 0);
     const stockBajo = (inventario || []).filter(i => i.stock <= i.min_stock).length;
 
     res.json({
@@ -1538,33 +1538,39 @@ app.get("/dashboard/kpis-gerente", async (req, res) => {
     // Datos en paralelo
     const [
       { data: ordenes14 },
-      { data: ventasHoy },
-      { data: ventasSemana },
+      { data: facturasHoy },
+      { data: facturasSemana },
       { data: aprobaciones },
-      { data: inventarioBajo },
+      { data: inventarioAll },
       { data: facturas7 },
     ] = await Promise.all([
       supabase.from("ordenes_trabajo")
         .select("id, estado, total, created_at")
         .gte("created_at", hace14.toISOString()),
-      supabase.from("ventas")
+      supabase.from("facturas")
         .select("total")
-        .gte("created_at", hoy.toISOString()),
-      supabase.from("ventas")
+        .gte("created_at", hoy.toISOString())
+        .neq("estado", "CANCELADA"),
+      supabase.from("facturas")
         .select("total")
-        .gte("created_at", inicioSemana.toISOString()),
+        .gte("created_at", inicioSemana.toISOString())
+        .neq("estado", "CANCELADA"),
       supabase.from("ordenes_trabajo")
         .select("id, estado, created_at")
         .in("estado", ["LISTO","ENTREGADO","CANCELADA"])
         .gte("created_at", hace14.toISOString()),
       supabase.from("inventario")
         .select("id, name, stock, min_stock")
-        .filter("stock", "lte", "min_stock"),
-      supabase.from("facturacion")
+        .order("name"),
+      supabase.from("facturas")
         .select("total, created_at")
         .gte("created_at", hace7.toISOString())
+        .neq("estado", "CANCELADA")
         .order("created_at", { ascending: false }),
     ]);
+
+    // Filtrar stock bajo en JS (comparación de columnas no soportada en Supabase JS client)
+    const inventarioBajo = (inventarioAll || []).filter(i => Number(i.stock || 0) <= Number(i.min_stock || 0));
 
     // ── Volumen diario últimos 14 días ──────────────────────────────────────
     const diasMap = {};
@@ -1591,11 +1597,12 @@ app.get("/dashboard/kpis-gerente", async (req, res) => {
     const ingresosDiarios = Object.entries(ingresosMap).map(([fecha, total]) => ({ fecha, total }));
 
     // ── KPIs calculados ───────────────────────────────────────────────────
-    const ingresoHoy    = (ventasHoy    || []).reduce((s, v) => s + Number(v.total), 0);
-    const ingresoSemana = (ventasSemana || []).reduce((s, v) => s + Number(v.total), 0);
-    const ordenesConTotal = (ordenes14 || []).filter(o => o.total > 0);
-    const ticketPromedio  = ordenesConTotal.length > 0
-      ? ordenesConTotal.reduce((s, o) => s + Number(o.total), 0) / ordenesConTotal.length
+    const ingresoHoy    = (facturasHoy    || []).reduce((s, v) => s + Number(v.total), 0);
+    const ingresoSemana = (facturasSemana || []).reduce((s, v) => s + Number(v.total), 0);
+    // Ticket promedio desde facturas (más preciso que ordenes_trabajo.total)
+    const facturasConTotal = (facturas7 || []).filter(f => Number(f.total) > 0);
+    const ticketPromedio  = facturasConTotal.length > 0
+      ? facturasConTotal.reduce((s, f) => s + Number(f.total), 0) / facturasConTotal.length
       : 0;
     const completadas   = (aprobaciones || []).filter(o => ["LISTO","ENTREGADO"].includes(o.estado)).length;
     const canceladas    = (aprobaciones || []).filter(o => o.estado === "CANCELADA").length;
@@ -5691,6 +5698,64 @@ const IA_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "buscar_vehiculos",
+      description: "Busca vehículos por placa, marca, modelo o propietario. Devuelve información del vehículo y su dueño.",
+      parameters: {
+        type: "object",
+        properties: {
+          placa:          { type: "string", description: "Placa del vehículo (parcial o completa)" },
+          marca:          { type: "string", description: "Marca del vehículo, ej: Toyota, Honda" },
+          modelo:         { type: "string", description: "Modelo del vehículo" },
+          cliente_nombre: { type: "string", description: "Nombre del propietario" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_suplidores",
+      description: "Lista o busca suplidores/proveedores registrados. Devuelve nombre, RNC, teléfono y correo.",
+      parameters: {
+        type: "object",
+        properties: {
+          nombre: { type: "string", description: "Nombre parcial del suplidor" },
+          rnc:    { type: "string", description: "RNC del suplidor" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "resumen_dashboard",
+      description: "Resumen general del taller: órdenes activas por estado, ingreso de hoy, stock bajo, total clientes y vehículos. Úsalo cuando pregunten '¿cómo va el taller?' o quieran un resumen rápido.",
+      parameters: {
+        type: "object",
+        properties: {},
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "contabilidad_resumen",
+      description: "Resumen financiero: cuentas por cobrar pendientes, cuentas por pagar pendientes, facturación del mes actual y del mes anterior.",
+      parameters: {
+        type: "object",
+        properties: {
+          mes: { type: "string", description: "Mes en formato YYYY-MM (default mes actual)" },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 async function ejecutarHerramientaIA(nombre, args) {
@@ -5891,6 +5956,117 @@ async function ejecutarHerramientaIA(nombre, args) {
         return { fecha, ordenes: enriched, total: enriched.length, por_estado: porEstado };
       }
 
+      case "buscar_vehiculos": {
+        let q = supabase
+          .from("vehiculos")
+          .select("id, placa, marca, modelo, ano, color, cliente_id, vin")
+          .order("marca")
+          .limit(20);
+        if (args.placa)  q = q.ilike("placa",  `%${args.placa}%`);
+        if (args.marca)  q = q.ilike("marca",  `%${args.marca}%`);
+        if (args.modelo) q = q.ilike("modelo", `%${args.modelo}%`);
+        const { data: vehs, error } = await q;
+        if (error) return { error: error.message };
+        let resultado = vehs || [];
+        // Filtrar por nombre de cliente si se indicó
+        if (args.cliente_nombre && resultado.length > 0) {
+          const ids = [...new Set(resultado.map(v => v.cliente_id).filter(Boolean))];
+          const { data: clis } = ids.length ? await supabase.from("clientes").select("id, nombre").in("id", ids) : { data: [] };
+          const cMap = Object.fromEntries((clis || []).map(c => [c.id, c.nombre]));
+          resultado = resultado.filter(v => (cMap[v.cliente_id] || "").toLowerCase().includes(args.cliente_nombre.toLowerCase()));
+          resultado = resultado.map(v => ({ ...v, cliente_nombre: cMap[v.cliente_id] || "Sin cliente" }));
+        } else if (resultado.length > 0) {
+          const ids = [...new Set(resultado.map(v => v.cliente_id).filter(Boolean))];
+          const { data: clis } = ids.length ? await supabase.from("clientes").select("id, nombre, telefono").in("id", ids) : { data: [] };
+          const cMap = Object.fromEntries((clis || []).map(c => [c.id, c]));
+          resultado = resultado.map(v => ({
+            ...v,
+            cliente_nombre: cMap[v.cliente_id]?.nombre || "Sin cliente",
+            cliente_telefono: cMap[v.cliente_id]?.telefono || "",
+          }));
+        }
+        return { vehiculos: resultado, total: resultado.length };
+      }
+
+      case "buscar_suplidores": {
+        let q = supabase.from("suplidores").select("id, name, rnc, telefono, correo, direccion").order("name").limit(50);
+        if (args.nombre) q = q.ilike("name", `%${args.nombre}%`);
+        if (args.rnc)    q = q.ilike("rnc",  `%${args.rnc}%`);
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        return { suplidores: (data || []).map(s => ({ ...s, nombre: s.name })), total: data?.length || 0 };
+      }
+
+      case "resumen_dashboard": {
+        const hoyD = new Date(); hoyD.setHours(0,0,0,0);
+        const [{ data: ordenes }, { data: facturasH }, { data: clientes }, { data: vehiculos }, { data: inventarioD }] = await Promise.all([
+          supabase.from("ordenes_trabajo").select("estado").not("estado", "eq", "CANCELADO"),
+          supabase.from("facturas").select("total").gte("created_at", hoyD.toISOString()).neq("estado", "CANCELADA"),
+          supabase.from("clientes").select("id", { count: "exact", head: true }),
+          supabase.from("vehiculos").select("id", { count: "exact", head: true }),
+          supabase.from("inventario").select("stock, min_stock, name"),
+        ]);
+        const porEstado = {};
+        for (const o of (ordenes || [])) porEstado[o.estado] = (porEstado[o.estado] || 0) + 1;
+        const ingresoHoyD = (facturasH || []).reduce((s, f) => s + Number(f.total), 0);
+        const stockBajoItems = (inventarioD || []).filter(i => Number(i.stock||0) <= Number(i.min_stock||0)).map(i => i.name);
+        return {
+          ordenes_por_estado: porEstado,
+          total_en_taller: (ordenes || []).filter(o => o.estado !== "ENTREGADO").length,
+          listos_para_entregar: porEstado["LISTO"] || 0,
+          ingreso_hoy_RD: ingresoHoyD.toFixed(2),
+          total_clientes: clientes?.length || 0,
+          total_vehiculos: vehiculos?.length || 0,
+          stock_bajo_count: stockBajoItems.length,
+          stock_bajo_items: stockBajoItems.slice(0, 8),
+        };
+      }
+
+      case "contabilidad_resumen": {
+        const ahora = new Date();
+        const mesStr = args.mes || ahora.toISOString().slice(0, 7);
+        const [anio, mes] = mesStr.split("-").map(Number);
+        const inicioMes  = new Date(anio, mes - 1, 1).toISOString();
+        const finMes     = new Date(anio, mes, 0, 23, 59, 59).toISOString();
+        const mesAntStr  = new Date(anio, mes - 2, 1).toISOString();
+        const mesAntFin  = new Date(anio, mes - 1, 0, 23, 59, 59).toISOString();
+
+        const [
+          { data: facturasMes },
+          { data: facturasAnt },
+          { data: cuentasCobrar },
+          { data: cuentasPagar },
+        ] = await Promise.all([
+          supabase.from("facturas").select("total, metodo_pago").gte("created_at", inicioMes).lte("created_at", finMes).neq("estado", "CANCELADA"),
+          supabase.from("facturas").select("total").gte("created_at", mesAntStr).lte("created_at", mesAntFin).neq("estado", "CANCELADA"),
+          supabase.from("cuentas_cobrar").select("monto_original, monto_pagado, estado, fecha_vencimiento").neq("estado", "PAGADA"),
+          supabase.from("cuentas_pagar").select("monto_original, monto_pagado, estado, fecha_vencimiento").neq("estado", "PAGADA"),
+        ]);
+
+        const totalMes = (facturasMes || []).reduce((s, f) => s + Number(f.total), 0);
+        const totalAnt = (facturasAnt || []).reduce((s, f) => s + Number(f.total), 0);
+        const porMetodo = {};
+        (facturasMes || []).forEach(f => { const m = f.metodo_pago || "N/A"; porMetodo[m] = (porMetodo[m] || 0) + Number(f.total); });
+
+        const pendCobrar = (cuentasCobrar || []).reduce((s, c) => s + Math.max(0, Number(c.monto_original) - Number(c.monto_pagado || 0)), 0);
+        const vencidasCobrar = (cuentasCobrar || []).filter(c => c.estado === "VENCIDA").length;
+        const pendPagar  = (cuentasPagar  || []).reduce((s, c) => s + Math.max(0, Number(c.monto_original) - Number(c.monto_pagado || 0)), 0);
+        const vencidasPagar = (cuentasPagar || []).filter(c => c.estado === "VENCIDA").length;
+
+        const variacion = totalAnt > 0 ? (((totalMes - totalAnt) / totalAnt) * 100).toFixed(1) : null;
+
+        return {
+          mes: mesStr,
+          facturacion_mes_RD: totalMes.toFixed(2),
+          facturas_emitidas: facturasMes?.length || 0,
+          por_metodo_pago: porMetodo,
+          mes_anterior_RD: totalAnt.toFixed(2),
+          variacion_pct: variacion ? `${variacion > 0 ? "+" : ""}${variacion}%` : "N/A",
+          cuentas_por_cobrar: { total_pendiente_RD: pendCobrar.toFixed(2), cantidad: cuentasCobrar?.length || 0, vencidas: vencidasCobrar },
+          cuentas_por_pagar:  { total_pendiente_RD: pendPagar.toFixed(2),  cantidad: cuentasPagar?.length  || 0, vencidas: vencidasPagar  },
+        };
+      }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -5906,15 +6082,30 @@ app.post("/api/ia/asistente", async (req, res) => {
     if (!OAI_KEY)          return res.status(500).json({ error: "OPENAI_API_KEY no configurada." });
 
     const systemPrompt = `Eres el asistente interno de Sólido Auto Servicio SRL, taller automotriz en Santo Domingo, República Dominicana.
-Tu función es ayudar al personal a encontrar información rápida.
+Tu función es dar respuestas rápidas y precisas al personal consultando la base de datos en tiempo real.
 
-REGLAS ESTRICTAS:
-1. SIEMPRE usa las herramientas disponibles para consultar datos antes de responder. Nunca respondas de memoria.
-2. Si una herramienta devuelve 0 resultados, di claramente "No encontré ningún registro con ese criterio" — NO digas que no puedes acceder.
-3. Si la herramienta devuelve datos, preséntales de forma clara y concisa.
-4. Para inventario: busca por palabras clave, ej. "aceite" para encontrar "Aceite 5W-30".
-5. Para montos usa formato "RD$ X,XXX.XX".
-6. Responde siempre en español dominicano, breve y directo.`;
+HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
+- buscar_facturas: facturas, cobros, NCF, pagos de clientes
+- buscar_ordenes: órdenes de trabajo, estado, reparaciones, vehículos en taller
+- buscar_clientes: buscar un cliente por nombre, teléfono o cédula
+- buscar_vehiculos: buscar un vehículo por placa, marca, modelo o dueño
+- consultar_inventario: stock de repuestos, precios, stock bajo
+- buscar_suplidores: proveedores, suplidores registrados
+- cuentas_por_cobrar: deudas pendientes de clientes
+- resumen_ventas: total facturado en un período
+- historial_vehiculo: historial completo de servicios de un vehículo por placa
+- ordenes_del_dia: órdenes recibidas hoy o en una fecha
+- resumen_dashboard: estado general del taller (órdenes activas, ingreso del día, stock bajo)
+- contabilidad_resumen: facturación del mes, cuentas por cobrar/pagar, variación vs mes anterior
+
+REGLAS:
+1. SIEMPRE usa una herramienta para responder — nunca de memoria.
+2. Usa resumen_dashboard cuando pregunten "¿cómo va el taller?" o quieran un resumen rápido.
+3. Usa contabilidad_resumen para preguntas financieras del mes o año.
+4. Si no hay resultados: "No encontré ningún registro con ese criterio."
+5. Montos siempre en formato "RD$ X,XXX.XX".
+6. Responde en español dominicano, breve y directo. Usa emojis moderadamente.
+7. Para múltiples resultados, usa listas cortas. Para un solo resultado, da todos los detalles relevantes.`;
 
     const mensajes = [
       { role: "system", content: systemPrompt },
