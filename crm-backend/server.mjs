@@ -1764,6 +1764,16 @@ app.post("/facturas", async (req, res) => {
       ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
     }
 
+    // Resolver orden_id y cotizacion_id desde diagnostico_id
+    let orden_id_resuelto = null;
+    let cotizacion_id_resuelta = null;
+    if (diagnostico_id) {
+      const { data: diagRow } = await supabase.from("diagnosticos").select("orden_id").eq("id", diagnostico_id).maybeSingle();
+      orden_id_resuelto = diagRow?.orden_id || null;
+      const { data: cotRow } = await supabase.from("cotizaciones").select("id").eq("diagnostico_id", diagnostico_id).order("id", { ascending: false }).limit(1).maybeSingle();
+      cotizacion_id_resuelta = cotRow?.id || null;
+    }
+
     const { data: factura, error: errFac } = await supabase
       .from("facturas")
       .insert([{
@@ -1777,6 +1787,8 @@ app.post("/facturas", async (req, res) => {
         vehiculo_id: vehiculo_id || null,
         vehiculo_info: vehiculo_info || null,
         diagnostico_id: diagnostico_id || null,
+        orden_id: orden_id_resuelto,
+        cotizacion_id: cotizacion_id_resuelta,
         subtotal,
         itbis,
         total,
