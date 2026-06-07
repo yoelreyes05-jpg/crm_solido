@@ -32,6 +32,7 @@ interface ChecklistState {
   gato_ok: boolean;
   llanta_repuesto_ok: boolean;
   documentos_ok: boolean;
+  herramientas_ok: boolean;
 }
 
 type Prioridad = "NORMAL" | "ALTA" | "URGENTE";
@@ -48,6 +49,7 @@ const CHECKLIST_ITEMS: [keyof ChecklistState, string][] = [
   ["gato_ok",            "Gato hidráulico"],
   ["llanta_repuesto_ok", "Llanta de repuesto"],
   ["documentos_ok",      "Documentos"],
+  ["herramientas_ok",    "Herramientas"],
 ];
 
 const CONDICIONES: Condicion[] = ["Excelente", "Bueno", "Regular", "Malo"];
@@ -59,12 +61,51 @@ const PRIORIDAD_COLOR: Record<Prioridad, string> = {
   URGENTE: "#ef4444",
 };
 
-// ── Colores tema ──────────────────────────────────────────────────────────────
-const BG       = "#0f172a";
-const CARD     = "#1e293b";
-const BORDER   = "#334155";
-const TEXT     = "#e2e8f0";
-const MUTED    = "#94a3b8";
+// ── Inspección visual — daños y fotos ─────────────────────────────────────────
+type FotoSlotKey = "frente" | "trasero" | "lateral_izq" | "lateral_der" | "interior" | "tablero" | "danos_visibles";
+
+interface ZonaDanio { zona_id: string; tipo_danio: string; label: string; }
+
+const FOTO_SLOTS: { key: FotoSlotKey; label: string; icon: string }[] = [
+  { key: "frente",        label: "Frente",        icon: "🚗" },
+  { key: "trasero",       label: "Trasero",       icon: "🔙" },
+  { key: "lateral_izq",   label: "Lateral Izq.",  icon: "◀️" },
+  { key: "lateral_der",   label: "Lateral Der.",  icon: "▶️" },
+  { key: "interior",      label: "Interior",      icon: "💺" },
+  { key: "tablero",       label: "Tablero",       icon: "🎛️" },
+  { key: "danos_visibles",label: "Daños",         icon: "⚠️" },
+];
+
+const ZONAS_DANIO_MAP = [
+  { id: "frontal_centro",  label: "Frontal centro",       cx: 200, cy: 45  },
+  { id: "frontal_izq",     label: "Frontal izquierdo",    cx: 110, cy: 65  },
+  { id: "frontal_der",     label: "Frontal derecho",      cx: 290, cy: 65  },
+  { id: "lateral_izq_f",   label: "Lateral izq. frente",  cx: 65,  cy: 130 },
+  { id: "lateral_izq_t",   label: "Lateral izq. trasero", cx: 65,  cy: 230 },
+  { id: "lateral_der_f",   label: "Lateral der. frente",  cx: 335, cy: 130 },
+  { id: "lateral_der_t",   label: "Lateral der. trasero", cx: 335, cy: 230 },
+  { id: "techo",           label: "Techo",                cx: 200, cy: 175 },
+  { id: "trasero_izq",     label: "Trasero izquierdo",    cx: 110, cy: 295 },
+  { id: "trasero_der",     label: "Trasero derecho",      cx: 290, cy: 295 },
+  { id: "trasero_centro",  label: "Trasero centro",       cx: 200, cy: 315 },
+];
+
+const TIPO_DANIO_LIST = ["rayon_leve", "rayon_profundo", "golpe", "falta_pieza", "sin_danio"] as const;
+const TIPO_DANIO_COLOR: Record<string, string> = {
+  rayon_leve: "#f59e0b", rayon_profundo: "#ef4444",
+  golpe: "#7c3aed", falta_pieza: "#1d4ed8", sin_danio: "#10b981",
+};
+const TIPO_DANIO_LABEL: Record<string, string> = {
+  rayon_leve: "Rayón leve", rayon_profundo: "Rayón profundo",
+  golpe: "Golpe/Abolladura", falta_pieza: "Falta pieza", sin_danio: "Sin daño",
+};
+
+// ── Colores tema (claro) ──────────────────────────────────────────────────────
+const BG       = "#f1f5f9";
+const CARD     = "#ffffff";
+const BORDER   = "#e2e8f0";
+const TEXT     = "#1e293b";
+const MUTED    = "#64748b";
 const BLUE     = "#3b82f6";
 const GREEN    = "#10b981";
 const RED      = "#ef4444";
@@ -99,7 +140,7 @@ const sInput: React.CSSProperties = {
   display: "block",
   width: "100%",
   padding: "11px 14px",
-  background: BG,
+  background: "#fff",
   border: `1px solid ${BORDER}`,
   borderRadius: 10,
   color: TEXT,
@@ -112,7 +153,7 @@ const sTextarea: React.CSSProperties = {
   display: "block",
   width: "100%",
   padding: "11px 14px",
-  background: BG,
+  background: "#fff",
   border: `1px solid ${BORDER}`,
   borderRadius: 10,
   color: TEXT,
@@ -155,9 +196,9 @@ const sBtnGhost: React.CSSProperties = {
   fontSize: 13,
 };
 const sError: React.CSSProperties = {
-  background: "#450a0a",
-  border: "1px solid #b91c1c",
-  color: "#fca5a5",
+  background: "#fef2f2",
+  border: "1px solid #fca5a5",
+  color: "#b91c1c",
   borderRadius: 10,
   padding: "12px 16px",
   fontSize: 13,
@@ -253,13 +294,26 @@ export default function RecepcionPage() {
   const [checklist, setChecklist] = useState<ChecklistState>({
     radio_pantalla: false, tapiceria_ok: false, alfombras_ok: false,
     luces_ok: false, bocina_ok: false, espejos_ok: false, gato_ok: false,
-    llanta_repuesto_ok: false, documentos_ok: false,
+    llanta_repuesto_ok: false, documentos_ok: false, herramientas_ok: false,
   });
   const [observaciones, setObservaciones] = useState("");
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [drawing, setDrawing] = useState(false);
   const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
   const [firmada, setFirmada] = useState(false);
+
+  // Paso 3 — Mapa de daños y fotos
+  const [zonesDanio, setZonesDanio] = useState<ZonaDanio[]>([]);
+  const [zonaSeleccionada, setZonaSeleccionada] = useState<string | null>(null);
+  const [fotosSlots, setFotosSlots] = useState<Record<FotoSlotKey, string | null>>({
+    frente: null, trasero: null, lateral_izq: null, lateral_der: null,
+    interior: null, tablero: null, danos_visibles: null,
+  });
+  const [rayones, setRayones] = useState("");
+  const [golpes, setGolpes] = useState("");
+  const [estadoVidrios, setEstadoVidrios] = useState("");
+  const [estadoLlantas, setEstadoLlantas] = useState("");
+  const [estadoPintura, setEstadoPintura] = useState("");
 
   // Paso 4 — Orden
   const [descripcion, setDescripcion] = useState("");
@@ -404,6 +458,31 @@ export default function RecepcionPage() {
     setFirmada(false);
   };
 
+  // ── Handlers daños y fotos ────────────────────────────────────────────────
+  const clickZona = (zonaId: string) => setZonaSeleccionada(zonaId);
+
+  const seleccionarTipo = (tipo: string) => {
+    if (!zonaSeleccionada) return;
+    const zona = ZONAS_DANIO_MAP.find(z => z.id === zonaSeleccionada);
+    if (!zona) return;
+    setZonesDanio(prev => {
+      const sinEsta = prev.filter(z => z.zona_id !== zonaSeleccionada);
+      if (tipo === "sin_danio") return sinEsta;
+      return [...sinEsta, { zona_id: zonaSeleccionada, tipo_danio: tipo, label: zona.label }];
+    });
+    setZonaSeleccionada(null);
+  };
+
+  const getDanioZona = (zonaId: string) => zonesDanio.find(z => z.zona_id === zonaId);
+
+  const handleFotoSlot = (key: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => setFotosSlots(prev => ({ ...prev, [key]: ev.target?.result as string }));
+    reader.readAsDataURL(file);
+  };
+
   // ── Navegación ────────────────────────────────────────────────────────────
   const avanzar = () => {
     setError("");
@@ -473,10 +552,17 @@ export default function RecepcionPage() {
             km_entrada:        kmEntrada ? Number(kmEntrada) : null,
             nivel_combustible: combustible,
             condicion_general: condicion,
-            zonas_danio:       [],
-            fotos:             [],
+            zonas_danio:       zonesDanio,
+            fotos:             Object.entries(fotosSlots)
+                                 .filter(([, v]) => v)
+                                 .map(([k, v]) => ({ tipo: k, data: v })),
             firma_cliente:     firma,
             observaciones:     observaciones.trim(),
+            rayones:           rayones.trim() || null,
+            golpes:            golpes.trim() || null,
+            estado_vidrios:    estadoVidrios.trim() || null,
+            estado_llantas:    estadoLlantas.trim() || null,
+            estado_pintura:    estadoPintura.trim() || null,
             creado_por_id:     usuario.id    || null,
             creado_por_nombre: usuario.nombre || "Sistema",
             ...checklist,
@@ -519,10 +605,18 @@ export default function RecepcionPage() {
     setChecklist({
       radio_pantalla: false, tapiceria_ok: false, alfombras_ok: false,
       luces_ok: false, bocina_ok: false, espejos_ok: false,
-      gato_ok: false, llanta_repuesto_ok: false, documentos_ok: false,
+      gato_ok: false, llanta_repuesto_ok: false, documentos_ok: false, herramientas_ok: false,
     });
     setObservaciones("");
     setFirmada(false);
+    setZonesDanio([]);
+    setZonaSeleccionada(null);
+    setFotosSlots({ frente: null, trasero: null, lateral_izq: null, lateral_der: null, interior: null, tablero: null, danos_visibles: null });
+    setRayones("");
+    setGolpes("");
+    setEstadoVidrios("");
+    setEstadoLlantas("");
+    setEstadoPintura("");
     // limpiar canvas en el siguiente ciclo (el canvas puede no estar montado)
     setTimeout(() => limpiarFirma(), 50);
     setDescripcion("");
@@ -547,7 +641,7 @@ export default function RecepcionPage() {
           </p>
           <div style={{
             display: "inline-block",
-            background: "#0f2e1e",
+            background: "#f0fdf4",
             border: `2px solid ${GREEN}`,
             borderRadius: 16,
             padding: "18px 40px",
@@ -604,7 +698,7 @@ export default function RecepcionPage() {
               {/* Cliente ya elegido */}
               {clienteSeleccionado && (
                 <div style={{
-                  background: "#0a2e0a",
+                  background: "#f0fdf4",
                   border: `1px solid ${GREEN}`,
                   borderRadius: 12,
                   padding: "14px 18px",
@@ -752,7 +846,7 @@ export default function RecepcionPage() {
               {/* Vehículo elegido */}
               {vehiculoSeleccionado && (
                 <div style={{
-                  background: "#0a2e0a",
+                  background: "#f0fdf4",
                   border: `1px solid ${GREEN}`,
                   borderRadius: 12,
                   padding: "14px 18px",
@@ -893,169 +987,230 @@ export default function RecepcionPage() {
         ═══════════════════════════════════════════════════════════════════ */}
         {paso === 3 && (
           <div>
+            {/* ── Datos básicos ── */}
             <div style={sCard}>
               <h2 style={{ fontSize: 17, fontWeight: 700, marginBottom: 16, color: TEXT }}>
                 Paso 3 — Inspección Visual
               </h2>
 
-              {/* KM */}
-              <label style={sLabel}>Kilómetros al recibir</label>
-              <input
-                style={sInput}
-                type="number"
-                placeholder="Ej: 85000"
-                value={kmEntrada}
-                onChange={e => setKmEntrada(e.target.value)}
-                min={0}
-              />
-
-              {/* Combustible */}
-              <div style={{ marginBottom: 22 }}>
-                <label style={sLabel}>
-                  Nivel de combustible {fuelEmoji} — {combustible}%
-                </label>
-                <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
-                  <div style={{
-                    flex: 1,
-                    height: 22,
-                    background: BG,
-                    borderRadius: 11,
-                    border: `1px solid ${BORDER}`,
-                    overflow: "hidden",
-                  }}>
-                    <div style={{
-                      width: `${combustible}%`,
-                      height: "100%",
-                      background: fuelColor,
-                      borderRadius: 11,
-                      transition: "width 0.15s, background 0.15s",
-                    }} />
-                  </div>
-                  <span style={{ color: fuelColor, fontWeight: 700, fontSize: 14, minWidth: 40, textAlign: "right" }}>
-                    {combustible}%
-                  </span>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+                <div>
+                  <label style={sLabel}>Kilómetros al recibir</label>
+                  <input style={sInput} type="number" placeholder="Ej: 85000" value={kmEntrada}
+                    onChange={e => setKmEntrada(e.target.value)} min={0} />
                 </div>
-                <input
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={combustible}
-                  onChange={e => setCombustible(Number(e.target.value))}
-                  style={{ width: "100%", accentColor: fuelColor, cursor: "pointer" }}
-                />
-                <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-                  {["Vacío", "¼", "½", "¾", "Lleno"].map(l => (
-                    <span key={l} style={{ fontSize: 10, color: MUTED }}>{l}</span>
-                  ))}
-                </div>
-              </div>
-
-              {/* Condición general */}
-              <div style={{ marginBottom: 22 }}>
-                <label style={sLabel}>Condición general del vehículo</label>
-                <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-                  {CONDICIONES.map(c => (
-                    <button
-                      key={c}
-                      onClick={() => setCondicion(c)}
-                      style={{
-                        padding: "9px 18px",
-                        borderRadius: 10,
+                <div>
+                  <label style={sLabel}>Condición general</label>
+                  <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+                    {CONDICIONES.map(c => (
+                      <button key={c} onClick={() => setCondicion(c)} style={{
+                        padding: "7px 14px", borderRadius: 8, fontSize: 13,
                         border: condicion === c ? `2px solid ${BLUE}` : `1px solid ${BORDER}`,
-                        background: condicion === c ? "#1e3a5f" : BG,
+                        background: condicion === c ? "#eff6ff" : "#fff",
                         color: condicion === c ? BLUE : MUTED,
-                        fontWeight: condicion === c ? 700 : 500,
-                        fontSize: 13,
-                        cursor: "pointer",
-                      }}
-                    >
-                      {c}
-                    </button>
+                        fontWeight: condicion === c ? 700 : 500, cursor: "pointer",
+                      }}>
+                        {c}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </div>
+
+              <label style={sLabel}>Nivel de combustible {fuelEmoji} — {combustible}%</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 8 }}>
+                <div style={{ flex: 1, height: 18, background: "#f1f5f9", borderRadius: 9, border: `1px solid ${BORDER}`, overflow: "hidden" }}>
+                  <div style={{ width: `${combustible}%`, height: "100%", background: fuelColor, borderRadius: 9, transition: "width 0.15s, background 0.15s" }} />
+                </div>
+                <span style={{ color: fuelColor, fontWeight: 700, fontSize: 14, minWidth: 40, textAlign: "right" }}>{combustible}%</span>
+              </div>
+              <input type="range" min={0} max={100} step={5} value={combustible}
+                onChange={e => setCombustible(Number(e.target.value))}
+                style={{ width: "100%", accentColor: fuelColor, cursor: "pointer", marginBottom: 4 }} />
+              <div style={{ display: "flex", justifyContent: "space-between" }}>
+                {["Vacío", "¼", "½", "¾", "Lleno"].map(l => (
+                  <span key={l} style={{ fontSize: 10, color: MUTED }}>{l}</span>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Mapa de daños ── */}
+            <div style={sCard}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 4 }}>🗺️ Mapa de Daños</p>
+              <p style={{ fontSize: 12, color: MUTED, marginBottom: 16 }}>Toca una zona del vehículo para marcar el tipo de daño</p>
+
+              <div style={{ display: "flex", gap: 20, flexWrap: "wrap" }}>
+                {/* SVG top-view del carro */}
+                <div style={{ flex: "0 0 auto" }}>
+                  <svg viewBox="0 0 400 360" style={{ width: 220, height: "auto", display: "block" }}>
+                    <ellipse cx="95"  cy="110" rx="22" ry="32" fill="#374151"/>
+                    <ellipse cx="305" cy="110" rx="22" ry="32" fill="#374151"/>
+                    <ellipse cx="95"  cy="250" rx="22" ry="32" fill="#374151"/>
+                    <ellipse cx="305" cy="250" rx="22" ry="32" fill="#374151"/>
+                    <rect x="80" y="25" width="240" height="310" rx="42" fill="#e5e7eb" stroke="#9ca3af" strokeWidth="2"/>
+                    <rect x="118" y="50"  width="164" height="65" rx="12" fill="#bfdbfe" stroke="#93c5fd" strokeWidth="1.5"/>
+                    <rect x="118" y="245" width="164" height="55" rx="12" fill="#bfdbfe" stroke="#93c5fd" strokeWidth="1.5"/>
+                    <rect x="128" y="120" width="144" height="120" rx="10" fill="#f9fafb" stroke="#e5e7eb" strokeWidth="1"/>
+                    <rect x="138" y="16"  width="124" height="22" rx="6" fill="#d1d5db" stroke="#9ca3af" strokeWidth="1.5"/>
+                    <rect x="138" y="322" width="124" height="22" rx="6" fill="#d1d5db" stroke="#9ca3af" strokeWidth="1.5"/>
+                    <text x="200" y="10"  textAnchor="middle" fontSize="11" fill="#9ca3af" fontFamily="system-ui,sans-serif">FRENTE</text>
+                    <text x="200" y="355" textAnchor="middle" fontSize="11" fill="#9ca3af" fontFamily="system-ui,sans-serif">TRASERO</text>
+                    {ZONAS_DANIO_MAP.map(z => {
+                      const danio = getDanioZona(z.id);
+                      const sel = zonaSeleccionada === z.id;
+                      return (
+                        <circle key={z.id} cx={z.cx} cy={z.cy} r={18}
+                          fill={danio ? TIPO_DANIO_COLOR[danio.tipo_danio] : sel ? "#3b82f6" : "rgba(255,255,255,0.9)"}
+                          stroke={danio ? TIPO_DANIO_COLOR[danio.tipo_danio] : sel ? "#1d4ed8" : "#94a3b8"}
+                          strokeWidth={2}
+                          onClick={() => clickZona(z.id)}
+                          style={{ cursor: "pointer" }}
+                        />
+                      );
+                    })}
+                  </svg>
+                </div>
+
+                {/* Leyenda + zonas marcadas */}
+                <div style={{ flex: 1, minWidth: 140 }}>
+                  <p style={{ fontSize: 12, fontWeight: 600, color: MUTED, marginBottom: 10 }}>Leyenda:</p>
+                  {TIPO_DANIO_LIST.map(t => (
+                    <div key={t} style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 7 }}>
+                      <div style={{ width: 13, height: 13, borderRadius: "50%", background: TIPO_DANIO_COLOR[t], flexShrink: 0 }} />
+                      <span style={{ fontSize: 12, color: TEXT }}>{TIPO_DANIO_LABEL[t]}</span>
+                    </div>
                   ))}
+
+                  {zonesDanio.length > 0 && (
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: `1px solid ${BORDER}` }}>
+                      <p style={{ fontSize: 11, fontWeight: 700, color: MUTED, marginBottom: 8, textTransform: "uppercase" }}>Zonas marcadas:</p>
+                      {zonesDanio.map(z => (
+                        <div key={z.zona_id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
+                          <div style={{ width: 10, height: 10, borderRadius: "50%", background: TIPO_DANIO_COLOR[z.tipo_danio], flexShrink: 0 }} />
+                          <span style={{ fontSize: 12, color: TEXT, flex: 1 }}>{z.label}: <strong>{TIPO_DANIO_LABEL[z.tipo_danio]}</strong></span>
+                          <button onClick={() => setZonesDanio(prev => prev.filter(d => d.zona_id !== z.zona_id))}
+                            style={{ background: "none", border: "none", cursor: "pointer", color: RED, fontSize: 16, lineHeight: 1, padding: "0 4px" }}>×</button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
+            </div>
 
-              {/* Checklist */}
-              <div style={{ marginBottom: 22 }}>
-                <label style={sLabel}>Checklist de accesorios</label>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                  {CHECKLIST_ITEMS.map(([key, lbl]) => (
-                    <label
-                      key={key}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: 10,
-                        padding: "10px 14px",
-                        borderRadius: 10,
-                        background: checklist[key] ? "#0a2e0a" : BG,
-                        border: `1px solid ${checklist[key] ? GREEN : BORDER}`,
-                        cursor: "pointer",
-                      }}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checklist[key]}
-                        onChange={e => setChecklist(prev => ({ ...prev, [key]: e.target.checked }))}
-                        style={{ width: 18, height: 18, accentColor: GREEN, cursor: "pointer", flexShrink: 0 }}
-                      />
-                      <span style={{ fontSize: 13, color: checklist[key] ? GREEN : TEXT, fontWeight: checklist[key] ? 600 : 400 }}>
-                        {lbl}
-                      </span>
-                    </label>
-                  ))}
+            {/* ── Fotos ── */}
+            <div style={sCard}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 4 }}>📷 Fotos del Vehículo</p>
+              <p style={{ fontSize: 12, color: MUTED, marginBottom: 14 }}>Toca un ángulo para capturar o adjuntar la foto</p>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(96px, 1fr))", gap: 10 }}>
+                {FOTO_SLOTS.map(slot => (
+                  <label key={slot.key} style={{ cursor: "pointer", display: "block" }}>
+                    <div style={{
+                      border: `2px dashed ${fotosSlots[slot.key] ? GREEN : BORDER}`,
+                      borderRadius: 10, overflow: "hidden",
+                      aspectRatio: "1 / 1", display: "flex", flexDirection: "column",
+                      alignItems: "center", justifyContent: "center",
+                      background: fotosSlots[slot.key] ? "#f0fdf4" : "#f8fafc",
+                    }}>
+                      {fotosSlots[slot.key] ? (
+                        <img src={fotosSlots[slot.key]!} alt={slot.label}
+                          style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        <>
+                          <span style={{ fontSize: 22 }}>{slot.icon}</span>
+                          <span style={{ fontSize: 10, color: MUTED, marginTop: 4, textAlign: "center", padding: "0 4px" }}>{slot.label}</span>
+                        </>
+                      )}
+                    </div>
+                    <input type="file" accept="image/*" capture="environment"
+                      style={{ display: "none" }}
+                      onChange={e => handleFotoSlot(slot.key, e)} />
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Checklist ── */}
+            <div style={sCard}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 14 }}>✅ Checklist de Accesorios</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                {CHECKLIST_ITEMS.map(([key, lbl]) => (
+                  <label key={key} style={{
+                    display: "flex", alignItems: "center", gap: 10, padding: "10px 14px",
+                    borderRadius: 10, cursor: "pointer",
+                    background: checklist[key] ? "#f0fdf4" : "#f8fafc",
+                    border: `1px solid ${checklist[key] ? GREEN : BORDER}`,
+                  }}>
+                    <input type="checkbox" checked={checklist[key]}
+                      onChange={e => setChecklist(prev => ({ ...prev, [key]: e.target.checked }))}
+                      style={{ width: 18, height: 18, accentColor: GREEN, cursor: "pointer", flexShrink: 0 }} />
+                    <span style={{ fontSize: 13, color: checklist[key] ? "#16a34a" : TEXT, fontWeight: checklist[key] ? 600 : 400 }}>
+                      {lbl}
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {/* ── Estado del vehículo en texto ── */}
+            <div style={sCard}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: TEXT, marginBottom: 14 }}>📝 Estado del Vehículo</p>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "0 16px" }}>
+                <div>
+                  <label style={sLabel}>Rayones</label>
+                  <input style={sInput} placeholder="Ej: Rayón en puerta trasera izq." value={rayones}
+                    onChange={e => setRayones(e.target.value)} />
+                </div>
+                <div>
+                  <label style={sLabel}>Golpes / Abolladuras</label>
+                  <input style={sInput} placeholder="Ej: Golpe en parachoques" value={golpes}
+                    onChange={e => setGolpes(e.target.value)} />
+                </div>
+                <div>
+                  <label style={sLabel}>Vidrios</label>
+                  <input style={sInput} placeholder="Ej: Fisura en parabrisas" value={estadoVidrios}
+                    onChange={e => setEstadoVidrios(e.target.value)} />
+                </div>
+                <div>
+                  <label style={sLabel}>Llantas</label>
+                  <input style={sInput} placeholder="Ej: Llanta trasera derecha baja" value={estadoLlantas}
+                    onChange={e => setEstadoLlantas(e.target.value)} />
+                </div>
+                <div style={{ gridColumn: "1 / -1" }}>
+                  <label style={sLabel}>Pintura</label>
+                  <input style={sInput} placeholder="Ej: Decoloración en capó" value={estadoPintura}
+                    onChange={e => setEstadoPintura(e.target.value)} />
                 </div>
               </div>
+            </div>
 
-              {/* Observaciones */}
-              <div style={{ marginBottom: 22 }}>
-                <label style={sLabel}>Observaciones</label>
-                <textarea
-                  style={sTextarea}
-                  placeholder="Describe cualquier condición relevante del vehículo al momento de la recepción..."
-                  value={observaciones}
-                  onChange={e => setObservaciones(e.target.value)}
-                  rows={3}
-                />
+            {/* ── Observaciones y firma ── */}
+            <div style={sCard}>
+              <div style={{ marginBottom: 20 }}>
+                <label style={sLabel}>Observaciones generales</label>
+                <textarea style={sTextarea}
+                  placeholder="Observaciones adicionales sobre el estado del vehículo..."
+                  value={observaciones} onChange={e => setObservaciones(e.target.value)} rows={3} />
               </div>
 
-              {/* Firma digital */}
-              <div>
-                <label style={sLabel}>Firma del cliente (opcional)</label>
-                <p style={{ fontSize: 12, color: MUTED, marginBottom: 10 }}>
-                  El cliente confirma que la información anterior es correcta.
-                </p>
-                <div style={{
-                  border: `2px dashed ${firmada ? GREEN : BORDER}`,
-                  borderRadius: 12,
-                  overflow: "hidden",
-                  maxWidth: 480,
-                  background: "#060f1e",
-                }}>
-                  <canvas
-                    ref={canvasRef}
-                    width={480}
-                    height={130}
-                    style={{ display: "block", touchAction: "none", cursor: "crosshair", width: "100%", maxWidth: 480 }}
-                    onMouseDown={startDraw}
-                    onMouseMove={draw}
-                    onMouseUp={stopDraw}
-                    onMouseLeave={stopDraw}
-                    onTouchStart={startDraw}
-                    onTouchMove={draw}
-                    onTouchEnd={stopDraw}
-                  />
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
-                  <button onClick={limpiarFirma} style={{ ...sBtnSecondary, padding: "8px 16px", fontSize: 13 }}>
-                    Limpiar firma
-                  </button>
-                  {firmada
-                    ? <span style={{ fontSize: 13, color: GREEN, fontWeight: 700 }}>Firma capturada</span>
-                    : <span style={{ fontSize: 12, color: MUTED }}>Firma con el dedo o el ratón</span>
-                  }
-                </div>
+              <label style={sLabel}>Firma del cliente (opcional)</label>
+              <p style={{ fontSize: 12, color: MUTED, marginBottom: 10 }}>
+                El cliente confirma que la información es correcta.
+              </p>
+              <div style={{ border: `2px dashed ${firmada ? GREEN : BORDER}`, borderRadius: 12, overflow: "hidden", maxWidth: 480, background: "#f8fafc" }}>
+                <canvas ref={canvasRef} width={480} height={130}
+                  style={{ display: "block", touchAction: "none", cursor: "crosshair", width: "100%", maxWidth: 480 }}
+                  onMouseDown={startDraw} onMouseMove={draw} onMouseUp={stopDraw} onMouseLeave={stopDraw}
+                  onTouchStart={startDraw} onTouchMove={draw} onTouchEnd={stopDraw} />
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 10 }}>
+                <button onClick={limpiarFirma} style={{ ...sBtnSecondary, padding: "8px 16px", fontSize: 13 }}>
+                  Limpiar firma
+                </button>
+                {firmada
+                  ? <span style={{ fontSize: 13, color: GREEN, fontWeight: 700 }}>✓ Firma capturada</span>
+                  : <span style={{ fontSize: 12, color: MUTED }}>Firma con el dedo o el ratón</span>
+                }
               </div>
             </div>
 
@@ -1063,6 +1218,39 @@ export default function RecepcionPage() {
               <button onClick={retroceder} style={sBtnSecondary}>← Atrás</button>
               <button onClick={avanzar} style={sBtnPrimary}>Siguiente →</button>
             </div>
+
+            {/* ── Modal tipo de daño ── */}
+            {zonaSeleccionada && (
+              <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
+                <div style={{ background: "#fff", borderRadius: 16, padding: 24, maxWidth: 340, width: "100%", boxShadow: "0 20px 60px rgba(0,0,0,0.2)" }}>
+                  <p style={{ fontWeight: 700, fontSize: 15, color: "#111", marginBottom: 4 }}>
+                    {ZONAS_DANIO_MAP.find(z => z.id === zonaSeleccionada)?.label}
+                  </p>
+                  <p style={{ fontSize: 13, color: MUTED, marginBottom: 16 }}>¿Qué tipo de daño hay en esta zona?</p>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {TIPO_DANIO_LIST.map(tipo => (
+                      <button key={tipo} onClick={() => seleccionarTipo(tipo)} style={{
+                        padding: "12px 16px", borderRadius: 10, textAlign: "left",
+                        border: `2px solid ${TIPO_DANIO_COLOR[tipo]}`,
+                        background: `${TIPO_DANIO_COLOR[tipo]}18`,
+                        color: TIPO_DANIO_COLOR[tipo], fontWeight: 600, fontSize: 14,
+                        cursor: "pointer", display: "flex", alignItems: "center", gap: 10,
+                      }}>
+                        <div style={{ width: 12, height: 12, borderRadius: "50%", background: TIPO_DANIO_COLOR[tipo], flexShrink: 0 }} />
+                        {TIPO_DANIO_LABEL[tipo]}
+                      </button>
+                    ))}
+                  </div>
+                  <button onClick={() => setZonaSeleccionada(null)} style={{
+                    marginTop: 12, width: "100%", padding: "10px",
+                    background: "none", border: `1px solid ${BORDER}`,
+                    borderRadius: 10, color: MUTED, cursor: "pointer", fontSize: 14,
+                  }}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
