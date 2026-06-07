@@ -80,6 +80,20 @@ interface Inspeccion {
   llanta_repuesto_ok?: boolean;
   documentos_ok?: boolean;
   herramientas_ok?: boolean;
+  rayones?: string;
+  golpes?: string;
+  estado_vidrios?: string;
+  estado_llantas?: string;
+  estado_pintura?: string;
+}
+
+interface Orden {
+  id: number;
+  descripcion?: string;
+  motivo_entrada?: string;
+  numero_orden?: string;
+  prioridad?: string;
+  created_at?: string;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -120,6 +134,7 @@ export default function CotizacionPage() {
   const [cliente,     setCliente]     = useState<Cliente | null>(null);
   const [vehiculo,    setVehiculo]    = useState<Vehiculo | null>(null);
   const [inspeccion,  setInspeccion]  = useState<Inspeccion | null>(null);
+  const [orden,       setOrden]       = useState<Orden | null>(null);
   const [loading,     setLoading]     = useState(true);
   const [error,       setError]       = useState<string | null>(null);
 
@@ -142,6 +157,7 @@ export default function CotizacionPage() {
       setCliente(data.cliente);
       setVehiculo(data.vehiculo);
       setInspeccion(data.inspeccion);
+      setOrden(data.orden || null);
       if (data.cotizacion?.aprobado) setAprobado(true);
     } catch (e: any) {
       setError(e.message);
@@ -195,7 +211,35 @@ export default function CotizacionPage() {
     setAprobando(false);
   };
 
-  const imprimir = () => window.print();
+  const imprimir = () => {
+    const doc = document.getElementById("cotizacion-doc");
+    if (!doc) { window.print(); return; }
+    const iframe = document.createElement("iframe");
+    iframe.style.cssText = "position:fixed;right:0;bottom:0;width:0;height:0;border:none;";
+    document.body.appendChild(iframe);
+    const iDoc = iframe.contentWindow?.document;
+    if (!iDoc) { document.body.removeChild(iframe); window.print(); return; }
+    iDoc.open();
+    iDoc.write(`<!DOCTYPE html><html><head><meta charset="utf-8">
+<title>Cotización ${cotizacion ? numCot(cotizacion.id) : ""}</title>
+<style>
+  body{margin:16px;font-family:system-ui,-apple-system,sans-serif;color:#111827;background:#fff;}
+  *{-webkit-print-color-adjust:exact!important;color-adjust:exact!important;print-color-adjust:exact!important;box-sizing:border-box;}
+  img{max-width:100%;}
+  table{border-collapse:collapse;width:100%;}
+  .no-print{display:none!important;}
+  @media print{
+    body{margin:0;}
+    @page{margin:14mm 12mm;size:A4;}
+    *{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;}
+  }
+</style></head><body>${doc.outerHTML}</body></html>`);
+    iDoc.close();
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(() => document.body.removeChild(iframe), 2000);
+    }, 400);
+  };
 
   // ── Render de carga / error ───────────────────────────────────────────────
   if (loading) return (
@@ -257,23 +301,28 @@ export default function CotizacionPage() {
         {/* Encabezado del taller */}
         <div style={{
           background: "linear-gradient(135deg, #0f172a, #1e3a5f)",
-          color: "#fff", padding: "28px 32px",
+          color: "#fff", padding: "20px 28px",
           display: "flex", alignItems: "center", justifyContent: "space-between",
+          gap: 16,
         }}>
-          <div>
-            <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: 1 }}>🔧 SÓLIDO AUTO SERVICIO</div>
-            <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
-              Taller Automotriz · Reparación &amp; Mantenimiento
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Sólido Auto Servicio"
+              style={{ height: 64, width: "auto", objectFit: "contain", borderRadius: 8, background: "#fff", padding: 4 }} />
+            <div>
+              <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 0.5, color: "#fff" }}>SÓLIDO AUTO SERVICIO</div>
+              <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 3 }}>Taller Automotriz · Reparación &amp; Mantenimiento</div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>RNC: 1-31-12345-6 · Tel: 809-712-2027</div>
             </div>
           </div>
-          <div style={{ textAlign: "right" }}>
-            <div style={{ fontSize: 18, fontWeight: 800, color: "#60a5fa" }}>{numCot(cotizacion.id)}</div>
+          <div style={{ textAlign: "right", flexShrink: 0 }}>
+            <div style={{ fontSize: 20, fontWeight: 800, color: "#60a5fa" }}>{numCot(cotizacion.id)}</div>
             <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 4 }}>
               Fecha: {fmtFecha(cotizacion.created_at || new Date().toISOString())}
             </div>
             {cotizacion.tiempo_estimado && (
               <div style={{ fontSize: 12, color: "#94a3b8" }}>
-                Tiempo estimado: <strong style={{ color: "#fbbf24" }}>{cotizacion.tiempo_estimado}</strong>
+                Tiempo est.: <strong style={{ color: "#fbbf24" }}>{cotizacion.tiempo_estimado}</strong>
               </div>
             )}
             {aprobado && (
@@ -286,6 +335,34 @@ export default function CotizacionPage() {
         </div>
 
         <div style={{ padding: "24px 32px", display: "flex", flexDirection: "column", gap: 20 }}>
+
+          {/* Motivo de entrada — por qué trajo el vehículo */}
+          {(orden?.motivo_entrada || orden?.descripcion) && (
+            <div style={{
+              background: "#eff6ff", border: "1px solid #bfdbfe",
+              borderRadius: 10, padding: "14px 18px",
+            }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: "#1d4ed8", marginBottom: 6, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                📋 Motivo de Entrada — Por qué el cliente trajo el vehículo
+              </div>
+              <div style={{ fontSize: 14, color: "#1e3a5f", lineHeight: 1.6, whiteSpace: "pre-wrap" }}>
+                {orden.motivo_entrada || orden.descripcion}
+              </div>
+              {orden.numero_orden && (
+                <div style={{ marginTop: 6, fontSize: 11, color: "#6b7280" }}>
+                  Orden: <strong>{orden.numero_orden}</strong>
+                  {orden.prioridad && orden.prioridad !== "NORMAL" && (
+                    <span style={{
+                      marginLeft: 8, padding: "1px 8px", borderRadius: 10, fontSize: 10, fontWeight: 700,
+                      background: orden.prioridad === "URGENTE" ? "#fef2f2" : "#fff7ed",
+                      color: orden.prioridad === "URGENTE" ? "#dc2626" : "#c2410c",
+                      border: orden.prioridad === "URGENTE" ? "1px solid #fca5a5" : "1px solid #fed7aa",
+                    }}>⚠️ {orden.prioridad}</span>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Cliente + Vehículo */}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
@@ -361,6 +438,24 @@ export default function CotizacionPage() {
               {inspeccion.observaciones && (
                 <div style={{ marginTop: 10, background: "#fff7ed", borderRadius: 8, padding: "10px 14px", fontSize: 13, color: "#92400e" }}>
                   <strong>Obs. recepción:</strong> {inspeccion.observaciones}
+                </div>
+              )}
+
+              {/* Campos de condición visual */}
+              {(inspeccion.rayones || inspeccion.golpes || inspeccion.estado_vidrios || inspeccion.estado_llantas || inspeccion.estado_pintura) && (
+                <div style={{ marginTop: 12, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {[
+                    { label: "Rayones", value: inspeccion.rayones },
+                    { label: "Golpes / Abolladuras", value: inspeccion.golpes },
+                    { label: "Estado Vidrios", value: inspeccion.estado_vidrios },
+                    { label: "Estado Llantas", value: inspeccion.estado_llantas },
+                    { label: "Estado Pintura", value: inspeccion.estado_pintura },
+                  ].filter(f => f.value).map(f => (
+                    <div key={f.label} style={{ background: "#f8fafc", borderRadius: 8, padding: "8px 12px" }}>
+                      <div style={{ fontSize: 10, color: "#6b7280", fontWeight: 700, marginBottom: 3, textTransform: "uppercase" }}>{f.label}</div>
+                      <div style={{ fontSize: 13, color: "#374151" }}>{f.value}</div>
+                    </div>
+                  ))}
                 </div>
               )}
 

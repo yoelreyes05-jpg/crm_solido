@@ -1386,7 +1386,7 @@ app.get("/cotizaciones/:id", async (req, res) => {
         : Promise.resolve({ data: null }),
     ]);
 
-    let cliente = null, vehiculo = null, inspeccion = null;
+    let cliente = null, vehiculo = null, inspeccion = null, orden = null;
     if (diag) {
       const [{ data: cli }, { data: veh }] = await Promise.all([
         supabase.from("clientes").select("*").eq("id", diag.cliente_id).single(),
@@ -1396,12 +1396,16 @@ app.get("/cotizaciones/:id", async (req, res) => {
       vehiculo = veh;
 
       if (diag.orden_id) {
-        const { data: ins } = await supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", diag.orden_id).single();
+        const [{ data: ins }, { data: ord }] = await Promise.all([
+          supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", diag.orden_id).single(),
+          supabase.from("ordenes").select("id, descripcion, motivo_entrada, numero_orden, created_at, prioridad").eq("id", diag.orden_id).single(),
+        ]);
         inspeccion = ins || null;
+        orden      = ord || null;
       }
     }
 
-    res.json({ cotizacion: cot, diagnostico: diag, cliente, vehiculo, inspeccion });
+    res.json({ cotizacion: cot, diagnostico: diag, cliente, vehiculo, inspeccion, orden });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
