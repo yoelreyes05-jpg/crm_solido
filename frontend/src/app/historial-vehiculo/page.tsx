@@ -187,11 +187,22 @@ export default function HistorialVehiculoPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtrado.map((h: any) => (
-                    <tr key={h.id} style={{ borderTop: "1px solid #f0f0f0", cursor: "pointer" }}
-                      onMouseEnter={e => (e.currentTarget.style.background = "#fafbff")}
-                      onMouseLeave={e => (e.currentTarget.style.background = "")}>
-                      <td style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#6366f1" }}>{h.numero_orden || "—"}</td>
+                  {filtrado.map((h: any) => {
+                    const activa = !!h._activa;
+                    const estadoColor = ESTADO_COLOR[h.estado] || "#6b7280";
+                    return (
+                    <tr key={h.id} style={{ borderTop: "1px solid #f0f0f0", cursor: "pointer", background: activa ? "#fffbeb" : "" }}
+                      onMouseEnter={e => (e.currentTarget.style.background = activa ? "#fef9c3" : "#fafbff")}
+                      onMouseLeave={e => (e.currentTarget.style.background = activa ? "#fffbeb" : "")}>
+                      <td style={{ padding: "12px 14px", fontWeight: 700, fontSize: 13, color: "#6366f1" }}>
+                        {h.numero_orden || "—"}
+                        {activa && (
+                          <span style={{ marginLeft: 6, fontSize: 10, background: estadoColor + "22", color: estadoColor,
+                            border: `1px solid ${estadoColor}55`, borderRadius: 20, padding: "1px 7px", fontWeight: 700, verticalAlign: "middle" }}>
+                            {h.estado}
+                          </span>
+                        )}
+                      </td>
                       <td style={{ padding: "12px 14px", fontWeight: 800, fontSize: 14, color: "#3b82f6", fontFamily: "monospace" }}>{h.placa}</td>
                       <td style={{ padding: "12px 14px", fontSize: 13 }}>{h.marca} {h.modelo} {h.ano && `(${h.ano})`}</td>
                       <td style={{ padding: "12px 14px", fontSize: 13, fontWeight: 600 }}>{h.cliente_nombre || "—"}</td>
@@ -203,12 +214,13 @@ export default function HistorialVehiculoPage() {
                       <td style={{ padding: "12px 14px", fontSize: 12, color: "#888", whiteSpace: "nowrap" }}>{fmtFecha(h.fecha_servicio)}</td>
                       <td style={{ padding: "12px 14px" }}>
                         <button onClick={() => setDetalle(h)}
-                          style={{ padding: "6px 16px", background: "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                          style={{ padding: "6px 16px", background: activa ? "#f59e0b" : "#6366f1", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
                           Ver →
                         </button>
                       </td>
                     </tr>
-                  ))}
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
