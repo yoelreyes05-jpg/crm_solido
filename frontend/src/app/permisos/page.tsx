@@ -24,12 +24,12 @@ const ROL_META: Record<string, { label: string; icon: string; color: string; bg:
   cafeteria:  { label: "Cafetería",  icon: "☕", color: "#9f3a20", bg: "#fff7ed", border: "#fb923c", desc: "Módulo de cafetería" },
 };
 
-const ACCION_META: { key: Accion; label: string; icon: string; activeColor: string; activeBg: string }[] = [
-  { key: "ver",      label: "Ver",      icon: "👁",  activeColor: "#1d4ed8", activeBg: "#dbeafe" },
-  { key: "crear",    label: "Crear",    icon: "➕",  activeColor: "#065f46", activeBg: "#d1fae5" },
-  { key: "editar",   label: "Editar",   icon: "✏️", activeColor: "#92400e", activeBg: "#fef3c7" },
-  { key: "aprobar",  label: "Aprobar",  icon: "✅",  activeColor: "#5b21b6", activeBg: "#ede9fe" },
-  { key: "eliminar", label: "Eliminar", icon: "🗑",  activeColor: "#991b1b", activeBg: "#fee2e2" },
+const ACCION_META: { key: Accion; label: string; trackOn: string; thumbShadow: string }[] = [
+  { key: "ver",      label: "Ver",      trackOn: "#3b82f6", thumbShadow: "#93c5fd" },
+  { key: "crear",    label: "Crear",    trackOn: "#10b981", thumbShadow: "#6ee7b7" },
+  { key: "editar",   label: "Editar",   trackOn: "#f59e0b", thumbShadow: "#fcd34d" },
+  { key: "aprobar",  label: "Aprobar",  trackOn: "#8b5cf6", thumbShadow: "#c4b5fd" },
+  { key: "eliminar", label: "Eliminar", trackOn: "#ef4444", thumbShadow: "#fca5a5" },
 ];
 
 const GRUPO_META: Record<string, { color: string; bg: string; border: string; icon: string }> = {
@@ -68,52 +68,91 @@ function CeldaPermiso({ tiene }: { tiene: boolean }) {
   );
 }
 
+// ── Toggle switch component ───────────────────────────────────────────────────
+function Toggle({
+  checked, onChange, trackOn, thumbShadow,
+}: {
+  checked: boolean; onChange: () => void; trackOn: string; thumbShadow: string;
+}) {
+  return (
+    <button
+      role="switch"
+      aria-checked={checked}
+      onClick={onChange}
+      style={{
+        width: 36,
+        height: 20,
+        borderRadius: 10,
+        background: checked ? trackOn : "#e2e8f0",
+        border: "none",
+        padding: 0,
+        cursor: "pointer",
+        position: "relative",
+        transition: "background 0.2s",
+        outline: "none",
+        flexShrink: 0,
+      }}
+    >
+      <span style={{
+        position: "absolute",
+        top: 3,
+        left: checked ? 19 : 3,
+        width: 14,
+        height: 14,
+        borderRadius: "50%",
+        background: "#fff",
+        boxShadow: checked ? `0 1px 4px ${thumbShadow}` : "0 1px 3px rgba(0,0,0,0.18)",
+        transition: "left 0.18s",
+        display: "block",
+      }} />
+    </button>
+  );
+}
+
 function FilaModulo({
   moduloKey, label, descripcion, permisos, onChange,
 }: {
   moduloKey: string; label: string; descripcion: string;
   permisos: PermisoModulo; onChange: (key: Accion, val: boolean) => void;
 }) {
-  const todoActivo = Object.values(permisos).every(Boolean);
+  const activos = Object.values(permisos).filter(Boolean).length;
+  const todoActivo = activos === 5;
+  const ningunoActivo = activos === 0;
 
   return (
-    <tr className="border-b border-gray-50 hover:bg-slate-50/60 transition-colors">
-      <td className="py-3 pl-5 pr-3 w-52">
+    <tr className="border-b border-gray-50 hover:bg-indigo-50/20 transition-colors group">
+      <td className="py-3 pl-5 pr-4 w-52">
         <div className="font-semibold text-gray-800 text-sm leading-tight">{label}</div>
         <div className="text-[11px] text-gray-400 mt-0.5 leading-snug">{descripcion}</div>
       </td>
-      {ACCION_META.map(({ key, label: aLabel, icon, activeColor, activeBg }) => (
-        <td key={key} className="py-3 px-2 text-center">
-          <label className="inline-flex flex-col items-center gap-1 cursor-pointer">
-            <div
-              onClick={() => onChange(key, !permisos[key])}
-              style={permisos[key]
-                ? { background: activeBg, border: `2px solid ${activeColor}`, color: activeColor }
-                : { background: "#f1f5f9", border: "2px solid #e2e8f0", color: "#94a3b8" }
-              }
-              className="w-9 h-9 rounded-xl flex items-center justify-center text-base transition-all duration-150 hover:scale-105 select-none cursor-pointer"
-            >
-              {icon}
-            </div>
+      {ACCION_META.map(({ key, label: aLabel, trackOn, thumbShadow }) => (
+        <td key={key} className="py-3 px-3 text-center">
+          <div className="flex flex-col items-center gap-1.5">
+            <Toggle
+              checked={permisos[key]}
+              onChange={() => onChange(key, !permisos[key])}
+              trackOn={trackOn}
+              thumbShadow={thumbShadow}
+            />
             <span
-              style={permisos[key] ? { color: activeColor, background: activeBg } : { color: "#9ca3af", background: "#f1f5f9" }}
-              className="text-[10px] font-semibold px-2 py-0.5 rounded-full"
+              className="text-[10px] font-semibold"
+              style={{ color: permisos[key] ? trackOn : "#cbd5e1" }}
             >
               {aLabel}
             </span>
-          </label>
+          </div>
         </td>
       ))}
-      <td className="py-3 pr-4 text-center">
+      <td className="py-3 pr-5 text-center">
         <button
-          onClick={() => ACCION_META.forEach(({ key }) => onChange(key, !todoActivo))}
-          className={`text-[11px] px-2.5 py-1 rounded-lg font-semibold border transition-all ${
+          onClick={() => ACCION_META.forEach(({ key }) => onChange(key, ningunoActivo ? true : todoActivo ? false : true))}
+          className={`text-[11px] px-3 py-1.5 rounded-lg font-semibold border transition-all ${
             todoActivo
               ? "border-red-200 text-red-500 bg-red-50 hover:bg-red-100"
               : "border-indigo-200 text-indigo-600 bg-indigo-50 hover:bg-indigo-100"
           }`}
         >
-          {todoActivo ? "Quitar" : "Todo"}
+          {todoActivo ? "Quitar todo" : "Todo"}
         </button>
       </td>
     </tr>
@@ -300,16 +339,16 @@ export default function PermisosPage() {
         {/* Tarjetas de roles */}
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-7">
           {/* Gerente — solo lectura */}
-          <div className="rounded-2xl p-4 border-2 cursor-default"
-            style={{ background: ROL_META.gerente.bg, borderColor: ROL_META.gerente.border }}>
-            <div className="flex items-center gap-2 mb-2">
-              <span className="text-xl">{ROL_META.gerente.icon}</span>
+          <div className="rounded-2xl p-4 cursor-default"
+            style={{ background: ROL_META.gerente.bg, border: `1.5px solid ${ROL_META.gerente.border}` }}>
+            <div className="flex items-center gap-2 mb-1.5">
+              <span className="text-lg">{ROL_META.gerente.icon}</span>
               <span className="font-bold text-sm" style={{ color: ROL_META.gerente.color }}>Gerente</span>
             </div>
-            <div className="text-[11px] text-gray-500 mb-2 leading-tight">{ROL_META.gerente.desc}</div>
+            <div className="text-[11px] text-gray-500 mb-3 leading-tight">{ROL_META.gerente.desc}</div>
             <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-              style={{ background: "#fde68a", color: ROL_META.gerente.color }}>
-              Acceso total
+              style={{ background: ROL_META.gerente.border + "60", color: ROL_META.gerente.color }}>
+              Acceso total ∞
             </span>
           </div>
 
@@ -323,32 +362,36 @@ export default function PermisosPage() {
               <button
                 key={rol}
                 onClick={() => { setRolActivo(rol); setVistaActiva("editor"); }}
-                className="relative rounded-2xl p-4 border-2 transition-all text-left hover:shadow-md hover:-translate-y-0.5"
+                className="relative rounded-2xl p-4 text-left transition-all duration-200 hover:-translate-y-0.5"
                 style={{
                   background: isActive ? meta.bg : "#ffffff",
-                  borderColor: isActive ? meta.border : "#e5e7eb",
-                  boxShadow: isActive ? `0 4px 20px ${meta.border}80` : undefined,
+                  border: isActive ? `2px solid ${meta.border}` : "1.5px solid #e5e7eb",
+                  boxShadow: isActive ? `0 6px 24px -4px ${meta.border}60` : "0 1px 4px rgba(0,0,0,0.04)",
                 }}
               >
                 {isActive && (
-                  <div className="absolute top-2.5 right-2.5 w-2.5 h-2.5 rounded-full"
-                    style={{ background: meta.border }} />
+                  <span className="absolute top-2.5 right-2.5 text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+                    style={{ background: meta.border + "30", color: meta.color }}>
+                    activo
+                  </span>
                 )}
-                <div className="flex items-center gap-2 mb-2">
-                  <span className="text-xl">{meta.icon}</span>
+                <div className="flex items-center gap-2 mb-1.5">
+                  <span className="text-lg">{meta.icon}</span>
                   <span className="font-bold text-sm" style={{ color: isActive ? meta.color : "#374151" }}>
                     {meta.label}
                   </span>
                 </div>
-                <div className="text-[11px] text-gray-400 mb-2.5 leading-tight">{meta.desc}</div>
-                <div className="flex items-center gap-2">
-                  <div className="flex-1 h-1.5 bg-gray-100 rounded-full overflow-hidden">
+                <div className="text-[11px] text-gray-400 mb-3 leading-tight">{meta.desc}</div>
+                <div className="flex items-center gap-2 mb-1">
+                  <div className="flex-1 h-1.5 rounded-full overflow-hidden" style={{ background: isActive ? meta.border + "25" : "#f1f5f9" }}>
                     <div className="h-full rounded-full transition-all duration-500"
                       style={{ width: `${pct}%`, background: meta.border }} />
                   </div>
-                  <span className="text-[10px] font-bold text-gray-400">{pct}%</span>
+                  <span className="text-[10px] font-bold" style={{ color: isActive ? meta.color : "#9ca3af" }}>{pct}%</span>
                 </div>
-                <div className="text-[10px] text-gray-400 mt-1">{activos}/{total} permisos</div>
+                <div className="text-[10px]" style={{ color: isActive ? meta.color + "cc" : "#9ca3af" }}>
+                  {activos} de {total} permisos
+                </div>
               </button>
             );
           })}
@@ -378,22 +421,36 @@ export default function PermisosPage() {
         {vistaActiva === "editor" && (
           <>
             {/* Indicador rol activo */}
-            <div className="flex items-center justify-between mb-5 px-4 py-3 rounded-2xl border"
-              style={{ background: ROL_META[rolActivo]?.bg, borderColor: ROL_META[rolActivo]?.border }}>
+            <div className="flex flex-wrap items-center justify-between mb-5 px-5 py-4 rounded-2xl gap-3"
+              style={{ background: ROL_META[rolActivo]?.bg, border: `1.5px solid ${ROL_META[rolActivo]?.border}` }}>
               <div className="flex items-center gap-3">
-                <span className="text-2xl">{ROL_META[rolActivo]?.icon}</span>
+                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
+                  style={{ background: ROL_META[rolActivo]?.border + "40" }}>
+                  {ROL_META[rolActivo]?.icon}
+                </div>
                 <div>
-                  <div className="font-bold text-gray-800">
-                    Editando: <span style={{ color: ROL_META[rolActivo]?.color }}>{ROL_META[rolActivo]?.label}</span>
+                  <div className="font-bold text-gray-800 text-sm">
+                    Editando permisos de: <span style={{ color: ROL_META[rolActivo]?.color }}>{ROL_META[rolActivo]?.label}</span>
                   </div>
-                  <div className="text-xs text-gray-500">{ROL_META[rolActivo]?.desc}</div>
+                  <div className="text-xs text-gray-500 mt-0.5">{ROL_META[rolActivo]?.desc}</div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-2xl font-black" style={{ color: ROL_META[rolActivo]?.color }}>
-                  {porcentaje}%
+              {/* Stats por acción */}
+              <div className="flex items-center gap-3">
+                {ACCION_META.map(({ key, label: aLabel, trackOn }) => {
+                  const count = MODULOS_SISTEMA.filter(m => permisosRol[m.key]?.[key]).length;
+                  return (
+                    <div key={key} className="flex flex-col items-center">
+                      <div className="text-base font-black" style={{ color: count > 0 ? trackOn : "#d1d5db" }}>{count}</div>
+                      <div className="text-[9px] font-semibold uppercase tracking-wide" style={{ color: count > 0 ? trackOn + "cc" : "#d1d5db" }}>{aLabel}</div>
+                    </div>
+                  );
+                })}
+                <div className="w-px h-8 bg-gray-200 mx-1" />
+                <div className="flex flex-col items-center">
+                  <div className="text-base font-black" style={{ color: ROL_META[rolActivo]?.color }}>{porcentaje}%</div>
+                  <div className="text-[9px] font-semibold uppercase tracking-wide text-gray-400">Total</div>
                 </div>
-                <div className="text-xs text-gray-400">{activosRol}/{totalRol} activos</div>
               </div>
             </div>
 
@@ -432,17 +489,17 @@ export default function PermisosPage() {
                     <div className="overflow-x-auto">
                       <table className="w-full min-w-[700px]">
                         <thead>
-                          <tr className="border-b border-gray-50">
+                          <tr className="border-b border-gray-100">
                             <th className="py-2.5 pl-5 pr-3 text-left text-[11px] font-bold text-gray-400 uppercase tracking-wider w-52">
                               Módulo
                             </th>
-                            {ACCION_META.map(({ key, label, icon }) => (
-                              <th key={key} className="py-2.5 px-2 text-center text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                                {icon} {label}
+                            {ACCION_META.map(({ key, label, trackOn }) => (
+                              <th key={key} className="py-2.5 px-3 text-center text-[11px] font-bold uppercase tracking-wider" style={{ color: trackOn }}>
+                                {label}
                               </th>
                             ))}
-                            <th className="py-2.5 pr-4 text-center text-[11px] font-bold text-gray-400 uppercase tracking-wider">
-                              Rápido
+                            <th className="py-2.5 pr-5 text-center text-[11px] font-bold text-gray-400 uppercase tracking-wider">
+                              —
                             </th>
                           </tr>
                         </thead>
