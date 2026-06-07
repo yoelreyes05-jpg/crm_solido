@@ -2581,10 +2581,13 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       ? await safe(() => supabase.from("cotizacion_items").select("*").eq("cotizacion_id", cotizacion.id).order("id"))
       : null;
 
-    // 6. Factura + items
-    const factura = ordenId
+    // 6. Factura + items — busca por orden_id primero, luego fallback por vehiculo_id
+    let factura = ordenId
       ? await safe(() => supabase.from("facturas").select("*").eq("orden_id", ordenId).order("id", { ascending: false }).limit(1).maybeSingle())
       : null;
+    if (!factura && hist.vehiculo_id) {
+      factura = await safe(() => supabase.from("facturas").select("*").eq("vehiculo_id", hist.vehiculo_id).order("id", { ascending: false }).limit(1).maybeSingle());
+    }
 
     const factura_items = factura?.id
       ? await safe(() => supabase.from("factura_items").select("*").eq("factura_id", factura.id).order("id"))
@@ -2653,7 +2656,13 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
         ? safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diag.id).maybeSingle())
         : Promise.resolve(null),
       safe(() => supabase.from("facturas").select("*").eq("orden_id", ordenId)
-        .order("id", { ascending: false }).limit(1).maybeSingle()),
+        .order("id", { ascending: false }).limit(1).maybeSingle()).then(async (f) => {
+        // Fallback: busca por vehiculo_id si no hay factura por orden_id (registros sin orden_id)
+        if (!f && orden.vehiculo_id) {
+          return await safe(() => supabase.from("facturas").select("*").eq("vehiculo_id", orden.vehiculo_id).order("id", { ascending: false }).limit(1).maybeSingle());
+        }
+        return f;
+      }),
       safe(() => supabase.from("orden_trabajo_log").select("*").eq("orden_id", ordenId).order("created_at")),
       orden.vehiculo_id
         ? safe(() => supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle())
@@ -4623,12 +4632,20 @@ app.post("/cotizaciones/:id/convertir", async (req, res) => {
       await supabase.from("ncf_secuencias").update({ actual: siguienteNum }).eq("tipo", cot.ncf_tipo);
     }
 
+    // Resolver orden_id desde el diagnóstico de la cotización
+    let orden_id_factura = null;
+    if (cot.diagnostico_id) {
+      const { data: diagForFac } = await supabase.from("diagnosticos").select("orden_id").eq("id", cot.diagnostico_id).maybeSingle();
+      orden_id_factura = diagForFac?.orden_id || null;
+    }
+
     const { data: factura, error: fErr } = await supabase.from("facturas").insert([{
       cliente_id:     cot.cliente_id,
       cliente_nombre: cot.cliente_nombre,
       cliente_rnc:    cot.cliente_rnc,
       vehiculo_id:    cot.vehiculo_id,
       vehiculo_info:  cot.vehiculo_info,
+      orden_id:       orden_id_factura,
       ncf, ncf_tipo: cot.ncf_tipo,
       subtotal: cot.subtotal, itbis: cot.itbis, total: cot.total,
       metodo_pago, estado: "ACTIVA",
