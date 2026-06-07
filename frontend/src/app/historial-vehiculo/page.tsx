@@ -233,170 +233,178 @@ export default function HistorialVehiculoPage() {
 
 // ── Función de impresión del expediente ───────────────
 function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDetalle: string, trabajosItems: any[], descripcionTrabajo: string, resolvedDiag?: { fallasIdentificadas: string; inspeccionMecanica: string; inspeccionElectrica: string; inspeccionElectronica: string; codigosFalla: string; observacionesDiag: string; resultadoQC: string; observacionesQC: string; }) {
-  const fmtD  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" }) : "—";
-  const fmtDH = (v: any) => v ? new Date(v).toLocaleString("es-DO",    { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  const fmtD  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric" }) : "—";
+  const fmtDH = (v: any) => v ? new Date(v).toLocaleString("es-DO", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const fmt$  = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO", { minimumFractionDigits:2 })}`;
 
-  const cot: any   = h.cotizacion_data  && typeof h.cotizacion_data  === "object" ? h.cotizacion_data  : {};
-  const fac: any   = h.factura_data     && typeof h.factura_data     === "object" ? h.factura_data     : {};
-  const timeline: any[] = Array.isArray(h.timeline_data) ? h.timeline_data : [];
-  const fechas: any     = h.fechas_proceso && typeof h.fechas_proceso === "object" ? h.fechas_proceso : {};
-  const checklist: any  = h.checklist_qc && typeof h.checklist_qc === "object" ? h.checklist_qc : {};
-  const inspec: any     = detalleCompleto?.inspeccion || (h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null);
-  const facItems: any[] = Array.isArray(fac?.items) ? fac.items : [];
+  // Datos resueltos
+  const facLive: any   = detalleCompleto?.factura || null;
+  const cotLive: any   = detalleCompleto?.cotizacion || null;
+  const facItemsLive: any[] = Array.isArray(detalleCompleto?.factura_items) ? detalleCompleto.factura_items : [];
+  const cotSnap: any   = h.cotizacion_data && typeof h.cotizacion_data === "object" ? h.cotizacion_data : {};
+  const facSnap: any   = h.factura_data    && typeof h.factura_data    === "object" ? h.factura_data    : {};
+  const cot: any       = cotLive || cotSnap;
+  const fac: any       = facLive || facSnap;
+  const facItems: any[] = facItemsLive.length > 0 ? facItemsLive : (Array.isArray(fac?.items) ? fac.items : []);
+  const timeline: any[] = Array.isArray(detalleCompleto?.estado_historial) && detalleCompleto.estado_historial.length > 0
+    ? detalleCompleto.estado_historial : (Array.isArray(h.timeline_data) ? h.timeline_data : []);
+  const fechas: any    = detalleCompleto?.fechas_proceso || (h.fechas_proceso && typeof h.fechas_proceso === "object" ? h.fechas_proceso : {});
+  const checklist: any = h.checklist_qc && typeof h.checklist_qc === "object" ? h.checklist_qc : {};
+  const inspec: any    = detalleCompleto?.inspeccion || (h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null);
   const avancesSnap: any[] = Array.isArray(h.avances_data) ? h.avances_data : [];
-  const avances: any[]  = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0 ? detalleCompleto.avances : avancesSnap;
+  const avances: any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0 ? detalleCompleto.avances : avancesSnap;
 
   const QC_LBL: Record<string,string> = {
-    motor:"Motor OK",frenos:"Frenos OK",fluidos:"Sin fugas",luces:"Luces OK",
-    electrico:"Eléctrico OK",transmision:"Transmisión",suspension:"Suspensión",
-    ac:"A/C",limpieza:"Limpieza",prueba_ruta:"Prueba de ruta",trabajo_ok:"Trabajo al 100%",
+    motor:"Motor",frenos:"Frenos",fluidos:"Sin fugas",luces:"Luces",
+    electrico:"Eléctrico",transmision:"Transmisión",suspension:"Suspensión",
+    ac:"A/C",limpieza:"Limpieza",prueba_ruta:"Prueba ruta",trabajo_ok:"Trabajo 100%",
   };
 
   const logoUrl = typeof window !== "undefined" ? window.location.origin + "/logo.png" : "/logo.png";
 
-  const secTitulo = (icono: string, titulo: string) =>
-    `<div style="font-size:11px;font-weight:800;color:#6366f1;text-transform:uppercase;letter-spacing:1.2px;margin:18px 0 8px;padding:5px 10px;background:#f8f7ff;border-left:3px solid #6366f1;border-radius:4px">${icono} ${titulo}</div>`;
+  // Helpers compactos
+  const ST = (ico: string, t: string) =>
+    `<div style="font-size:9.5px;font-weight:800;color:#4f46e5;text-transform:uppercase;letter-spacing:1px;margin:10px 0 4px;padding:3px 8px;background:#f5f3ff;border-left:2px solid #6366f1;border-radius:3px">${ico} ${t}</div>`;
+  const FL = (l: string, v: any) => v
+    ? `<span style="color:#888;font-size:10px">${l}: </span><b style="font-size:10px;color:#222">${v}</b>  ` : "";
 
-  const fila = (label: string, valor: any) => valor
-    ? `<div style="display:flex;gap:10px;margin-bottom:5px;font-size:12px"><span style="color:#888;min-width:130px;flex-shrink:0">${label}:</span><span style="font-weight:600;color:#333">${valor}</span></div>`
-    : "";
-
-  // Sección trabajo solicitado
+  // ── TRABAJO SOLICITADO
   const secTrabSol = descripcionTrabajo
-    ? `${secTitulo("📝","Trabajo Solicitado")}<div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 14px;font-size:13px;color:#1e3a5f;white-space:pre-wrap;line-height:1.6">${descripcionTrabajo}</div>` : "";
+    ? `${ST("📝","Trabajo Solicitado")}<div style="background:#eff6ff;border-radius:5px;padding:5px 10px;font-size:10.5px;color:#1e3a5f;white-space:pre-wrap;line-height:1.5">${descripcionTrabajo}</div>` : "";
 
-  // Sección inspección
+  // ── INSPECCIÓN (compacta — solo si hay datos)
   const secInsp = inspec ? (() => {
     const zonas = Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : [];
-    const zonasHtml = zonas.length > 0
-      ? `<div style="margin-top:8px"><b style="font-size:11px;color:#92400e">⚠️ Daños al ingreso:</b><div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px">${zonas.map((z: any) => `<span style="background:#fef9c3;border:1px solid #fde68a;color:#92400e;border-radius:5px;padding:2px 8px;font-size:11px">${(z.zona||"").replace(/_/g," ")}: ${(z.tipo||"").replace(/_/g," ")}</span>`).join("")}</div></div>`
-      : "";
-    return `${secTitulo("📋","Inspección de Recepción")}<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px"><div><b>KM entrada:</b> ${inspec.km_entrada != null ? Number(inspec.km_entrada).toLocaleString() : "—"}</div><div><b>Combustible:</b> ${inspec.nivel_combustible != null ? inspec.nivel_combustible+"%" : "—"}</div><div><b>Condición:</b> ${inspec.condicion_general || "—"}</div></div>${inspec.observaciones ? `<div style="margin-top:6px;font-size:12px;color:#374151">📝 ${inspec.observaciones}</div>` : ""}${zonasHtml}`;
+    const zonasTxt = zonas.length > 0
+      ? `<div style="margin-top:4px;font-size:9.5px;color:#92400e">⚠️ Daños: ${zonas.map((z:any)=>`${(z.zona||"").replace(/_/g," ")}: ${(z.tipo||"").replace(/_/g," ")}`).join(" · ")}</div>` : "";
+    const kmComb = [
+      inspec.km_entrada != null ? `KM: ${Number(inspec.km_entrada).toLocaleString()}` : "",
+      inspec.nivel_combustible != null ? `Comb: ${inspec.nivel_combustible}%` : "",
+      inspec.condicion_general ? `Cond: ${inspec.condicion_general}` : "",
+    ].filter(Boolean).join("  ·  ");
+    return `${ST("📋","Recepción")}<div style="font-size:10px;color:#374151">${kmComb}</div>${inspec.observaciones ? `<div style="font-size:10px;color:#555;margin-top:2px">${inspec.observaciones}</div>` : ""}${zonasTxt}`;
   })() : "";
 
-  // Diagnóstico
+  // ── DIAGNÓSTICO
   const secDiag = (() => {
-    const fallas = resolvedDiag?.fallasIdentificadas || h.fallas_identificadas || h.diagnostico_general;
-    const inspecMec = resolvedDiag?.inspeccionMecanica || h.inspeccion_mecanica;
-    const inspecElec = resolvedDiag?.inspeccionElectrica || h.inspeccion_electrica;
-    const inspecEle = resolvedDiag?.inspeccionElectronica || h.inspeccion_electronica;
+    const fallas   = resolvedDiag?.fallasIdentificadas || h.fallas_identificadas || h.diagnostico_general;
+    const inspecMec  = resolvedDiag?.inspeccionMecanica    || h.inspeccion_mecanica;
+    const inspecElec = resolvedDiag?.inspeccionElectrica   || h.inspeccion_electrica;
+    const inspecEle  = resolvedDiag?.inspeccionElectronica || h.inspeccion_electronica;
     const mo = manoDeObraDetalle;
     if (!fallas && !mo && !inspecMec && !inspecElec) return "";
-    const fallasHtml = fallas ? `<div style="background:#eff6ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#1e40af;font-weight:600;white-space:pre-wrap">${fallas}</div>` : "";
-    const moHtml = mo ? `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:4px">Mano de Obra</div><div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">${mo.split("\n").filter((l: string)=>l.trim()).map((l: string)=>`<div style="font-size:12px;margin-bottom:3px">✓ ${l.trim()}</div>`).join("")}</div></div>` : "";
+    const fallasHtml = fallas ? `<div style="background:#eff6ff;border-radius:5px;padding:5px 10px;font-size:10.5px;color:#1e40af;font-weight:600;white-space:pre-wrap;margin-bottom:4px">${fallas}</div>` : "";
+    const moHtml = mo ? `<div style="font-size:9.5px;font-weight:700;color:#065f46;margin:4px 0 2px">MANO DE OBRA</div><div style="display:flex;flex-wrap:wrap;gap:3px">${mo.split("\n").filter((l:string)=>l.trim()).map((l:string)=>`<span style="font-size:9.5px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:4px;padding:2px 7px">✓ ${l.trim()}</span>`).join("")}</div>` : "";
     const inspecGrid = (inspecMec || inspecElec || inspecEle)
-      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;margin-top:8px">${inspecMec ? `<div><b style="color:#555">🔧 Mecánica</b><br>${inspecMec}</div>` : ""}${inspecElec ? `<div><b style="color:#555">⚡ Eléctrica</b><br>${inspecElec}</div>` : ""}${inspecEle ? `<div><b style="color:#555">💻 Scanner</b><br>${inspecEle}</div>` : ""}</div>` : "";
-    return `${secTitulo("🔬","Diagnóstico Técnico")}${fallasHtml}${moHtml}${inspecGrid}`;
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;font-size:9.5px;margin-top:4px">${inspecMec?`<div><b style="color:#555">🔧 Mecánica</b><br>${inspecMec}</div>`:""}${inspecElec?`<div><b style="color:#555">⚡ Eléctrica</b><br>${inspecElec}</div>`:""}${inspecEle?`<div><b style="color:#555">💻 Scanner</b><br>${inspecEle}</div>`:""}</div>` : "";
+    return `${ST("🔬","Diagnóstico Técnico")}${fallasHtml}${moHtml}${inspecGrid}`;
   })();
 
-  // Trabajos realizados
+  // ── TRABAJOS REALIZADOS
   const secTrabajos = trabajosItems.length > 0
-    ? `${secTitulo("🛠️","Trabajos Realizados")}<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:#f8fafc"><th style="padding:6px 10px;text-align:left;color:#6b7280">Tipo</th><th style="padding:6px 10px;text-align:left;color:#6b7280">Descripción</th><th style="padding:6px 10px;text-align:left;color:#6b7280">Estado</th></tr></thead><tbody>${trabajosItems.map((t: any) => `<tr style="border-top:1px solid #f0f0f0"><td style="padding:6px 10px;font-weight:600">${t.tipo||"—"}</td><td style="padding:6px 10px">${t.descripcion||"—"}</td><td style="padding:6px 10px;font-weight:700;color:${t.estado==="REALIZADO"?"#065f46":"#92400e"}">${(t.estado||"").replace(/_/g," ")}</td></tr>`).join("")}</tbody></table>`
+    ? `${ST("🛠️","Trabajos Realizados")}<table style="width:100%;border-collapse:collapse;font-size:9.5px"><thead><tr style="background:#f8fafc"><th style="padding:3px 6px;text-align:left;color:#6b7280">Tipo</th><th style="padding:3px 6px;text-align:left;color:#6b7280">Descripción</th><th style="padding:3px 6px;text-align:left;color:#6b7280">Estado</th></tr></thead><tbody>${trabajosItems.map((t:any)=>`<tr style="border-top:1px solid #f0f0f0"><td style="padding:3px 6px;font-weight:600">${t.tipo||"—"}</td><td style="padding:3px 6px">${t.descripcion||"—"}</td><td style="padding:3px 6px;font-weight:700;color:${t.estado==="REALIZADO"?"#065f46":"#92400e"}">${(t.estado||"").replace(/_/g," ")}</td></tr>`).join("")}</tbody></table>`
     : avances.length > 0
-    ? `${secTitulo("🛠️","Avances de Reparación")}${avances.map((a: any) => `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0;font-size:12px"><b>${a.tecnico_nombre||""}</b>${a.created_at ? ` · ${fmtD(a.created_at)}` : ""}<br><span style="color:#374151">${a.descripcion||""}</span></div>`).join("")}`
-    : h.trabajos_realizados ? `${secTitulo("🛠️","Trabajos Realizados")}<div style="font-size:12px;white-space:pre-wrap;color:#374151">${h.trabajos_realizados}</div>` : "";
+    ? `${ST("🛠️","Avances")}${avances.map((a:any)=>`<div style="font-size:9.5px;padding:2px 0;border-bottom:1px solid #f0f0f0"><b>${a.tecnico_nombre||""}</b>${a.created_at?` · ${fmtD(a.created_at)}`:""} — ${a.descripcion||""}</div>`).join("")}`
+    : h.trabajos_realizados ? `${ST("🛠️","Trabajos Realizados")}<div style="font-size:9.5px;white-space:pre-wrap">${h.trabajos_realizados}</div>` : "";
 
-  // Cotización
-  const secCot = (cot?.mano_obra > 0 || cot?.total > 0)
-    ? `${secTitulo("📄","Cotización")}<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${cot.mano_obra > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">Mano de obra</td><td style="padding:5px 10px;text-align:right;font-weight:700">${fmt$(cot.mano_obra)}</td></tr>` : ""}${cot.repuestos > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">Repuestos</td><td style="padding:5px 10px;text-align:right;font-weight:700">${fmt$(cot.repuestos)}</td></tr>` : ""}${cot.itbis > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">ITBIS</td><td style="padding:5px 10px;text-align:right">${fmt$(cot.itbis)}</td></tr>` : ""}<tr style="background:#f0fdf4"><td style="padding:8px 10px;font-weight:900;font-size:14px">TOTAL</td><td style="padding:8px 10px;text-align:right;font-weight:900;font-size:14px;color:#065f46">${fmt$(cot.total || (Number(cot.mano_obra||0)+Number(cot.repuestos||0)))}</td></tr></tbody></table>${cot.tiempo_estimado ? `<div style="font-size:11px;color:#888;margin-top:4px">⏱️ Tiempo estimado: ${cot.tiempo_estimado}</div>` : ""}` : "";
+  // ── COTIZACIÓN + FACTURA (en dos columnas si ambas existen)
+  const hayCot = cot && (Number(cot.mano_obra||0) > 0 || Number(cot.total||0) > 0);
+  const hayFac = fac && Number(fac.total||0) > 0;
 
-  // Control de calidad
+  const cotHtml = hayCot ? `${ST("📄","Cotización")}<table style="width:100%;border-collapse:collapse;font-size:9.5px"><tbody>${Number(cot.mano_obra||0)>0?`<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 6px">Mano de obra</td><td style="padding:2px 6px;text-align:right;font-weight:700">${fmt$(cot.mano_obra)}</td></tr>`:""}${Number(cot.repuestos||0)>0?`<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 6px">Repuestos</td><td style="padding:2px 6px;text-align:right;font-weight:700">${fmt$(cot.repuestos)}</td></tr>`:""}${Number(cot.itbis||0)>0?`<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:2px 6px">ITBIS</td><td style="padding:2px 6px;text-align:right">${fmt$(cot.itbis)}</td></tr>`:""}<tr style="background:#f0fdf4"><td style="padding:4px 6px;font-weight:900">TOTAL</td><td style="padding:4px 6px;text-align:right;font-weight:900;color:#065f46">${fmt$(cot.total||(Number(cot.mano_obra||0)+Number(cot.repuestos||0)))}</td></tr></tbody></table>` : "";
+
+  const facHtml = hayFac ? `${ST("🧾","Factura")}` +
+    `<div style="font-size:9.5px;margin-bottom:3px">${FL("NCF",fac.ncf)}${FL("Tipo",fac.ncf_tipo)}${FL("Pago",fac.metodo_pago)}</div>` +
+    (facItems.length > 0
+      ? `<table style="width:100%;border-collapse:collapse;font-size:9.5px"><thead><tr style="background:#f8fafc"><th style="padding:2px 6px;text-align:left">Descripción</th><th style="padding:2px 6px;text-align:center">Cant.</th><th style="padding:2px 6px;text-align:right">Subtotal</th></tr></thead><tbody>${facItems.map((fi:any)=>`<tr style="border-top:1px solid #f0f0f0"><td style="padding:2px 6px">${fi.descripcion||"—"}</td><td style="padding:2px 6px;text-align:center">${fi.cantidad||1}</td><td style="padding:2px 6px;text-align:right;font-weight:700">${fmt$(fi.subtotal)}</td></tr>`).join("")}</tbody></table>` : "") +
+    `<div style="font-weight:900;font-size:11px;color:#166534;margin-top:3px;text-align:right">Total: ${fmt$(fac.total)}</div>` : "";
+
+  const secFinanciero = (hayCot || hayFac)
+    ? `<div style="display:grid;grid-template-columns:${hayCot && hayFac ? "1fr 1fr" : "1fr"};gap:10px">${cotHtml}${facHtml}</div>` : "";
+
+  // ── CONTROL DE CALIDAD
   const _resQC = resolvedDiag?.resultadoQC || h.resultado_qc;
   const _obsQC = resolvedDiag?.observacionesQC || h.observaciones_qc;
   const secQC = _resQC ? (() => {
     const aprobado = _resQC === "APROBADO";
     const clItems = Object.entries(checklist).filter(([,v]) => v !== undefined);
     const clHtml = clItems.length > 0
-      ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px">${clItems.map(([k,v]) => `<div style="font-size:11px;padding:3px 8px;border-radius:20px;background:${v?"#f0fdf4":"#fef2f2"};color:${v?"#065f46":"#991b1b"}">${v?"✓":"✗"} ${QC_LBL[k]||k.replace(/_/g," ")}</div>`).join("")}</div>` : "";
-    return `${secTitulo("✅","Control de Calidad")}<div style="display:inline-block;padding:4px 16px;border-radius:20px;font-weight:800;font-size:13px;background:${aprobado?"#d1fae5":"#fee2e2"};color:${aprobado?"#065f46":"#991b1b"}">${_resQC}</div>${h.tecnico_qc ? `<div style="font-size:12px;color:#555;margin-top:4px">Técnico QC: ${h.tecnico_qc}</div>` : ""}${_obsQC ? `<div style="font-size:12px;color:#555;margin-top:4px">${_obsQC}</div>` : ""}${clHtml}`;
+      ? `<div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:4px">${clItems.map(([k,v])=>`<span style="font-size:9px;padding:2px 6px;border-radius:10px;background:${v?"#f0fdf4":"#fef2f2"};color:${v?"#065f46":"#991b1b"};border:1px solid ${v?"#bbf7d0":"#fca5a5"}">${v?"✓":"✗"} ${QC_LBL[k]||k.replace(/_/g," ")}</span>`).join("")}</div>` : "";
+    return `${ST("✅","Control de Calidad")}<span style="display:inline-block;padding:2px 12px;border-radius:20px;font-weight:800;font-size:10px;background:${aprobado?"#d1fae5":"#fee2e2"};color:${aprobado?"#065f46":"#991b1b"}">${_resQC}</span>${_obsQC?`<span style="font-size:9.5px;color:#555;margin-left:8px">${_obsQC}</span>`:""}${clHtml}`;
   })() : "";
 
-  // Factura
-  const secFac = fac?.total > 0
-    ? `${secTitulo("🧾","Factura")}${fila("NCF", fac.ncf)}${fila("Tipo NCF", fac.ncf_tipo)}${fila("Método de pago", fac.metodo_pago)}${fila("Subtotal", fac.subtotal > 0 ? fmt$(fac.subtotal) : null)}${fac.itbis > 0 ? fila("ITBIS", fmt$(fac.itbis)) : ""}<div style="margin-top:8px;font-weight:900;font-size:15px;color:#166534">Total factura: ${fmt$(fac.total)}</div>${facItems.length > 0 ? `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:8px"><thead><tr style="background:#f8fafc"><th style="padding:5px 8px;text-align:left">Descripción</th><th style="padding:5px 8px;text-align:center">Cant.</th><th style="padding:5px 8px;text-align:right">Subtotal</th></tr></thead><tbody>${facItems.map((fi: any) => `<tr style="border-top:1px solid #f0f0f0"><td style="padding:5px 8px">${fi.descripcion||"—"}</td><td style="padding:5px 8px;text-align:center">${fi.cantidad||1}</td><td style="padding:5px 8px;text-align:right;font-weight:700">${fmt$(fi.subtotal)}</td></tr>`).join("")}</tbody></table>` : ""}` : "";
-
-  // Entrega
+  // ── ENTREGA
   const secEntrega = (h.fecha_entrega || (h as any).notas_entrega)
-    ? `${secTitulo("🏁","Entrega al Cliente")}${fila("Fecha de entrega", fmtDH(h.fecha_entrega))}${fila("Entregado por", (h as any).usuario_entrego)}${(h as any).notas_entrega ? `<div style="font-size:12px;color:#374151;margin-top:4px;padding:6px 10px;background:#eff6ff;border-radius:6px">${(h as any).notas_entrega}</div>` : ""}${(h as any).firma_entrega ? `<div style="margin-top:8px"><div style="font-size:10px;color:#888;margin-bottom:4px">FIRMA DEL CLIENTE:</div><img src="${(h as any).firma_entrega}" style="max-height:70px;border:1px solid #e5e7eb;border-radius:6px;background:#fff;padding:4px"/></div>` : ""}` : "";
+    ? `${ST("🏁","Entrega")}<div style="font-size:9.5px">${FL("Fecha",fmtDH(h.fecha_entrega))}${FL("Por",(h as any).usuario_entrego)}</div>${(h as any).notas_entrega?`<div style="font-size:9.5px;color:#374151;margin-top:2px;padding:3px 8px;background:#eff6ff;border-radius:4px">${(h as any).notas_entrega}</div>`:""}` : "";
 
-  // Timeline
+  // ── TIMELINE (compacto — inline)
   const secTimeline = timeline.length > 0
-    ? `${secTitulo("📅","Historial del Proceso")}<table style="width:100%;border-collapse:collapse;font-size:11px">${timeline.map((t: any) => `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:4px 8px;white-space:nowrap;color:#888">${fmtDH(t.created_at)}</td><td style="padding:4px 8px;font-weight:700;color:#374151">${(t.estado_nuevo||"").replace(/_/g," ")}</td><td style="padding:4px 8px;color:#6b7280">${t.usuario_nombre||""}</td><td style="padding:4px 8px;color:#92400e;font-style:italic">${t.motivo||""}</td></tr>`).join("")}</table>` : "";
+    ? `${ST("📅","Historial")}<table style="width:100%;border-collapse:collapse;font-size:9px">${timeline.map((t:any)=>`<tr style="border-bottom:1px solid #f5f5f5"><td style="padding:2px 5px;white-space:nowrap;color:#888;width:105px">${fmtDH(t.created_at)}</td><td style="padding:2px 5px;font-weight:700;color:#374151;width:150px">${(t.estado_nuevo||"").replace(/_/g," ")}</td><td style="padding:2px 5px;color:#6b7280">${t.usuario_nombre||""}</td><td style="padding:2px 5px;color:#92400e;font-style:italic">${t.motivo||""}</td></tr>`).join("")}</table>` : "";
 
-  // Fechas del proceso
+  // ── FECHAS (barra horizontal)
   const fechasArr = [
-    { l:"Recibido",         v: fechas.recibido },
-    { l:"Diagnóstico",      v: fechas.diagnostico },
-    { l:"Aprobación",       v: fechas.aprobacion },
-    { l:"Inicio reparación",v: fechas.inicio_reparacion },
-    { l:"Control calidad",  v: fechas.control_calidad },
-    { l:"Listo",            v: fechas.listo },
-    { l:"Entregado",        v: fechas.entrega },
-  ].filter(f => f.v);
+    {l:"Recibido",v:fechas.recibido},{l:"Diagnóstico",v:fechas.diagnostico},
+    {l:"Aprobación",v:fechas.aprobacion},{l:"Reparación",v:fechas.inicio_reparacion},
+    {l:"QC",v:fechas.control_calidad},{l:"Listo",v:fechas.listo},{l:"Entregado",v:fechas.entrega},
+  ].filter(f=>f.v);
   const secFechas = fechasArr.length > 0
-    ? `${secTitulo("🕐","Fechas del Proceso")}<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px">${fechasArr.map(f => `<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:8px;padding:8px 10px"><div style="font-size:10px;color:#888;margin-bottom:3px">${f.l}</div><div style="font-size:11px;font-weight:700;color:#333">${fmtDH(f.v)}</div></div>`).join("")}</div>` : "";
+    ? `${ST("🕐","Fechas")}<div style="display:flex;flex-wrap:wrap;gap:5px">${fechasArr.map(f=>`<div style="background:#f8fafc;border:1px solid #e5e7eb;border-radius:5px;padding:3px 8px"><div style="font-size:8.5px;color:#888">${f.l}</div><div style="font-size:9.5px;font-weight:700;color:#333">${fmtDH(f.v)}</div></div>`).join("")}</div>` : "";
 
   const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8">
 <title>Expediente — ${h.placa} · ${h.numero_orden||""}</title>
 <style>
   *{margin:0;padding:0;box-sizing:border-box}
-  body{font-family:'Segoe UI',Arial,sans-serif;padding:24px 28px;color:#1a1a1a;line-height:1.5;max-width:820px;margin:auto}
-  @media print{body{padding:12px 16px}@page{margin:8mm 10mm}}
+  body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5px;color:#1a1a1a;line-height:1.4;max-width:780px;margin:auto;padding:12px 16px}
+  @media print{
+    @page{margin:6mm 8mm;size:A4}
+    body{padding:0}
+  }
 </style></head><body>
 
-<!-- Cabecera -->
-<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #111827;padding-bottom:14px;margin-bottom:16px">
-  <div style="display:flex;align-items:center;gap:14px">
-    <img src="${logoUrl}" alt="Logo" style="height:56px;max-width:160px;object-fit:contain;border-radius:6px" onerror="this.style.display='none'"/>
+<!-- CABECERA compacta -->
+<div style="display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #111827;padding-bottom:8px;margin-bottom:8px">
+  <div style="display:flex;align-items:center;gap:10px">
+    <img src="${logoUrl}" alt="Logo" style="height:40px;max-width:120px;object-fit:contain;border-radius:4px" onerror="this.style.display='none'"/>
     <div>
-      <div style="font-size:17px;font-weight:900">SÓLIDO AUTO SERVICIO</div>
-      <div style="font-size:10px;color:#6b7280;line-height:1.5">Expertos en Mecánica &amp; Detallado · Tel: 809-712-2027</div>
+      <div style="font-size:13px;font-weight:900;line-height:1.2">SÓLIDO AUTO SERVICIO</div>
+      <div style="font-size:9px;color:#6b7280">Mecánica &amp; Detallado · Tel: 809-712-2027 · Santo Domingo, RD</div>
     </div>
   </div>
   <div style="text-align:right">
-    <div style="font-size:20px;font-weight:900;color:#6366f1">${h.numero_orden || `ID #${h.id}`}</div>
-    <div style="font-size:11px;color:#6b7280">${fmtD(h.fecha_servicio)}</div>
-    <span style="display:inline-block;padding:3px 12px;border-radius:20px;font-size:10px;font-weight:700;background:#d1fae5;color:#065f46;margin-top:4px">✅ ENTREGADO</span>
+    <div style="font-size:15px;font-weight:900;color:#4f46e5">${h.numero_orden||`ID #${h.id}`}</div>
+    <div style="font-size:9px;color:#6b7280">${fmtD(h.fecha_servicio)}</div>
+    <span style="display:inline-block;padding:2px 10px;border-radius:20px;font-size:9px;font-weight:700;background:#d1fae5;color:#065f46">✅ ENTREGADO</span>
   </div>
 </div>
 
-<!-- Info principal -->
-<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-bottom:16px">
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;background:#f8fafc">
-    <div style="font-size:10px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:6px">🚗 Vehículo</div>
-    <div style="font-weight:800;font-size:15px;color:#3b82f6;font-family:monospace">${h.placa}</div>
-    <div style="font-size:13px;font-weight:600;margin-top:2px">${h.marca||""} ${h.modelo||""} ${h.ano ? `(${h.ano})` : ""}</div>
-    <div style="font-size:12px;color:#6b7280">${h.color||""}</div>
+<!-- INFO PRINCIPAL: vehículo + cliente + costos en una sola fila -->
+<div style="display:grid;grid-template-columns:1.1fr 1fr 0.9fr;gap:8px;margin-bottom:8px">
+  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;background:#f8fafc">
+    <div style="font-size:8.5px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:3px">🚗 Vehículo</div>
+    <div style="font-weight:800;font-size:12px;color:#3b82f6;font-family:monospace">${h.placa}</div>
+    <div style="font-size:10.5px;font-weight:600">${h.marca||""} ${h.modelo||""} ${h.ano?`(${h.ano})`:""}</div>
+    <div style="font-size:9.5px;color:#6b7280">${h.color||""}</div>
   </div>
-  <div style="border:1px solid #e5e7eb;border-radius:8px;padding:10px 14px;background:#f8fafc">
-    <div style="font-size:10px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:6px">👤 Cliente</div>
-    <div style="font-size:14px;font-weight:700">${h.cliente_nombre||"Particular"}</div>
-    ${h.cliente_telefono ? `<div style="font-size:12px;color:#6b7280;margin-top:2px">📞 ${h.cliente_telefono}</div>` : ""}
+  <div style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;background:#f8fafc">
+    <div style="font-size:8.5px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:3px">👤 Cliente</div>
+    <div style="font-size:11px;font-weight:700">${h.cliente_nombre||"Particular"}</div>
+    ${h.cliente_telefono?`<div style="font-size:9.5px;color:#6b7280">📞 ${h.cliente_telefono}</div>`:""}
+    ${detalleCompleto?.cliente?.email?`<div style="font-size:9px;color:#6b7280">${detalleCompleto.cliente.email}</div>`:""}
   </div>
-  <div style="border:1px solid #bbf7d0;border-radius:8px;padding:10px 14px;background:#f0fdf4">
-    <div style="font-size:10px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:6px">💰 Costos</div>
-    ${h.costo_mano_obra > 0 ? `<div style="font-size:12px;color:#374151">Mano de obra: <b>${fmt$(h.costo_mano_obra)}</b></div>` : ""}
-    ${h.costo_repuestos > 0 ? `<div style="font-size:12px;color:#374151">Repuestos: <b>${fmt$(h.costo_repuestos)}</b></div>` : ""}
-    <div style="font-size:16px;font-weight:900;color:#065f46;margin-top:4px">${fmt$(h.costo_total)}</div>
-    ${(h as any).ncf ? `<div style="font-size:11px;color:#6b7280;margin-top:2px">NCF: ${(h as any).ncf}</div>` : ""}
+  <div style="border:1px solid #bbf7d0;border-radius:6px;padding:6px 10px;background:#f0fdf4">
+    <div style="font-size:8.5px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:3px">💰 Total</div>
+    ${Number(h.costo_mano_obra||0)>0?`<div style="font-size:9.5px;color:#374151">M.O.: <b>${fmt$(h.costo_mano_obra)}</b></div>`:""}
+    ${Number(h.costo_repuestos||0)>0?`<div style="font-size:9.5px;color:#374151">Rep.: <b>${fmt$(h.costo_repuestos)}</b></div>`:""}
+    <div style="font-size:13px;font-weight:900;color:#065f46">${fmt$(h.costo_total)}</div>
+    ${(h as any).ncf?`<div style="font-size:9px;color:#6b7280">NCF: ${(h as any).ncf}</div>`:""}
   </div>
 </div>
 
-${secTrabSol}
-${secInsp}
-${secDiag}
-${secTrabajos}
-${secCot}
-${secQC}
-${secFac}
-${secEntrega}
-${secTimeline}
-${secFechas}
+${secTrabSol}${secInsp}${secDiag}${secTrabajos}${secFinanciero}${secQC}${secEntrega}${secTimeline}${secFechas}
 
-<!-- Pie -->
-<div style="margin-top:30px;padding-top:12px;border-top:1px dashed #cbd5e1;text-align:center;font-size:10px;color:#9ca3af">
-  <p>Expediente generado el ${fmtD(new Date().toISOString())} · <strong>SÓLIDO AUTO SERVICIO</strong> · Tel: 809-712-2027 · Santo Domingo, RD</p>
+<!-- PIE -->
+<div style="margin-top:10px;padding-top:6px;border-top:1px dashed #cbd5e1;text-align:center;font-size:9px;color:#9ca3af">
+  Expediente generado el ${fmtD(new Date().toISOString())} · <b>SÓLIDO AUTO SERVICIO</b> · Tel: 809-712-2027
 </div>
 </body></html>`;
 
@@ -404,12 +412,12 @@ ${secFechas}
   if (prev) prev.remove();
   const iframe = document.createElement("iframe");
   iframe.id = "__print_hist__";
-  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:860px;height:1100px;border:none;opacity:0;";
+  iframe.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:820px;height:1200px;border:none;opacity:0;";
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
-  if (!doc) { const w = window.open("","_blank","width=860,height=1100"); if (w) { w.document.write(html); w.document.close(); } return; }
+  if (!doc) { const w = window.open("","_blank","width=820,height=1200"); if (w) { w.document.write(html); w.document.close(); } return; }
   doc.open(); doc.write(html); doc.close();
-  iframe.onload = () => { try { (iframe.contentWindow as any)?.focus(); (iframe.contentWindow as any)?.print(); } catch { const w = window.open("","_blank","width=860,height=1100"); if (w) { w.document.write(html); w.document.close(); } } };
+  iframe.onload = () => { try { (iframe.contentWindow as any)?.focus(); (iframe.contentWindow as any)?.print(); } catch { const w = window.open("","_blank","width=820,height=1200"); if (w) { w.document.write(html); w.document.close(); } } };
 }
 
 // ── Expediente completo ────────────────────────────────
