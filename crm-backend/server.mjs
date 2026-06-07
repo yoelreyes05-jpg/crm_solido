@@ -1378,13 +1378,8 @@ app.get("/cotizaciones/:id", async (req, res) => {
     const { data: cot, error } = await supabase.from("cotizaciones").select("*").eq("id", id).single();
     if (error || !cot) return res.status(404).json({ error: "Cotización no encontrada" });
 
-    // Cargar diagnóstico, cliente, vehículo e inspección en paralelo
-    const [{ data: diag }, { data: orden }] = await Promise.all([
-      supabase.from("diagnosticos").select("*").eq("id", cot.diagnostico_id).single(),
-      cot.diagnostico_id
-        ? supabase.from("diagnosticos").select("orden_id").eq("id", cot.diagnostico_id).single()
-        : Promise.resolve({ data: null }),
-    ]);
+    // Cargar diagnóstico
+    const { data: diag } = await supabase.from("diagnosticos").select("*").eq("id", cot.diagnostico_id).single();
 
     let cliente = null, vehiculo = null, inspeccion = null, orden = null;
     if (diag) {
