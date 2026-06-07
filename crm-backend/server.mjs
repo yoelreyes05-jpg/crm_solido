@@ -1393,7 +1393,7 @@ app.get("/cotizaciones/:id", async (req, res) => {
       if (diag.orden_id) {
         const [{ data: ins }, { data: ord }] = await Promise.all([
           supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", diag.orden_id).single(),
-          supabase.from("ordenes").select("id, descripcion, motivo_entrada, numero_orden, created_at, prioridad").eq("id", diag.orden_id).single(),
+          supabase.from("ordenes_trabajo").select("id, descripcion, motivo_entrada, numero_orden, created_at, prioridad").eq("id", diag.orden_id).maybeSingle(),
         ]);
         inspeccion = ins || null;
         orden      = ord || null;
@@ -2475,7 +2475,7 @@ app.get("/vehiculo-historial", async (req, res) => {
     // 1. Todas las órdenes de trabajo (menos CANCELADO)
     const ordenes = await safe(() =>
       supabase.from("ordenes_trabajo")
-        .select("id, numero_orden, descripcion, motivo_entrada, estado, created_at, cliente_id, vehiculo_id, costo_total")
+        .select("id, numero_orden, descripcion, motivo_entrada, estado, created_at, cliente_id, vehiculo_id, total")
         .not("estado", "eq", "CANCELADO")
         .order("created_at", { ascending: false })
         .limit(1000)
@@ -2522,7 +2522,7 @@ app.get("/vehiculo-historial", async (req, res) => {
         numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
         tipo_servicio:    h.tipo_servicio || o.descripcion || o.motivo_entrada || "En proceso",
         tecnico_nombre:   h.tecnico_nombre || null,
-        costo_total:      Number(h.costo_total || o.costo_total || 0),
+        costo_total:      Number(h.costo_total || o.total || 0),
         costo_mano_obra:  Number(h.costo_mano_obra || 0),
         costo_repuestos:  Number(h.costo_repuestos || 0),
         ncf:              h.ncf || null,
