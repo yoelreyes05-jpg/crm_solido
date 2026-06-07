@@ -232,7 +232,7 @@ export default function HistorialVehiculoPage() {
 }
 
 // ── Función de impresión del expediente ───────────────
-function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDetalle: string, trabajosItems: any[], descripcionTrabajo: string) {
+function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDetalle: string, trabajosItems: any[], descripcionTrabajo: string, resolvedDiag?: { fallasIdentificadas: string; inspeccionMecanica: string; inspeccionElectrica: string; inspeccionElectronica: string; codigosFalla: string; observacionesDiag: string; resultadoQC: string; observacionesQC: string; }) {
   const fmtD  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" }) : "—";
   const fmtDH = (v: any) => v ? new Date(v).toLocaleString("es-DO",    { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const fmt$  = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO", { minimumFractionDigits:2 })}`;
@@ -277,13 +277,16 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
 
   // Diagnóstico
   const secDiag = (() => {
-    const fallas = h.fallas_identificadas || h.diagnostico_general;
+    const fallas = resolvedDiag?.fallasIdentificadas || h.fallas_identificadas || h.diagnostico_general;
+    const inspecMec = resolvedDiag?.inspeccionMecanica || h.inspeccion_mecanica;
+    const inspecElec = resolvedDiag?.inspeccionElectrica || h.inspeccion_electrica;
+    const inspecEle = resolvedDiag?.inspeccionElectronica || h.inspeccion_electronica;
     const mo = manoDeObraDetalle;
-    if (!fallas && !mo && !h.inspeccion_mecanica && !h.inspeccion_electrica) return "";
+    if (!fallas && !mo && !inspecMec && !inspecElec) return "";
     const fallasHtml = fallas ? `<div style="background:#eff6ff;border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:13px;color:#1e40af;font-weight:600;white-space:pre-wrap">${fallas}</div>` : "";
     const moHtml = mo ? `<div style="margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#065f46;text-transform:uppercase;margin-bottom:4px">Mano de Obra</div><div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">${mo.split("\n").filter((l: string)=>l.trim()).map((l: string)=>`<div style="font-size:12px;margin-bottom:3px">✓ ${l.trim()}</div>`).join("")}</div></div>` : "";
-    const inspecGrid = (h.inspeccion_mecanica || h.inspeccion_electrica || h.inspeccion_electronica)
-      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;margin-top:8px">${h.inspeccion_mecanica ? `<div><b style="color:#555">🔧 Mecánica</b><br>${h.inspeccion_mecanica}</div>` : ""}${h.inspeccion_electrica ? `<div><b style="color:#555">⚡ Eléctrica</b><br>${h.inspeccion_electrica}</div>` : ""}${h.inspeccion_electronica ? `<div><b style="color:#555">💻 Scanner</b><br>${h.inspeccion_electronica}</div>` : ""}</div>` : "";
+    const inspecGrid = (inspecMec || inspecElec || inspecEle)
+      ? `<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;margin-top:8px">${inspecMec ? `<div><b style="color:#555">🔧 Mecánica</b><br>${inspecMec}</div>` : ""}${inspecElec ? `<div><b style="color:#555">⚡ Eléctrica</b><br>${inspecElec}</div>` : ""}${inspecEle ? `<div><b style="color:#555">💻 Scanner</b><br>${inspecEle}</div>` : ""}</div>` : "";
     return `${secTitulo("🔬","Diagnóstico Técnico")}${fallasHtml}${moHtml}${inspecGrid}`;
   })();
 
@@ -299,12 +302,14 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
     ? `${secTitulo("📄","Cotización")}<table style="width:100%;border-collapse:collapse;font-size:12px"><tbody>${cot.mano_obra > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">Mano de obra</td><td style="padding:5px 10px;text-align:right;font-weight:700">${fmt$(cot.mano_obra)}</td></tr>` : ""}${cot.repuestos > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">Repuestos</td><td style="padding:5px 10px;text-align:right;font-weight:700">${fmt$(cot.repuestos)}</td></tr>` : ""}${cot.itbis > 0 ? `<tr style="border-bottom:1px solid #f0f0f0"><td style="padding:5px 10px">ITBIS</td><td style="padding:5px 10px;text-align:right">${fmt$(cot.itbis)}</td></tr>` : ""}<tr style="background:#f0fdf4"><td style="padding:8px 10px;font-weight:900;font-size:14px">TOTAL</td><td style="padding:8px 10px;text-align:right;font-weight:900;font-size:14px;color:#065f46">${fmt$(cot.total || (Number(cot.mano_obra||0)+Number(cot.repuestos||0)))}</td></tr></tbody></table>${cot.tiempo_estimado ? `<div style="font-size:11px;color:#888;margin-top:4px">⏱️ Tiempo estimado: ${cot.tiempo_estimado}</div>` : ""}` : "";
 
   // Control de calidad
-  const secQC = h.resultado_qc ? (() => {
-    const aprobado = h.resultado_qc === "APROBADO";
+  const _resQC = resolvedDiag?.resultadoQC || h.resultado_qc;
+  const _obsQC = resolvedDiag?.observacionesQC || h.observaciones_qc;
+  const secQC = _resQC ? (() => {
+    const aprobado = _resQC === "APROBADO";
     const clItems = Object.entries(checklist).filter(([,v]) => v !== undefined);
     const clHtml = clItems.length > 0
       ? `<div style="display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px">${clItems.map(([k,v]) => `<div style="font-size:11px;padding:3px 8px;border-radius:20px;background:${v?"#f0fdf4":"#fef2f2"};color:${v?"#065f46":"#991b1b"}">${v?"✓":"✗"} ${QC_LBL[k]||k.replace(/_/g," ")}</div>`).join("")}</div>` : "";
-    return `${secTitulo("✅","Control de Calidad")}<div style="display:inline-block;padding:4px 16px;border-radius:20px;font-weight:800;font-size:13px;background:${aprobado?"#d1fae5":"#fee2e2"};color:${aprobado?"#065f46":"#991b1b"}">${h.resultado_qc}</div>${h.tecnico_qc ? `<div style="font-size:12px;color:#555;margin-top:4px">Técnico QC: ${h.tecnico_qc}</div>` : ""}${h.observaciones_qc ? `<div style="font-size:12px;color:#555;margin-top:4px">${h.observaciones_qc}</div>` : ""}${clHtml}`;
+    return `${secTitulo("✅","Control de Calidad")}<div style="display:inline-block;padding:4px 16px;border-radius:20px;font-weight:800;font-size:13px;background:${aprobado?"#d1fae5":"#fee2e2"};color:${aprobado?"#065f46":"#991b1b"}">${_resQC}</div>${h.tecnico_qc ? `<div style="font-size:12px;color:#555;margin-top:4px">Técnico QC: ${h.tecnico_qc}</div>` : ""}${_obsQC ? `<div style="font-size:12px;color:#555;margin-top:4px">${_obsQC}</div>` : ""}${clHtml}`;
   })() : "";
 
   // Factura
@@ -439,17 +444,6 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
       .catch(() => {});
   }, [h.id, h.orden_id, h._historial_id]);
 
-  // Snapshot JSONB
-  const avancesSnap: any[] = Array.isArray(h.avances_data)   ? h.avances_data   : [];
-  const timeline:    any[] = Array.isArray(h.timeline_data)  ? h.timeline_data  : [];
-  const cot:         any   = h.cotizacion_data && typeof h.cotizacion_data === "object" && !Array.isArray(h.cotizacion_data) ? h.cotizacion_data : null;
-  const fac:         any   = h.factura_data    && typeof h.factura_data    === "object" && !Array.isArray(h.factura_data)    ? h.factura_data    : null;
-  const fechas:      any   = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso : {};
-  const checklist:   any   = h.checklist_qc    && typeof h.checklist_qc    === "object" ? h.checklist_qc   : {};
-  const inspecSnap:  any   = h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null;
-  const cotItems:    any[] = Array.isArray(cot?.items) ? cot.items : Array.isArray(cot?.items_detalle) ? cot.items_detalle : [];
-  const facItems:    any[] = Array.isArray(fac?.items) ? fac.items : [];
-
   // ── Helper: parsear campo que puede venir como JSON string ──
   const parseJsonField = (v: any): any[] => {
     if (Array.isArray(v)) return v;
@@ -459,34 +453,79 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
     return [];
   };
 
-  // Live data: prefer detalle endpoint, fallback to snapshot
-  const inspec:       any   = detalleCompleto?.inspeccion || inspecSnap;
-  const avancesLive:  any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
+  // Datos vivos del endpoint de detalle (prioritarios)
+  const diagVivo   = detalleCompleto?.diagnostico   || null;
+  const ordenViva  = detalleCompleto?.orden         || null;
+  const cotViva    = detalleCompleto?.cotizacion    || null;
+  const facViva    = detalleCompleto?.factura       || null;
+  const inspecViva = detalleCompleto?.inspeccion    || null;
+
+  // Snapshots JSONB de vehiculo_historial (fallback para órdenes con historial cerrado)
+  const avancesSnap: any[] = Array.isArray(h.avances_data)   ? h.avances_data   : [];
+  const cotSnap:     any   = h.cotizacion_data && typeof h.cotizacion_data === "object" && !Array.isArray(h.cotizacion_data) ? h.cotizacion_data : null;
+  const facSnap:     any   = h.factura_data    && typeof h.factura_data    === "object" && !Array.isArray(h.factura_data)    ? h.factura_data    : null;
+  const fechasSnap:  any   = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso : {};
+  const checklist:   any   = h.checklist_qc    && typeof h.checklist_qc    === "object" ? h.checklist_qc   : {};
+  const inspecSnap:  any   = h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null;
+
+  // Fuentes resueltas (live primero, snapshot como fallback)
+  const inspec:      any   = inspecViva || inspecSnap;
+  const cot:         any   = cotViva    || cotSnap;
+  const fac:         any   = facViva    || facSnap;
+  const fechas:      any   = detalleCompleto?.fechas_proceso || fechasSnap || {};
+
+  const avancesLive: any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
     ? detalleCompleto.avances : avancesSnap;
 
-  // trabajos_realizados_items: viene en diagnostico.trabajos_realizados_items (puede ser string JSON)
-  const rawTrabajosItems = detalleCompleto?.diagnostico?.trabajos_realizados_items
-    || cot?.trabajos_realizados_items   // snapshot
-    || h.trabajos_realizados_items;     // campo directo si lo hay
+  // Timeline: live (estado_historial del endpoint) > snapshot (timeline_data)
+  const timeline: any[] = Array.isArray(detalleCompleto?.estado_historial) && detalleCompleto.estado_historial.length > 0
+    ? detalleCompleto.estado_historial.map((t: any) => ({
+        ...t, estado_nuevo: t.estado_nuevo || t.estado, estado_anterior: t.estado_anterior || null,
+      }))
+    : Array.isArray(h.timeline_data) ? h.timeline_data : [];
+
+  // Items de cotización y factura
+  const cotItems: any[] = detalleCompleto?.cotizacion_items?.length
+    ? detalleCompleto.cotizacion_items
+    : parseJsonField(cot?.items_detalle || cot?.items || []);
+  const facItems: any[] = detalleCompleto?.factura_items?.length
+    ? detalleCompleto.factura_items
+    : parseJsonField(fac?.items || []);
+
+  // trabajos_realizados_items
+  const rawTrabajosItems = diagVivo?.trabajos_realizados_items
+    || cot?.trabajos_realizados_items
+    || h.trabajos_realizados_items;
   const trabajosItems: any[] = parseJsonField(rawTrabajosItems);
 
-  // mano_de_obra_detalle: del diagnóstico en vivo, luego del snapshot en cotizacion_data, luego campo directo
+  // mano_de_obra_detalle
   const manoDeObraDetalle: string =
-    detalleCompleto?.diagnostico?.mano_de_obra_detalle
-    || detalleCompleto?.cotizacion?.mano_de_obra_detalle
-    || cot?.mano_de_obra_detalle
+    diagVivo?.mano_de_obra_detalle
+    || cotViva?.mano_de_obra_detalle
+    || cotSnap?.mano_de_obra_detalle
     || (h as any).mano_de_obra_detalle
     || "";
 
-  // descripcion (trabajo solicitado): de la orden en vivo o del snapshot
+  // descripcion (trabajo solicitado)
   const descripcionTrabajo: string =
-    detalleCompleto?.orden?.descripcion
+    ordenViva?.descripcion || ordenViva?.motivo_entrada
     || (h as any).descripcion
     || h.motivo_entrada
     || "";
 
-  const hayFallas = h.codigos_falla || h.fallas_identificadas;
-  const hayQC     = h.resultado_qc || h.observaciones_qc || Object.keys(checklist).length > 0;
+  // Campos de diagnóstico: live > snapshot en h
+  const fallasIdentificadas = diagVivo?.fallas_identificadas || h.fallas_identificadas || h.diagnostico_general || "";
+  const inspeccionMecanica  = diagVivo?.inspeccion_mecanica  || h.inspeccion_mecanica  || "";
+  const inspeccionElectrica = diagVivo?.inspeccion_electrica || h.inspeccion_electrica || "";
+  const inspeccionElectronica = diagVivo?.inspeccion_electronica || h.inspeccion_electronica || "";
+  const codigosFalla        = diagVivo?.codigos_falla        || h.codigos_falla        || "";
+  const observacionesDiag   = diagVivo?.observaciones        || h.observaciones        || "";
+  const resultadoQC         = ordenViva?.resultado_qc || h.resultado_qc || "";
+  const observacionesQC     = ordenViva?.observaciones_qc || h.observaciones_qc || "";
+  const tecnicoNombre       = detalleCompleto?.tecnico_nombre || diagVivo?.tecnico_nombre || h.tecnico_nombre || "";
+
+  const hayFallas = codigosFalla || fallasIdentificadas;
+  const hayQC     = resultadoQC || observacionesQC || Object.keys(checklist).length > 0;
 
   return (
     <div style={{ background: "#fff", borderRadius: 18, padding: 32, boxShadow: "0 4px 32px rgba(0,0,0,0.10)", marginBottom: 24 }}>
@@ -510,7 +549,7 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Badge texto={h.estado || "ENTREGADO"} />
           <button
-            onClick={() => imprimirExpedienteHistorial(h, detalleCompleto, manoDeObraDetalle, trabajosItems, descripcionTrabajo)}
+            onClick={() => imprimirExpedienteHistorial(h, detalleCompleto, manoDeObraDetalle, trabajosItems, descripcionTrabajo, { fallasIdentificadas, inspeccionMecanica, inspeccionElectrica, inspeccionElectronica, codigosFalla, observacionesDiag, resultadoQC, observacionesQC })}
             style={{ padding: "9px 20px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
             🖨️ Imprimir
           </button>
@@ -533,8 +572,8 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
         </Card>
         <Card>
           <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>📋 Servicio</div>
-          <Fila label="Tipo de servicio" valor={h.tipo_servicio} destaca />
-          <Fila label="Técnico"       valor={h.tecnico_nombre} />
+          <Fila label="Tipo de servicio" valor={diagVivo?.tipo_servicio || h.tipo_servicio} destaca />
+          <Fila label="Técnico"       valor={tecnicoNombre} />
           <Fila label="Fecha entrega" valor={fmtFecha(h.fecha_servicio)} />
           <Fila label="NCF"           valor={h.ncf || fac?.ncf} />
           <Fila label="Notas entrega" valor={h.notas_entrega} />
@@ -650,9 +689,9 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
       {/* ── Diagnóstico ── */}
       <Seccion icono="🔬" titulo="Diagnóstico Técnico">
         {/* Hallazgos generales */}
-        {(h.diagnostico_general || h.fallas_identificadas || detalleCompleto?.diagnostico?.fallas_identificadas) && (
+        {fallasIdentificadas && (
           <div style={{ background: "#eff6ff", borderRadius: 10, padding: "10px 14px", marginBottom: 14, fontSize: 13, color: "#1e40af", fontWeight: 600, whiteSpace: "pre-wrap" }}>
-            {h.diagnostico_general || h.fallas_identificadas || detalleCompleto?.diagnostico?.fallas_identificadas}
+            {fallasIdentificadas}
           </div>
         )}
 
@@ -674,36 +713,36 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12 }}>
           <Card>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 8 }}>🔧 Inspección Mecánica</div>
-            {h.inspeccion_mecanica
-              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{h.inspeccion_mecanica}</p>
+            {inspeccionMecanica
+              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{inspeccionMecanica}</p>
               : <SinDatos />}
           </Card>
           <Card>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 8 }}>⚡ Inspección Eléctrica</div>
-            {h.inspeccion_electrica
-              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{h.inspeccion_electrica}</p>
+            {inspeccionElectrica
+              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{inspeccionElectrica}</p>
               : <SinDatos />}
           </Card>
           <Card>
             <div style={{ fontWeight: 700, fontSize: 12, color: "#555", marginBottom: 8 }}>💻 Escáner / Electrónica</div>
-            {h.inspeccion_electronica
-              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{h.inspeccion_electronica}</p>
+            {inspeccionElectronica
+              ? <p style={{ margin: 0, fontSize: 12, color: "#333", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>{inspeccionElectronica}</p>
               : <SinDatos />}
           </Card>
         </div>
 
-        {h.codigos_falla && (
+        {codigosFalla && (
           <div style={{ background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 12, padding: "14px 18px", marginTop: 14 }}>
             <div style={{ fontWeight: 700, color: "#92400e", marginBottom: 8, fontSize: 13 }}>⚠️ Códigos de Falla</div>
-            <div style={{ fontSize: 13 }}>{h.codigos_falla}</div>
+            <div style={{ fontSize: 13 }}>{codigosFalla}</div>
           </div>
         )}
 
-        {h.observaciones && (
+        {observacionesDiag && (
           <div style={{ marginTop: 14 }}>
             <div style={{ fontSize: 12, fontWeight: 700, color: "#888", marginBottom: 6 }}>OBSERVACIONES DEL TÉCNICO</div>
             <p style={{ background: "#f8fafc", borderRadius: 10, padding: "12px 16px", margin: 0, fontSize: 13, color: "#555", whiteSpace: "pre-wrap" }}>
-              {h.observaciones}
+              {observacionesDiag}
             </p>
           </div>
         )}
@@ -792,14 +831,14 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
         <>
           <Seccion icono="✅" titulo="Control de Calidad">
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              <Card bg={h.resultado_qc === "APROBADO" ? "#f0fdf4" : h.resultado_qc === "RECHAZADO" ? "#fef2f2" : "#f8fafc"}
-                    border={h.resultado_qc === "APROBADO" ? "#bbf7d0" : h.resultado_qc === "RECHAZADO" ? "#fecaca" : "#e5e7eb"}>
-                {h.resultado_qc && (
+              <Card bg={resultadoQC === "APROBADO" ? "#f0fdf4" : resultadoQC === "RECHAZADO" ? "#fef2f2" : "#f8fafc"}
+                    border={resultadoQC === "APROBADO" ? "#bbf7d0" : resultadoQC === "RECHAZADO" ? "#fecaca" : "#e5e7eb"}>
+                {resultadoQC && (
                   <div style={{ marginBottom: 10 }}>
-                    <Badge texto={h.resultado_qc} color={h.resultado_qc === "APROBADO" ? "#10b981" : "#ef4444"} />
+                    <Badge texto={resultadoQC} color={resultadoQC === "APROBADO" ? "#10b981" : "#ef4444"} />
                   </div>
                 )}
-                {h.observaciones_qc && <Fila label="Observaciones" valor={h.observaciones_qc} />}
+                {observacionesQC && <Fila label="Observaciones" valor={observacionesQC} />}
               </Card>
               {Object.keys(checklist).length > 0 && (
                 <Card>

@@ -2632,58 +2632,79 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
 
     const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
 
-    // 1. Orden de trabajo
+    // 1. Orden de trabajo completa
     const orden = await safe(() => supabase.from("ordenes_trabajo").select("*").eq("id", ordenId).maybeSingle());
     if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
 
-    // 2. Diagnóstico más reciente de esa orden
+    // 2. Diagnóstico más reciente
     const diag = await safe(() =>
       supabase.from("diagnosticos").select("*").eq("orden_id", ordenId)
         .order("created_at", { ascending: false }).limit(1).maybeSingle()
     );
 
-    // 3. Avances de reparación
-    const avances = diag?.id
-      ? await safe(() => supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diag.id).order("created_at"))
+    // 3–8. Todo en paralelo
+    const [avances, inspeccion, cotizacion, factura, estado_historial, vehiculo, cliente, tecnico] = await Promise.all([
+      diag?.id
+        ? safe(() => supabase.from("avances_reparacion").select("*").eq("diagnostico_id", diag.id).order("created_at"))
+        : Promise.resolve([]),
+      safe(() => supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", ordenId)
+        .order("created_at", { ascending: false }).limit(1).maybeSingle()),
+      diag?.id
+        ? safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diag.id).maybeSingle())
+        : Promise.resolve(null),
+      safe(() => supabase.from("facturas").select("*").eq("orden_id", ordenId)
+        .order("id", { ascending: false }).limit(1).maybeSingle()),
+      safe(() => supabase.from("orden_trabajo_log").select("*").eq("orden_id", ordenId).order("created_at")),
+      orden.vehiculo_id
+        ? safe(() => supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle())
+        : Promise.resolve(null),
+      orden.cliente_id
+        ? safe(() => supabase.from("clientes").select("*").eq("id", orden.cliente_id).maybeSingle())
+        : Promise.resolve(null),
+      orden.tecnico_asignado_id
+        ? safe(() => supabase.from("usuarios").select("nombre").eq("id", orden.tecnico_asignado_id).maybeSingle())
+        : Promise.resolve(null),
+    ]);
+
+    // Items de factura (si hay factura)
+    const factura_items = factura?.id
+      ? await safe(() => supabase.from("factura_items").select("*").eq("factura_id", factura.id).order("id"))
       : [];
 
-    // 4. Inspección vehicular
-    const inspeccion = await safe(() =>
-      supabase.from("inspeccion_vehiculo").select("*").eq("orden_id", ordenId)
-        .order("created_at", { ascending: false }).limit(1).maybeSingle()
-    );
+    // Items de cotización (del JSONB items_detalle o del campo items)
+    const cotizacion_items = Array.isArray(cotizacion?.items_detalle) ? cotizacion.items_detalle
+      : Array.isArray(cotizacion?.items) ? cotizacion.items : [];
 
-    // 5. Cotización
-    const cotizacion = diag?.id
-      ? await safe(() => supabase.from("cotizaciones").select("*").eq("diagnostico_id", diag.id).maybeSingle())
-      : null;
+    // Calcular fechas del proceso desde orden y log
+    const fechas_proceso = {
+      recibido:            orden.created_at,
+      diagnostico:         orden.fecha_diagnostico || null,
+      esperando_aprobacion:orden.fecha_esperando_aprobacion || null,
+      aprobacion:          orden.fecha_aprobacion || null,
+      inicio_reparacion:   orden.fecha_inicio_reparacion || null,
+      control_calidad:     orden.fecha_control_calidad || null,
+      listo:               orden.fecha_listo || null,
+      entrega:             orden.fecha_entrega || null,
+    };
 
-    // 6. Historial de estados (audit trail)
-    const estado_historial = await safe(() =>
-      supabase.from("orden_trabajo_log").select("*").eq("orden_id", ordenId).order("created_at")
-    );
-
-    // 7. Vehículo y cliente
-    const vehiculo = orden.vehiculo_id
-      ? await safe(() => supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle())
-      : null;
-    const cliente = orden.cliente_id
-      ? await safe(() => supabase.from("clientes").select("nombre,telefono,email").eq("id", orden.cliente_id).maybeSingle())
-      : null;
+    // Nombre del técnico
+    const tecnico_nombre = diag?.tecnico_nombre || orden.tecnico_nombre || tecnico?.nombre || null;
 
     res.json({
-      historial: null,         // No hay registro en vehiculo_historial (orden aún activa)
-      diagnostico: diag || null,
+      historial:       null,
+      diagnostico:     diag || null,
       orden,
-      avances: Array.isArray(avances) ? avances : [],
-      cotizacion: cotizacion || null,
-      cotizacion_items: [],
-      factura: null,
-      factura_items: [],
-      estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
-      inspeccion: inspeccion || null,
-      cliente: cliente || null,
-      vehiculo: vehiculo || null,
+      avances:         Array.isArray(avances) ? avances : [],
+      cotizacion:      cotizacion || null,
+      cotizacion_items,
+      factura:         factura || null,
+      factura_items:   Array.isArray(factura_items) ? factura_items : [],
+      estado_historial:Array.isArray(estado_historial) ? estado_historial : [],
+      inspeccion:      inspeccion || null,
+      cliente:         cliente || null,
+      vehiculo:        vehiculo || null,
+      tecnico_nombre,
+      fechas_proceso,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
