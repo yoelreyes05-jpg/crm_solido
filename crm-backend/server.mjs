@@ -2465,74 +2465,74 @@ app.post("/ordenes/:id/crear-historial", async (req, res) => {
   }
 });
 
-// GET /vehiculo-historial — lista completa (admin): historial cerrado + órdenes activas
+// GET /vehiculo-historial — lista completa (admin)
+// Fuente de verdad: ordenes_trabajo (tiene TODAS las órdenes, activas y entregadas).
+// vehiculo_historial se usa solo para el detalle/snapshot; no para la lista.
 app.get("/vehiculo-historial", async (req, res) => {
   try {
     const safe = async (fn) => { try { const r = await fn(); return r.data || null; } catch { return null; } };
 
-    // 1. Historial cerrado (órdenes ya entregadas)
-    const historial = await safe(() =>
-      supabase.from("vehiculo_historial").select("*").order("created_at", { ascending: false })
-    ) || [];
-
-    // 2. Órdenes activas que todavía no tienen entrada en vehiculo_historial
-    const ordenIdsEnHistorial = new Set(historial.map(h => h.orden_id).filter(Boolean));
-
-    const activeOrders = await safe(() =>
+    // 1. Todas las órdenes de trabajo (menos CANCELADO)
+    const ordenes = await safe(() =>
       supabase.from("ordenes_trabajo")
-        .select("id, numero_orden, descripcion, motivo_entrada, estado, created_at, cliente_id, vehiculo_id, tecnico_asignado_id")
+        .select("id, numero_orden, descripcion, motivo_entrada, estado, created_at, cliente_id, vehiculo_id, costo_total")
         .not("estado", "eq", "CANCELADO")
         .order("created_at", { ascending: false })
-        .limit(500)
+        .limit(1000)
     ) || [];
 
-    const ordenesNoEnHistorial = activeOrders.filter(o => !ordenIdsEnHistorial.has(o.id));
+    if (ordenes.length === 0) return res.json([]);
 
-    let ordenesActivas = [];
-    if (ordenesNoEnHistorial.length > 0) {
-      const vehiculoIds = [...new Set(ordenesNoEnHistorial.map(o => o.vehiculo_id).filter(Boolean))];
-      const clienteIds  = [...new Set(ordenesNoEnHistorial.map(o => o.cliente_id).filter(Boolean))];
+    // 2. Enriquecer con vehículo y cliente en 2 queries en paralelo
+    const vehiculoIds = [...new Set(ordenes.map(o => o.vehiculo_id).filter(Boolean))];
+    const clienteIds  = [...new Set(ordenes.map(o => o.cliente_id).filter(Boolean))];
 
-      const [vehiculos, clientes] = await Promise.all([
-        vehiculoIds.length > 0
-          ? safe(() => supabase.from("vehiculos").select("id,placa,marca,modelo,ano,color").in("id", vehiculoIds))
-          : Promise.resolve([]),
-        clienteIds.length > 0
-          ? safe(() => supabase.from("clientes").select("id,nombre,telefono").in("id", clienteIds))
-          : Promise.resolve([]),
-      ]);
+    const [vehiculos, clientes, histSnap] = await Promise.all([
+      vehiculoIds.length > 0
+        ? safe(() => supabase.from("vehiculos").select("id,placa,marca,modelo,ano,color").in("id", vehiculoIds))
+        : Promise.resolve([]),
+      clienteIds.length > 0
+        ? safe(() => supabase.from("clientes").select("id,nombre,telefono").in("id", clienteIds))
+        : Promise.resolve([]),
+      // vehiculo_historial: solo para traer campos extra (costo_total real, tecnico_nombre, ncf, etc.)
+      safe(() => supabase.from("vehiculo_historial")
+        .select("orden_id, costo_total, costo_mano_obra, costo_repuestos, tecnico_nombre, ncf, fecha_entrega, tipo_servicio")
+        .order("created_at", { ascending: false })),
+    ]);
 
-      const vMap = {}; (vehiculos || []).forEach(v => { vMap[v.id] = v; });
-      const cMap = {}; (clientes  || []).forEach(c => { cMap[c.id] = c; });
+    const vMap = {}; (vehiculos || []).forEach(v => { vMap[v.id] = v; });
+    const cMap = {}; (clientes  || []).forEach(c => { cMap[c.id] = c; });
+    const hMap = {}; (histSnap  || []).forEach(h => { if (h.orden_id) hMap[h.orden_id] = h; });
 
-      ordenesActivas = ordenesNoEnHistorial.map(o => {
-        const v = vMap[o.vehiculo_id] || {};
-        const c = cMap[o.cliente_id]  || {};
-        return {
-          id:               `orden_${o.id}`,
-          orden_id:         o.id,
-          placa:            v.placa   || "—",
-          marca:            v.marca   || "—",
-          modelo:           v.modelo  || "—",
-          ano:              v.ano     || null,
-          color:            v.color   || null,
-          cliente_nombre:   c.nombre  || "Particular",
-          cliente_telefono: c.telefono|| null,
-          numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
-          tipo_servicio:    o.descripcion || o.motivo_entrada || "En proceso",
-          tecnico_nombre:   null,
-          costo_total:      0,
-          costo_mano_obra:  0,
-          costo_repuestos:  0,
-          fecha_servicio:   o.created_at,
-          estado:           o.estado || "RECIBIDO",
-          _activa:          true,
-        };
-      });
-    }
+    const lista = ordenes.map(o => {
+      const v = vMap[o.vehiculo_id] || {};
+      const c = cMap[o.cliente_id]  || {};
+      const h = hMap[o.id]          || {};
+      const entregada = o.estado === "ENTREGADO";
+      return {
+        id:               entregada && hMap[o.id] ? `h_${o.id}` : `orden_${o.id}`,
+        orden_id:         o.id,
+        placa:            v.placa    || "—",
+        marca:            v.marca    || "—",
+        modelo:           v.modelo   || "—",
+        ano:              v.ano      || null,
+        color:            v.color    || null,
+        cliente_nombre:   c.nombre   || "Particular",
+        cliente_telefono: c.telefono || null,
+        numero_orden:     o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+        tipo_servicio:    h.tipo_servicio || o.descripcion || o.motivo_entrada || "En proceso",
+        tecnico_nombre:   h.tecnico_nombre || null,
+        costo_total:      Number(h.costo_total || o.costo_total || 0),
+        costo_mano_obra:  Number(h.costo_mano_obra || 0),
+        costo_repuestos:  Number(h.costo_repuestos || 0),
+        ncf:              h.ncf || null,
+        fecha_servicio:   h.fecha_entrega || o.created_at,
+        estado:           o.estado || "RECIBIDO",
+        _activa:          !entregada,
+      };
+    });
 
-    // Combinar: historial cerrado primero (más reciente arriba), luego activas
-    res.json([...historial, ...ordenesActivas]);
+    res.json(lista);
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
