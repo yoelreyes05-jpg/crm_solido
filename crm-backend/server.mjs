@@ -2494,9 +2494,9 @@ app.get("/vehiculo-historial", async (req, res) => {
       clienteIds.length > 0
         ? safe(() => supabase.from("clientes").select("id,nombre,telefono").in("id", clienteIds))
         : Promise.resolve([]),
-      // vehiculo_historial: solo para traer campos extra (costo_total real, tecnico_nombre, ncf, etc.)
+      // vehiculo_historial: id real + campos extra para el detalle
       safe(() => supabase.from("vehiculo_historial")
-        .select("orden_id, costo_total, costo_mano_obra, costo_repuestos, tecnico_nombre, ncf, fecha_entrega, tipo_servicio")
+        .select("id, orden_id, costo_total, costo_mano_obra, costo_repuestos, tecnico_nombre, ncf, fecha_entrega, tipo_servicio")
         .order("created_at", { ascending: false })),
     ]);
 
@@ -2509,9 +2509,11 @@ app.get("/vehiculo-historial", async (req, res) => {
       const c = cMap[o.cliente_id]  || {};
       const h = hMap[o.id]          || {};
       const entregada = o.estado === "ENTREGADO";
+      const histId = hMap[o.id]?.id || null; // id real de vehiculo_historial (si existe)
       return {
-        id:               entregada && hMap[o.id] ? `h_${o.id}` : `orden_${o.id}`,
+        id:               histId ? histId : `orden_${o.id}`,  // numérico si tiene historial, string si no
         orden_id:         o.id,
+        _historial_id:    histId,   // para saber si hay snapshot en vehiculo_historial
         placa:            v.placa    || "—",
         marca:            v.marca    || "—",
         modelo:           v.modelo   || "—",

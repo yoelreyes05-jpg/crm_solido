@@ -426,11 +426,18 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
   const [detalleCompleto, setDetalleCompleto] = useState<any>(null);
 
   useEffect(() => {
-    fetch(`${API}/vehiculo-historial/${h.id}/detalle`)
+    // Si tiene id numérico de vehiculo_historial → endpoint de historial cerrado
+    // Si es una orden activa (id = "orden_X") → endpoint de orden activa
+    const ordenId = h.orden_id;
+    const tieneHistorial = h._historial_id || (typeof h.id === "number");
+    const url = tieneHistorial
+      ? `${API}/vehiculo-historial/${h._historial_id || h.id}/detalle`
+      : `${API}/vehiculo-historial/orden/${ordenId}/detalle`;
+    fetch(url)
       .then(r => r.ok ? r.json() : null)
       .then(d => { if (d) setDetalleCompleto(d); })
       .catch(() => {});
-  }, [h.id]);
+  }, [h.id, h.orden_id, h._historial_id]);
 
   // Snapshot JSONB
   const avancesSnap: any[] = Array.isArray(h.avances_data)   ? h.avances_data   : [];
