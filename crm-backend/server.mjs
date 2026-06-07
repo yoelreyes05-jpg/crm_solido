@@ -5701,6 +5701,20 @@ const IA_TOOLS = [
   {
     type: "function",
     function: {
+      name: "historial_cliente",
+      description: "Historial completo de un cliente: sus vehículos, todas sus órdenes de trabajo con fechas de entrega, totales pagados y estado. Úsalo cuando pregunten por el historial o vehículo de un cliente por nombre.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nombre: { type: "string", description: "Nombre parcial o completo del cliente" },
+        },
+        required: ["cliente_nombre"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
       name: "buscar_vehiculos",
       description: "Busca vehículos por placa, marca, modelo o propietario. Devuelve información del vehículo y su dueño.",
       parameters: {
@@ -5956,6 +5970,54 @@ async function ejecutarHerramientaIA(nombre, args) {
         return { fecha, ordenes: enriched, total: enriched.length, por_estado: porEstado };
       }
 
+      case "historial_cliente": {
+        // 1. Encontrar cliente(s) por nombre
+        const { data: clis } = await supabase.from("clientes")
+          .select("id, nombre, telefono, email")
+          .ilike("nombre", `%${args.cliente_nombre}%`)
+          .limit(5);
+        if (!clis || clis.length === 0)
+          return { error: `No se encontró ningún cliente con nombre "${args.cliente_nombre}"` };
+
+        const resultado = [];
+        for (const cli of clis) {
+          // 2. Vehículos del cliente
+          const { data: vehs } = await supabase.from("vehiculos")
+            .select("id, placa, marca, modelo, ano, color")
+            .eq("cliente_id", cli.id);
+
+          // 3. Órdenes del cliente (todas)
+          const { data: ordenes } = await supabase.from("ordenes_trabajo")
+            .select("id, numero_orden, estado, descripcion, motivo_entrada, total, created_at, fecha_entrega, vehiculo_id")
+            .eq("cliente_id", cli.id)
+            .order("created_at", { ascending: false })
+            .limit(30);
+
+          const vMap = Object.fromEntries((vehs || []).map(v => [v.id, v]));
+          const ordenesEnriquecidas = (ordenes || []).map(o => ({
+            ...o,
+            vehiculo_info: vMap[o.vehiculo_id]
+              ? `${vMap[o.vehiculo_id].marca} ${vMap[o.vehiculo_id].modelo} (${vMap[o.vehiculo_id].placa})`
+              : "Sin vehículo",
+            placa: vMap[o.vehiculo_id]?.placa || null,
+          }));
+
+          const totalPagado = (ordenes || []).reduce((s, o) => s + Number(o.total || 0), 0);
+          const ultimaEntrega = (ordenes || []).find(o => o.fecha_entrega || o.estado === "ENTREGADO");
+
+          resultado.push({
+            cliente: { nombre: cli.nombre, telefono: cli.telefono, email: cli.email },
+            vehiculos: vehs || [],
+            total_ordenes: ordenes?.length || 0,
+            total_pagado_RD: totalPagado.toFixed(2),
+            ultima_entrega: ultimaEntrega?.fecha_entrega || null,
+            ultima_entrega_estado: ultimaEntrega?.estado || null,
+            ordenes: ordenesEnriquecidas,
+          });
+        }
+        return resultado.length === 1 ? resultado[0] : { clientes_encontrados: resultado };
+      }
+
       case "buscar_vehiculos": {
         let q = supabase
           .from("vehiculos")
@@ -6085,27 +6147,28 @@ app.post("/api/ia/asistente", async (req, res) => {
 Tu función es dar respuestas rápidas y precisas al personal consultando la base de datos en tiempo real.
 
 HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
-- buscar_facturas: facturas, cobros, NCF, pagos de clientes
-- buscar_ordenes: órdenes de trabajo, estado, reparaciones, vehículos en taller
-- buscar_clientes: buscar un cliente por nombre, teléfono o cédula
-- buscar_vehiculos: buscar un vehículo por placa, marca, modelo o dueño
+- historial_cliente: cuando pregunten por el vehículo, historial u órdenes de un cliente por nombre. ESTA ES LA HERRAMIENTA PRINCIPAL para preguntas como "el vehículo de Claudio", "cuándo entregaron el carro de Juan", "qué servicios ha traído Pedro".
+- buscar_facturas: facturas, cobros, NCF, pagos
+- buscar_ordenes: buscar órdenes por placa, estado o fecha (no por nombre de cliente — para eso usa historial_cliente)
+- buscar_clientes: solo si necesitas teléfono, email o cédula de un cliente. Si preguntan por su historial, usa historial_cliente directamente.
+- buscar_vehiculos: buscar vehículo por placa, marca o modelo
 - consultar_inventario: stock de repuestos, precios, stock bajo
-- buscar_suplidores: proveedores, suplidores registrados
+- buscar_suplidores: proveedores registrados
 - cuentas_por_cobrar: deudas pendientes de clientes
 - resumen_ventas: total facturado en un período
-- historial_vehiculo: historial completo de servicios de un vehículo por placa
-- ordenes_del_dia: órdenes recibidas hoy o en una fecha
-- resumen_dashboard: estado general del taller (órdenes activas, ingreso del día, stock bajo)
-- contabilidad_resumen: facturación del mes, cuentas por cobrar/pagar, variación vs mes anterior
+- historial_vehiculo: historial de un vehículo por PLACA (cuando ya tienes la placa)
+- ordenes_del_dia: órdenes de hoy o de una fecha
+- resumen_dashboard: estado general del taller (úsalo para "¿cómo va el taller?")
+- contabilidad_resumen: facturación del mes, cuentas por cobrar/pagar
 
 REGLAS:
-1. SIEMPRE usa una herramienta para responder — nunca de memoria.
-2. Usa resumen_dashboard cuando pregunten "¿cómo va el taller?" o quieran un resumen rápido.
-3. Usa contabilidad_resumen para preguntas financieras del mes o año.
+1. SIEMPRE usa una herramienta — nunca respondas de memoria.
+2. Para preguntas sobre cliente + vehículo/historial: llama historial_cliente de inmediato con el nombre. No llames buscar_clientes primero.
+3. Puedes encadenar herramientas: si una devuelve una placa, úsala en historial_vehiculo en la siguiente ronda.
 4. Si no hay resultados: "No encontré ningún registro con ese criterio."
-5. Montos siempre en formato "RD$ X,XXX.XX".
-6. Responde en español dominicano, breve y directo. Usa emojis moderadamente.
-7. Para múltiples resultados, usa listas cortas. Para un solo resultado, da todos los detalles relevantes.`;
+5. Montos en formato "RD$ X,XXX.XX".
+6. Responde en español dominicano, breve y directo.
+7. Incluye fechas de entrega cuando estén disponibles (campo fecha_entrega o estado ENTREGADO).`;
 
     const mensajes = [
       { role: "system", content: systemPrompt },
@@ -6113,34 +6176,43 @@ REGLAS:
       { role: "user", content: pregunta.trim() },
     ];
 
-    // Primera llamada — puede devolver tool_calls
-    let oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
-      body: JSON.stringify({ model: "gpt-4o-mini", messages: mensajes, tools: IA_TOOLS, tool_choice: "auto", max_tokens: 800, temperature: 0.3 }),
-    });
-    if (!oaiRes.ok) return res.status(502).json({ error: "Error al contactar OpenAI.", detalle: await oaiRes.text() });
+    // Loop agentic: hasta 4 rondas de tool calls
+    const MAX_ROUNDS = 4;
+    let conversacion = [...mensajes];
+    let msg = null;
 
-    let oaiData = await oaiRes.json();
-    let msg = oaiData.choices?.[0]?.message;
-
-    // Si la IA pidió herramientas, ejecutarlas y volver a llamar
-    if (msg?.tool_calls?.length) {
-      const extras = [msg];
-      for (const tc of msg.tool_calls) {
-        let args = {};
-        try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
-        const resultado = await ejecutarHerramientaIA(tc.function.name, args);
-        extras.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(resultado) });
-      }
-      oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+    for (let ronda = 0; ronda < MAX_ROUNDS; ronda++) {
+      const oaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
         method: "POST",
         headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OAI_KEY}` },
-        body: JSON.stringify({ model: "gpt-4o-mini", messages: [...mensajes, ...extras], max_tokens: 800, temperature: 0.3 }),
+        body: JSON.stringify({
+          model: "gpt-4o-mini",
+          messages: conversacion,
+          tools: IA_TOOLS,
+          tool_choice: "auto",
+          max_tokens: 1000,
+          temperature: 0.3,
+        }),
       });
-      if (!oaiRes.ok) return res.status(502).json({ error: "Error al procesar resultados.", detalle: await oaiRes.text() });
-      oaiData = await oaiRes.json();
+      if (!oaiRes.ok) return res.status(502).json({ error: "Error al contactar OpenAI.", detalle: await oaiRes.text() });
+
+      const oaiData = await oaiRes.json();
       msg = oaiData.choices?.[0]?.message;
+
+      // Si no hay tool_calls, la IA ya tiene la respuesta final
+      if (!msg?.tool_calls?.length) break;
+
+      // Ejecutar todas las herramientas pedidas en paralelo
+      conversacion.push(msg);
+      const resultados = await Promise.all(
+        msg.tool_calls.map(async (tc) => {
+          let args = {};
+          try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
+          const resultado = await ejecutarHerramientaIA(tc.function.name, args);
+          return { role: "tool", tool_call_id: tc.id, content: JSON.stringify(resultado) };
+        })
+      );
+      conversacion.push(...resultados);
     }
 
     res.json({ respuesta: msg?.content?.trim() || "No pude generar una respuesta. Intenta de nuevo." });
