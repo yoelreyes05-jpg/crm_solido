@@ -363,7 +363,6 @@ Un técnico escribió esta lista de trabajos a realizar (es un DIAGNÓSTICO, NO 
 ${texto.trim()}
 """
 Transfórmala en una lista numerada de TRABAJOS RECOMENDADOS, redactados en modo prescriptivo/recomendación (lo que SE DEBE HACER), NO en pasado ni como reporte de trabajos ya ejecutados. Usa verbos en infinitivo o futuro ("Sustituir...", "Verificar...", "Realizar..."). Descripción técnica breve por ítem, menciona estándares cuando aplique. Máximo 220 palabras. Responde SOLO con la lista.`,
-  };
 
     avance: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
 Un técnico describió el trabajo que YA REALIZÓ (avance de reparación)${ctx ? ` (${ctx})` : ""}:
