@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import Link from "next/link";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { API_URL as API } from "@/config";
+import { useEmpresa } from "@/lib/empresa";
 
 // ─── Fases del taller ────────────────────────────────────────────────────────
 const FASES = [
@@ -88,9 +89,12 @@ function BarChart({
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 export default function Dashboard() {
+  const empresa = useEmpresa();
   const [stats,   setStats]   = useState<any>(null);
   const [ordenes, setOrdenes] = useState<any[]>([]);
   const [kpisGerente, setKpisGerente] = useState<any>(null);
+  const [vinHoy,  setVinHoy]  = useState(0);
+  const [cafeHoy, setCafeHoy] = useState<number|null>(null);
   const [loading, setLoading] = useState(true);
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
 
@@ -106,13 +110,38 @@ export default function Dashboard() {
       const requests: Promise<any>[] = [
         fetch(`${API}/dashboard/stats`),
         fetch(`${API}/ordenes`),
+        fetch(`${API}/api/predictivo/vin-historial`),
+        fetch(`${API}/cafeteria/ventas?limit=200`),
       ];
       if (esGerente) requests.push(fetch(`${API}/dashboard/kpis-gerente`));
 
-      const [sRes, oRes, kRes] = await Promise.all(requests);
+      const [sRes, oRes, vinRes, cafeRes, kRes] = await Promise.all(requests);
       setStats(await sRes.json());
       const o = await oRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
+
+      // VIN: contar consultas de hoy
+      try {
+        const vinData = await vinRes.json();
+        const hoy = new Date().toISOString().slice(0, 10);
+        const count = Array.isArray(vinData)
+          ? vinData.filter((v: any) => v.consultado_en?.slice(0, 10) === hoy).length
+          : 0;
+        setVinHoy(count);
+      } catch { setVinHoy(0); }
+
+      // Cafetería: total vendido hoy
+      try {
+        const cafeData = await cafeRes.json();
+        const hoy = new Date().toISOString().slice(0, 10);
+        const total = Array.isArray(cafeData)
+          ? cafeData
+              .filter((v: any) => v.created_at?.slice(0, 10) === hoy)
+              .reduce((s: number, v: any) => s + (Number(v.total) || 0), 0)
+          : null;
+        setCafeHoy(total);
+      } catch { setCafeHoy(null); }
+
       if (kRes) setKpisGerente(await kRes.json());
     } catch {}
     setLoading(false);
@@ -159,7 +188,7 @@ export default function Dashboard() {
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:22 }}>
         <div>
           <h1 style={S.title}>📊 Dashboard</h1>
-          <p style={{ color:"#888", fontSize:14, margin:0 }}>Sólido Auto Servicio — Vista general del taller</p>
+          <p style={{ color:"#888", fontSize:14, margin:0 }}>{empresa.nombre || "Sólido Auto Servicio"} — Vista general del taller</p>
         </div>
         <span style={{ fontSize:12, color:"#aaa", background:"#fff", padding:"6px 14px", borderRadius:8, border:"1px solid #e5e7eb" }}>
           🔄 Auto‑refresh 5s
@@ -197,6 +226,8 @@ export default function Dashboard() {
           { label:"🔧 Reparación",  valor: stats?.ordenes?.reparacion||0,   color:"#ef4444" },
           { label:"👥 Clientes",    valor: stats?.clientes||0,              color:"#8b5cf6" },
           { label:"⚠️ Stock Bajo",  valor: stats?.stockBajo||0,             color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
+          { label:"🔎 VIN Hoy",     valor: vinHoy,                          color:"#7c3aed" },
+          ...(cafeHoy !== null ? [{ label:"☕ Café Hoy", valor: `$${cafeHoy.toLocaleString("es-DO",{minimumFractionDigits:2,maximumFractionDigits:2})}`, color:"#d97706" }] : []),
         ].map(k => (
           <div key={k.label} style={{ background:"#fff", borderRadius:14, padding:"18px 16px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", borderLeft:`5px solid ${k.color}` }}>
             <div style={{ fontSize:13, color:"#888", marginBottom:8, fontWeight:600 }}>{k.label}</div>
@@ -375,7 +406,7 @@ export default function Dashboard() {
                                 )}
                                 {fase.key === "LISTO" && orden.cliente_telefono && (
                                   <a
-                                    href={`https://wa.me/${orden.cliente_telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre} 👋, le informamos que su vehículo *${orden.vehiculo_info}* ya está listo para ser retirado en *Sólido Auto Servicio*. Nuestro horario es de 8am a 6pm. ¡Le esperamos!`)}`}
+                                    href={`https://wa.me/${orden.cliente_telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre} 👋, le informamos que su vehículo *${orden.vehiculo_info}* ya está listo para ser retirado en *${empresa.nombre || "Sólido Auto Servicio"}*. Nuestro horario es de 8am a 6pm. ¡Le esperamos!`)}`}
                                     target="_blank" rel="noreferrer"
                                     onClick={e => e.stopPropagation()}
                                     style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:4, marginTop:7, padding:"5px 0", background:"#25d366", color:"#fff", borderRadius:6, fontSize:11, fontWeight:700, textDecoration:"none" }}>
@@ -447,12 +478,14 @@ export default function Dashboard() {
       {/* ACCESOS RÁPIDOS */}
       <div style={S.section}>
         <h2 style={S.sectionTitle}>⚡ Accesos Rápidos</h2>
-        <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:12 }}>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12 }}>
           {[
-            { href:"/recepcion",    label:"🚗 Nueva Recepción",  color:"#3b82f6" },
-            { href:"/diagnosticos", label:"🔬 Nuevo Diagnóstico", color:"#8b5cf6" },
-            { href:"/facturacion",  label:"🧾 Facturar",          color:"#10b981" },
-            { href:"/clientes",     label:"👤 Nuevo Cliente",     color:"#f59e0b" },
+            { href:"/recepcion",    label:"🚗 Nueva Recepción",   color:"#3b82f6" },
+            { href:"/diagnosticos", label:"🔬 Nuevo Diagnóstico",  color:"#8b5cf6" },
+            { href:"/facturacion",  label:"🧾 Facturar",           color:"#10b981" },
+            { href:"/clientes",     label:"👤 Nuevo Cliente",      color:"#f59e0b" },
+            { href:"/cafeteria",    label:"☕ Cafetería",           color:"#d97706" },
+            { href:"/inteligencia", label:"🧠 Inteligencia",        color:"#7c3aed" },
           ].map(a => (
             <Link key={a.href} href={a.href} style={{
               background:a.color, color:"#fff", padding:"18px 16px",
@@ -476,7 +509,7 @@ export default function Dashboard() {
 const S: any = {
   container:    { padding:"24px 28px", background:"#f5f7fb", minHeight:"100vh" },
   title:        { fontSize:26, fontWeight:900, margin:0 },
-  kpiGrid:      { display:"grid", gridTemplateColumns:"repeat(6,1fr)", gap:14, marginBottom:24 },
+  kpiGrid:      { display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(130px,1fr))", gap:14, marginBottom:24 },
   section:      { marginBottom:28 },
   sectionTitle: { fontSize:17, fontWeight:700, marginBottom:14, color:"#111" },
   td:           { padding:"12px 16px", fontSize:13 },
