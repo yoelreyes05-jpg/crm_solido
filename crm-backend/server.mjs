@@ -324,6 +324,75 @@ app.get("/vin/:vin/repuestos-sugeridos", async (req, res) => {
   }
 });
 
+// ── IA: Mejorar texto técnico (diagnóstico / trabajos) ───────────────────────
+app.post("/api/ia/mejorar-texto", async (req, res) => {
+  const { texto, tipo, vehiculo, cliente } = req.body;
+  if (!texto || texto.trim().length < 10)
+    return res.status(400).json({ error: "Texto muy corto para procesar." });
+
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_KEY) return res.status(500).json({ error: "IA no configurada en el servidor." });
+
+  const ctx = [vehiculo ? `Vehículo: ${vehiculo}` : "", cliente ? `Cliente: ${cliente}` : ""].filter(Boolean).join(" | ");
+
+  const prompts = {
+    diagnostico: `Eres el asistente técnico oficial de "Sólido Auto Servicio", taller automotriz en República Dominicana.
+Un técnico escribió este diagnóstico de forma rápida${ctx ? ` (${ctx})` : ""}:
+"""
+${texto.trim()}
+"""
+Transfórmalo en un DIAGNÓSTICO TÉCNICO PROFESIONAL en español usando exactamente este formato:
+
+HALLAZGOS TÉCNICOS:
+[descripción clara y técnica de cada problema detectado]
+
+CAUSA PROBABLE:
+[análisis técnico de la causa raíz]
+
+TRABAJOS RECOMENDADOS:
+[lista numerada de los trabajos a realizar]
+
+OBSERVACIONES:
+[notas relevantes para el cliente o el taller]
+
+Reglas: mantén TODA la información original sin inventar nada nuevo. Usa terminología técnica automotriz. Máximo 320 palabras. Responde SOLO con el diagnóstico.`,
+
+    trabajos: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
+Un técnico escribió esta lista de trabajos de forma rápida${ctx ? ` (${ctx})` : ""}:
+"""
+${texto.trim()}
+"""
+Transfórmala en una DESCRIPCIÓN TÉCNICA PROFESIONAL de los trabajos realizados o a realizar. Usa lista numerada, descripción técnica breve por trabajo, menciona estándares cuando aplique. Máximo 220 palabras. Responde SOLO con la lista.`,
+  };
+
+  const prompt = prompts[tipo] || prompts.diagnostico;
+
+  try {
+    const oRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "Authorization": `Bearer ${OPENAI_KEY}` },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 700,
+        temperature: 0.25,
+      }),
+    });
+    if (!oRes.ok) {
+      const err = await oRes.text();
+      console.error("OpenAI error:", err);
+      return res.status(502).json({ error: "Error al conectar con IA." });
+    }
+    const data = await oRes.json();
+    const mejorado = data.choices?.[0]?.message?.content?.trim();
+    if (!mejorado) return res.status(502).json({ error: "IA no devolvió respuesta." });
+    res.json({ mejorado });
+  } catch (e) {
+    console.error("IA error:", e);
+    res.status(500).json({ error: "Error interno al procesar con IA." });
+  }
+});
+
 // ── POST /vin/registrar-consulta ─────────────────────────────────────────────
 // Registra en vin_historial cada vez que se decodifica un VIN en el frontend.
 app.post("/vin/registrar-consulta", async (req, res) => {

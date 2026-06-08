@@ -99,6 +99,8 @@ export default function ReparacionPage() {
   const [msg,     setMsg]     = useState<Msg | null>(null);
   const [descAvance, setDescAvance] = useState("");
   const [confirmCompleta, setConfirmCompleta] = useState(false);
+  const [mejorandoIA,     setMejorandoIA]     = useState(false);
+  const [iaModal,         setIaModal]         = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
   const avancesEndRef = useRef<HTMLDivElement>(null);
 
@@ -763,7 +765,48 @@ export default function ReparacionPage() {
             <h3 style={{ margin: "0 0 14px", fontSize: 14, fontWeight: 700, color: C.text }}>
               ➕ Agregar Avance
             </h3>
-            <label style={labelStyle}>Descripción del trabajo realizado</label>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <label style={{ ...labelStyle, marginBottom: 0 }}>Descripción del trabajo realizado</label>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (!descAvance.trim() || descAvance.trim().length < 10) {
+                    setMsg({ tipo: "error", texto: "Escribe el trabajo antes de usar la IA." });
+                    return;
+                  }
+                  setMejorandoIA(true);
+                  setMsg(null);
+                  try {
+                    const r = await fetch(`${API}/api/ia/mejorar-texto`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({
+                        texto: descAvance,
+                        tipo: "trabajos",
+                        vehiculo: vehiculoStr !== "—" ? vehiculoStr : undefined,
+                        cliente: orden?.cliente_nombre,
+                      }),
+                    });
+                    const data = await r.json();
+                    if (data.error) { setMsg({ tipo: "error", texto: data.error }); return; }
+                    setIaModal(data.mejorado);
+                  } catch {
+                    setMsg({ tipo: "error", texto: "No se pudo conectar con la IA." });
+                  } finally {
+                    setMejorandoIA(false);
+                  }
+                }}
+                disabled={mejorandoIA}
+                style={{
+                  background: mejorandoIA ? "#4c1d95" : "#7c3aed",
+                  color: "#fff", border: "none", borderRadius: 7,
+                  padding: "5px 12px", fontSize: 12, fontWeight: 700,
+                  cursor: mejorandoIA ? "wait" : "pointer",
+                }}
+              >
+                {mejorandoIA ? "⏳ Procesando..." : "✨ Pulir con IA"}
+              </button>
+            </div>
             <textarea
               value={descAvance}
               onChange={e => setDescAvance(e.target.value)}
@@ -889,6 +932,42 @@ export default function ReparacionPage() {
           </div>
         </div>
       </div>
+
+      {/* Modal IA */}
+      {iaModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(620px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#a78bfa" }}>✨ Avance mejorado por IA</h3>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>Revisa y edita antes de aceptar</p>
+              </div>
+              <button onClick={() => setIaModal(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer" }}>✕</button>
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>Texto original</div>
+              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#94a3b8", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto" }}>
+                {descAvance}
+              </div>
+            </div>
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>✨ Versión profesional (editable)</div>
+              <textarea
+                value={iaModal}
+                onChange={e => setIaModal(e.target.value)}
+                style={{ flex: 1, minHeight: 200, width: "100%", padding: "12px 14px", background: "#0f172a", border: "2px solid #7c3aed55", borderRadius: 8, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7, resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
+              <button onClick={() => setIaModal(null)} style={{ flex: 1, padding: "10px 0", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.muted, fontWeight: 700, cursor: "pointer" }}>✕ Descartar</button>
+              <button
+                onClick={() => { setDescAvance(iaModal); setIaModal(null); setMsg({ tipo: "ok", texto: "Texto mejorado aplicado al avance." }); }}
+                style={{ flex: 2, padding: "10px 0", background: "#7c3aed", border: "none", borderRadius: 10, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+              >✅ Aceptar y aplicar</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

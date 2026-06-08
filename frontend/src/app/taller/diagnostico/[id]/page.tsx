@@ -160,6 +160,8 @@ export default function DiagnosticoPage() {
   const [inspecOpen,    setInspecOpen]    = useState(false);
   const [confirmCerrar, setConfirmCerrar] = useState(false);
   const [exito,         setExito]         = useState(false);
+  const [mejorandoIA,   setMejorandoIA]   = useState<"desc" | "trabajos" | null>(null);
+  const [iaModal,       setIaModal]       = useState<{ campo: "desc" | "trabajos"; mejorado: string } | null>(null);
 
   // Campos del formulario
   const [desc,      setDesc]      = useState("");
@@ -436,6 +438,36 @@ export default function DiagnosticoPage() {
       setMsg({ tipo: "error", texto: e.message || "Error al guardar diagnostico." });
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── IA: Mejorar texto ─────────────────────────────────────────────────────
+  const mejorarConIA = async (campo: "desc" | "trabajos") => {
+    const texto = campo === "desc" ? desc : moDetalle;
+    if (!texto.trim() || texto.trim().length < 15) {
+      setMsg({ tipo: "error", texto: "Escribe al menos una descripción antes de usar la IA." });
+      return;
+    }
+    setMejorandoIA(campo);
+    setMsg(null);
+    try {
+      const r = await fetch(`${API}/api/ia/mejorar-texto`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          texto,
+          tipo: campo === "desc" ? "diagnostico" : "trabajos",
+          vehiculo: vehiculoStr !== "—" ? vehiculoStr : undefined,
+          cliente: orden?.cliente_nombre,
+        }),
+      });
+      const data = await r.json();
+      if (data.error) { setMsg({ tipo: "error", texto: data.error }); return; }
+      setIaModal({ campo, mejorado: data.mejorado });
+    } catch {
+      setMsg({ tipo: "error", texto: "No se pudo conectar con la IA. Verifica la conexión." });
+    } finally {
+      setMejorandoIA(null);
     }
   };
 
@@ -762,9 +794,27 @@ export default function DiagnosticoPage() {
 
             {/* Descripcion */}
             <div style={{ marginBottom: 18 }}>
-              <label style={labelStyle}>
-                Descripcion de hallazgos tecnicos <span style={{ color: C.red }}>*</span>
-              </label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>
+                  Descripcion de hallazgos tecnicos <span style={{ color: C.red }}>*</span>
+                </label>
+                {!diagnostico?.terminado && (
+                  <button
+                    type="button"
+                    onClick={() => mejorarConIA("desc")}
+                    disabled={mejorandoIA === "desc"}
+                    style={{
+                      background: mejorandoIA === "desc" ? "#4c1d95" : "#7c3aed",
+                      color: "#fff", border: "none", borderRadius: 7,
+                      padding: "5px 12px", fontSize: 12, fontWeight: 700,
+                      cursor: mejorandoIA === "desc" ? "wait" : "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}
+                  >
+                    {mejorandoIA === "desc" ? "⏳ Procesando..." : "✨ Pulir con IA"}
+                  </button>
+                )}
+              </div>
               <textarea
                 value={desc}
                 onChange={e => setDesc(e.target.value)}
@@ -944,7 +994,25 @@ export default function DiagnosticoPage() {
 
             {/* Trabajos a realizar */}
             <div style={{ marginBottom: 18 }}>
-              <label style={labelStyle}>Trabajos a realizar (uno por linea)</label>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+                <label style={{ ...labelStyle, marginBottom: 0 }}>Trabajos a realizar (uno por linea)</label>
+                {!diagnostico?.terminado && (
+                  <button
+                    type="button"
+                    onClick={() => mejorarConIA("trabajos")}
+                    disabled={mejorandoIA === "trabajos"}
+                    style={{
+                      background: mejorandoIA === "trabajos" ? "#4c1d95" : "#7c3aed",
+                      color: "#fff", border: "none", borderRadius: 7,
+                      padding: "5px 12px", fontSize: 12, fontWeight: 700,
+                      cursor: mejorandoIA === "trabajos" ? "wait" : "pointer",
+                      display: "flex", alignItems: "center", gap: 5,
+                    }}
+                  >
+                    {mejorandoIA === "trabajos" ? "⏳ Procesando..." : "✨ Pulir con IA"}
+                  </button>
+                )}
+              </div>
               <textarea
                 value={moDetalle}
                 onChange={e => setMoDetalle(e.target.value)}
@@ -1132,6 +1200,73 @@ export default function DiagnosticoPage() {
                 style={{ background: C.blue, color: "#fff", border: "none", borderRadius: 8, padding: "10px 24px", fontWeight: 700, cursor: "pointer" }}
               >
                 Listo
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: resultado IA */}
+      {iaModal && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(660px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#a78bfa" }}>
+                  ✨ Texto mejorado por IA
+                </h3>
+                <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
+                  {iaModal.campo === "desc" ? "Diagnóstico técnico" : "Trabajos a realizar"} — revisa y acepta o descarta
+                </p>
+              </div>
+              <button onClick={() => setIaModal(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer" }}>✕</button>
+            </div>
+
+            {/* Texto original */}
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                Texto original del técnico
+              </div>
+              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#94a3b8", whiteSpace: "pre-wrap", maxHeight: 100, overflowY: "auto" }}>
+                {iaModal.campo === "desc" ? desc : moDetalle}
+              </div>
+            </div>
+
+            {/* Texto mejorado — editable */}
+            <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+                ✨ Versión profesional (puedes editar antes de aceptar)
+              </div>
+              <textarea
+                value={iaModal.mejorado}
+                onChange={e => setIaModal(prev => prev ? { ...prev, mejorado: e.target.value } : null)}
+                style={{
+                  flex: 1, minHeight: 220, width: "100%", padding: "12px 14px",
+                  background: "#0f172a", border: "2px solid #7c3aed55",
+                  borderRadius: 8, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7,
+                  resize: "vertical", boxSizing: "border-box", fontFamily: "inherit",
+                }}
+              />
+            </div>
+
+            {/* Botones */}
+            <div style={{ display: "flex", gap: 12, marginTop: 18 }}>
+              <button
+                onClick={() => setIaModal(null)}
+                style={{ flex: 1, padding: "11px 0", background: C.card2, border: `1px solid ${C.border}`, borderRadius: 10, color: C.muted, fontWeight: 700, cursor: "pointer" }}
+              >
+                ✕ Descartar
+              </button>
+              <button
+                onClick={() => {
+                  if (iaModal.campo === "desc") setDesc(iaModal.mejorado);
+                  else setMoDetalle(iaModal.mejorado);
+                  setIaModal(null);
+                  setMsg({ tipo: "ok", texto: "Texto mejorado aplicado. Recuerda guardar el diagnóstico." });
+                }}
+                style={{ flex: 2, padding: "11px 0", background: "#7c3aed", border: "none", borderRadius: 10, color: "#fff", fontWeight: 800, fontSize: 14, cursor: "pointer" }}
+              >
+                ✅ Aceptar y aplicar
               </button>
             </div>
           </div>
