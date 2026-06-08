@@ -20,8 +20,11 @@ export default function SuplidoresPage() {
   const [editando, setEditando]   = useState<Suplidor | null>(null);
   const [saving, setSaving]       = useState(false);
   const [busqueda, setBusqueda]   = useState("");
-  const [buscandoRNC, setBuscandoRNC] = useState(false);
-  const [rncEstado, setRncEstado]     = useState<"ok" | "notfound" | "">("");
+  const [buscandoRNC, setBuscandoRNC]           = useState(false);
+  const [rncEstado, setRncEstado]               = useState<"ok" | "notfound" | "">("");
+  const [busqNombre, setBusqNombre]             = useState("");
+  const [resultadosNombre, setResultadosNombre] = useState<any[]>([]);
+  const [buscandoNombre, setBuscandoNombre]     = useState(false);
 
   const consultarRNC = async (rnc: string) => {
     const limpio = rnc.replace(/\D/g, "");
@@ -39,6 +42,25 @@ export default function SuplidoresPage() {
       }
     } catch { setRncEstado("notfound"); }
     finally { setBuscandoRNC(false); }
+  };
+
+  const buscarPorNombre = async (q: string) => {
+    setBusqNombre(q);
+    if (q.length < 3) { setResultadosNombre([]); return; }
+    setBuscandoNombre(true);
+    try {
+      const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setResultadosNombre(Array.isArray(data) ? data : []);
+    } catch { setResultadosNombre([]); }
+    finally { setBuscandoNombre(false); }
+  };
+
+  const seleccionarDeNombre = (item: any) => {
+    setForm(f => ({ ...f, rnc: item.rnc, name: item.razon_social }));
+    setBusqNombre("");
+    setResultadosNombre([]);
+    setRncEstado("ok");
   };
 
   const cargar = useCallback(async () => {
@@ -111,6 +133,54 @@ export default function SuplidoresPage() {
           <h2 style={s.cardTitle}>
             {editando ? `✏️ Editando: ${editando.name}` : "➕ Nuevo Suplidor"}
           </h2>
+
+          {/* ── Buscar en DGII por nombre ── */}
+          <label style={s.label}>🔎 Buscar en padrón DGII por nombre</label>
+          <div style={{ position: "relative", marginBottom: 14 }}>
+            <input
+              value={busqNombre}
+              onChange={e => buscarPorNombre(e.target.value)}
+              placeholder="Escribe el nombre de la empresa o persona…"
+              style={{ ...s.input, marginBottom: 0, paddingRight: buscandoNombre ? 36 : undefined }}
+            />
+            {buscandoNombre && (
+              <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)", fontSize: 16 }}>⏳</span>
+            )}
+            {resultadosNombre.length > 0 && (
+              <div style={{
+                position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 100,
+                background: "#1e293b", border: "1px solid #334155", borderRadius: 8,
+                boxShadow: "0 8px 24px rgba(0,0,0,.4)", maxHeight: 260, overflowY: "auto",
+              }}>
+                {resultadosNombre.map((r, i) => (
+                  <div
+                    key={i}
+                    onClick={() => seleccionarDeNombre(r)}
+                    style={{
+                      padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #334155",
+                      transition: "background .15s",
+                    }}
+                    onMouseEnter={e => (e.currentTarget.style.background = "#2563eb22")}
+                    onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                  >
+                    <div style={{ fontWeight: 600, fontSize: 13, color: "#f1f5f9" }}>{r.razon_social}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                      RNC: {r.rnc}
+                      {r.nombre_comercial && ` · ${r.nombre_comercial}`}
+                      <span style={{
+                        marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 10,
+                        background: r.estado === "ACTIVO" ? "#16a34a33" : "#dc262633",
+                        color: r.estado === "ACTIVO" ? "#4ade80" : "#f87171",
+                      }}>{r.estado}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            {busqNombre.length >= 3 && !buscandoNombre && resultadosNombre.length === 0 && (
+              <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 4 }}>Sin resultados para "{busqNombre}"</p>
+            )}
+          </div>
 
           <label style={s.label}>Nombre *</label>
           <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}

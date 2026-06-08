@@ -5607,13 +5607,47 @@ app.patch("/inspeccion/:id", async (req, res) => {
 // =====================================================
 
 /**
+ * GET /rnc/buscar?q=texto  ← debe ir ANTES de /rnc/:rnc para que Express no confunda
+ * Búsqueda por nombre o prefijo de RNC (máx 10 resultados) — para autocompletar.
+ */
+app.get("/rnc/buscar", async (req, res) => {
+  try {
+    const q = req.query.q?.trim();
+    if (!q || q.length < 3) return res.json([]);
+
+    // Si parece un número, buscar por prefijo de RNC
+    if (/^\d+$/.test(q)) {
+      const { data, error } = await supabase
+        .from("rnc_dgii")
+        .select("rnc, razon_social, nombre_comercial, estado")
+        .like("rnc", `${q}%`)
+        .limit(10);
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data || []);
+    }
+
+    // Búsqueda por nombre (sin filtrar por estado — muestra todos incluido SUSPENDIDO)
+    const { data, error } = await supabase
+      .from("rnc_dgii")
+      .select("rnc, razon_social, nombre_comercial, estado")
+      .ilike("razon_social", `%${q}%`)
+      .limit(10);
+
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
  * GET /rnc/:rnc
- * Consulta un RNC o cédula en la tabla rnc_dgii (importada del padrón DGII).
+ * Consulta exacta por RNC o cédula.
  * Retorna: { rnc, razon_social, nombre_comercial, actividad, estado, fecha_constitucion, tipo }
  */
 app.get("/rnc/:rnc", async (req, res) => {
   try {
-    const rnc = req.params.rnc?.replace(/\D/g, ""); // solo dígitos
+    const rnc = req.params.rnc?.replace(/\D/g, "");
     if (!rnc || rnc.length < 9) return res.status(400).json({ error: "RNC inválido" });
 
     const { data, error } = await supabase
@@ -5631,7 +5665,7 @@ app.get("/rnc/:rnc", async (req, res) => {
   }
 });
 
-/** Alias legacy: /dgii/rnc/:rnc — mantiene compatibilidad con facturacion/page.tsx */
+/** Alias legacy: /dgii/rnc/:rnc — compatibilidad con facturacion/page.tsx */
 app.get("/dgii/rnc/:rnc", async (req, res) => {
   try {
     const rnc = req.params.rnc?.replace(/\D/g, "");
@@ -5643,45 +5677,8 @@ app.get("/dgii/rnc/:rnc", async (req, res) => {
       .maybeSingle();
     if (error) return res.status(500).json({ error: error.message });
     if (!data)  return res.status(404).json({ error: "RNC no encontrado" });
-    // Formato compatible con el código existente en facturacion (espera data.nombre)
     res.json({ ...data, nombre: data.razon_social });
   } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-/**
- * GET /rnc/buscar?q=texto
- * Búsqueda por nombre (máx 10 resultados) — para autocompletar.
- */
-app.get("/rnc/buscar", async (req, res) => {
-  try {
-    const q = req.query.q?.trim();
-    if (!q || q.length < 3) return res.json([]);
-
-    // Si parece un número, buscar por RNC exacto o prefijo
-    if (/^\d+$/.test(q)) {
-      const { data, error } = await supabase
-        .from("rnc_dgii")
-        .select("rnc, razon_social, nombre_comercial, estado")
-        .like("rnc", `${q}%`)
-        .eq("estado", "ACTIVO")
-        .limit(10);
-      if (error) return res.status(500).json({ error: error.message });
-      return res.json(data || []);
-    }
-
-    // Búsqueda por nombre
-    const { data, error } = await supabase
-      .from("rnc_dgii")
-      .select("rnc, razon_social, nombre_comercial, estado")
-      .ilike("razon_social", `%${q}%`)
-      .eq("estado", "ACTIVO")
-      .limit(10);
-
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data || []);
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
 });
 
 // =====================================================
