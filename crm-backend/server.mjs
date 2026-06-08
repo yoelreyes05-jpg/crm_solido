@@ -335,7 +335,7 @@ app.post("/api/ia/mejorar-texto", async (req, res) => {
 
   const ctx = [vehiculo ? `Vehículo: ${vehiculo}` : "", cliente ? `Cliente: ${cliente}` : ""].filter(Boolean).join(" | ");
 
-  const prompts: Record<string, string> = {
+  const prompts = {
     diagnostico: `Eres el asistente técnico oficial de "Sólido Auto Servicio", taller automotriz en República Dominicana.
 Un técnico escribió este diagnóstico de forma rápida${ctx ? ` (${ctx})` : ""}:
 """
