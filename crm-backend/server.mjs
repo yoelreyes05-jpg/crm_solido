@@ -167,26 +167,36 @@ function parsearNHTSA(results) {
     results.find(r => r.Variable === label)?.Value?.trim() || null;
 
   const marca       = get("Make");
-  const modelo      = get("Model");
+  const modeloBase  = get("Model");
+  const trim        = get("Trim");
+  // Combinar modelo + trim: "RX" + "330" → "RX 330"
+  const modelo      = modeloBase && trim ? `${modeloBase} ${trim}` : (modeloBase || null);
   const ano         = get("Model Year");
   const motorCC     = get("Displacement (CC)");
   const motorL      = get("Displacement (L)");
   const cilindros   = get("Engine Number of Cylinders");
-  const config      = get("Engine Configuration");   // L4, V6…
+  const config      = get("Engine Configuration");
   const combustible = get("Fuel Type - Primary");
   const pais        = get("Plant Country");
   const tipo        = get("Vehicle Type");
-  const traccion    = get("Drive Type");
 
-  // Construir descripción del motor: "1.5L L4" o "3.5L V6"
+  // Normalizar configuración de motor: "V-Shaped" → "V6", "In-Line" → "L4"
+  let configStr = null;
+  if (config && cilindros) {
+    if (config.toLowerCase().includes("v")) configStr = `V${cilindros}`;
+    else if (config.toLowerCase().includes("line")) configStr = `L${cilindros}`;
+    else configStr = config;
+  }
+
+  // Construir descripción del motor: "3.3L V6" o "1.5L L4"
   let motorStr = null;
   if (motorL) {
     motorStr = `${parseFloat(motorL).toFixed(1)}L`;
-    if (config) motorStr += ` ${config}`;
-    if (cilindros) motorStr += ` (${cilindros} cil.)`;
+    if (configStr) motorStr += ` ${configStr}`;
+    else if (cilindros) motorStr += ` (${cilindros} cil.)`;
   } else if (motorCC) {
     motorStr = `${motorCC}cc`;
-    if (config) motorStr += ` ${config}`;
+    if (configStr) motorStr += ` ${configStr}`;
   }
 
   // Normalizar combustible
@@ -222,10 +232,9 @@ app.get("/vin/:vin", async (req, res) => {
       return res.json({ ...cached, fuente: "cache" });
     }
 
-    // 2. Llamar a NHTSA
+    // 2. Llamar a NHTSA (timeout manual compatible con Node 16+)
     const nhtsa = await fetch(
-      `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`,
-      { signal: AbortSignal.timeout(8000) }
+      `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`
     );
     if (!nhtsa.ok) return res.status(502).json({ error: "Error consultando NHTSA" });
 

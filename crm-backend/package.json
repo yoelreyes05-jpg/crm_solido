@@ -6,6 +6,9 @@
     "start": "node server.mjs",
     "dev": "node server.mjs"
   },
+  "engines": {
+    "node": ">=18"
+  },
   "dependencies": {
     "@supabase/supabase-js": "^2.49.0",
     "cors": "^2.8.5",
