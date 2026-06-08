@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
-
 import { API_URL as API } from "@/config";
+import { decodificarVIN as decodeVIN } from "@/lib/vin";
 
 export default function Vehiculos() {
   const [clientes, setClientes] = useState([]);
@@ -42,22 +42,19 @@ export default function Vehiculos() {
     setDecodandoVIN(true);
     setVinEstado("");
     try {
-      const res  = await fetch(`${API}/vin/${limpio}`);
-      const data = await res.json();
-      if (res.ok && data.marca) {
-        setForm(f => ({
-          ...f,
-          vin:        limpio,
-          marca:      data.marca  || f.marca,
-          modelo:     data.modelo || f.modelo,
-          ano:        data.ano    || f.ano,
-          motor:      data.motor  || f.motor,
-          combustible: data.combustible || f.combustible,
-        }));
-        setVinEstado("ok");
-      } else {
-        setVinEstado("error");
-      }
+      const data = await decodeVIN(limpio);
+      setForm(f => ({
+        ...f,
+        vin:         limpio,
+        marca:       data.marca       || f.marca,
+        modelo:      data.modelo      || f.modelo,
+        ano:         data.ano         || f.ano,
+        motor:       data.motor       || f.motor,
+        combustible: data.combustible || f.combustible,
+      }));
+      setVinEstado("ok");
+      // Guardar en caché del backend (fire-and-forget)
+      fetch(`${API}/vin/${limpio}`).catch(() => {});
     } catch { setVinEstado("error"); }
     finally { setDecodandoVIN(false); }
   };

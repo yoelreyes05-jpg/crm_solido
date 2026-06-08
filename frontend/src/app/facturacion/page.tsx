@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
+import { decodificarVIN as decodeVIN } from "@/lib/vin";
 
 // ─── DATOS EMPRESA ─────────────────────────────────────────────────────────
 const EMPRESA = {
@@ -384,15 +385,16 @@ export default function FacturaPage() {
     setVinSugeridosFac([]);
     setVinPerfilMostrador(null);
     try {
-      const res  = await fetch(`${API}/vin/${v}/repuestos-sugeridos`);
-      const data = await res.json();
-      if (res.ok && data.perfil?.marca) {
-        setVinPerfilMostrador(data.perfil);
-        setVinSugeridosFac(data.sugeridos || []);
-        setVinFacEstado("ok");
-      } else {
-        setVinFacEstado("error");
-      }
+      // 1. Decodificar directo desde el navegador → NHTSA (no depende de Railway)
+      const perfil = await decodeVIN(v);
+      setVinPerfilMostrador(perfil);
+      setVinFacEstado("ok");
+
+      // 2. Buscar sugeridos en catálogo propio (sí usa Railway)
+      fetch(`${API}/vin/${v}/repuestos-sugeridos`)
+        .then(r => r.ok ? r.json() : { sugeridos: [] })
+        .then(d => setVinSugeridosFac(d.sugeridos || []))
+        .catch(() => {});
     } catch { setVinFacEstado("error"); }
     finally { setDecodandoVINFac(false); }
   };
