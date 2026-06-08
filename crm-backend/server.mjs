@@ -154,6 +154,285 @@ app.get("/clientes/:id/vehiculos", async (req, res) => {
 // =====================================================
 // 🚗 VEHÍCULOS
 // =====================================================
+// =====================================================
+// 🚗 VIN DECODER (NHTSA) + CATÁLOGO DE COMPATIBILIDAD
+// =====================================================
+
+/**
+ * Normaliza la respuesta de NHTSA a campos simples.
+ * NHTSA retorna un array de {Variable, Value} — extraemos los que importan.
+ */
+function parsearNHTSA(results) {
+  const get = (label) =>
+    results.find(r => r.Variable === label)?.Value?.trim() || null;
+
+  const marca       = get("Make");
+  const modelo      = get("Model");
+  const ano         = get("Model Year");
+  const motorCC     = get("Displacement (CC)");
+  const motorL      = get("Displacement (L)");
+  const cilindros   = get("Engine Number of Cylinders");
+  const config      = get("Engine Configuration");   // L4, V6…
+  const combustible = get("Fuel Type - Primary");
+  const pais        = get("Plant Country");
+  const tipo        = get("Vehicle Type");
+  const traccion    = get("Drive Type");
+
+  // Construir descripción del motor: "1.5L L4" o "3.5L V6"
+  let motorStr = null;
+  if (motorL) {
+    motorStr = `${parseFloat(motorL).toFixed(1)}L`;
+    if (config) motorStr += ` ${config}`;
+    if (cilindros) motorStr += ` (${cilindros} cil.)`;
+  } else if (motorCC) {
+    motorStr = `${motorCC}cc`;
+    if (config) motorStr += ` ${config}`;
+  }
+
+  // Normalizar combustible
+  const fuelMap = {
+    "Gasoline": "Gasolina", "Diesel": "Diesel", "Electric": "Eléctrico",
+    "Flexible Fuel Vehicle (FFV)": "Flex (Gas/Etanol)",
+    "Hybrid": "Híbrido", "Plug-in Hybrid": "Híbrido Enchufable",
+    "Compressed Natural Gas (CNG)": "Gas Natural",
+  };
+  const combustibleStr = (combustible && fuelMap[combustible]) || combustible || null;
+
+  return { marca, modelo, ano, motor: motorStr, combustible: combustibleStr, pais, tipo_vehiculo: tipo };
+}
+
+/**
+ * GET /vin/:vin
+ * Decodifica un VIN usando la API gratuita de NHTSA.
+ * Cachea el resultado en la tabla vin_cache para no repetir llamadas.
+ */
+app.get("/vin/:vin", async (req, res) => {
+  try {
+    const vin = req.params.vin?.trim().toUpperCase();
+    if (!vin || vin.length !== 17) return res.status(400).json({ error: "VIN debe tener exactamente 17 caracteres" });
+
+    // 1. Buscar en caché
+    const { data: cached } = await supabase
+      .from("vin_cache")
+      .select("*")
+      .eq("vin", vin)
+      .maybeSingle();
+    if (cached) {
+      console.log(`✅ VIN ${vin} — desde caché`);
+      return res.json({ ...cached, fuente: "cache" });
+    }
+
+    // 2. Llamar a NHTSA
+    const nhtsa = await fetch(
+      `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${vin}?format=json`,
+      { signal: AbortSignal.timeout(8000) }
+    );
+    if (!nhtsa.ok) return res.status(502).json({ error: "Error consultando NHTSA" });
+
+    const json    = await nhtsa.json();
+    const results = json?.Results || [];
+    const parsed  = parsearNHTSA(results);
+
+    if (!parsed.marca) {
+      return res.status(404).json({ error: "VIN no reconocido por NHTSA" });
+    }
+
+    // 3. Guardar en caché
+    await supabase.from("vin_cache").upsert({
+      vin,
+      ...parsed,
+      datos_raw:  results,
+      created_at: new Date().toISOString(),
+    }, { onConflict: "vin" }).catch(() => {});
+
+    console.log(`✅ VIN ${vin} — ${parsed.marca} ${parsed.modelo} ${parsed.ano}`);
+    res.json({ ...parsed, vin, fuente: "nhtsa" });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /vehiculos/:id/repuestos-sugeridos ───────────────────────────────────
+// Retorna los repuestos más usados/compatibles con el vehículo de esa orden.
+app.get("/vehiculos/:id/repuestos-sugeridos", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: veh } = await supabase
+      .from("vehiculos")
+      .select("marca, modelo, ano, motor, combustible")
+      .eq("id", id)
+      .maybeSingle();
+    if (!veh) return res.status(404).json({ error: "Vehículo no encontrado" });
+
+    const anoNum = parseInt(veh.ano) || 0;
+
+    // Buscar compatibilidades exactas o por marca/modelo
+    const { data: compat } = await supabase
+      .from("repuesto_compatibilidad")
+      .select(`
+        inventario_id, veces_usado, confirmado, origen,
+        inventario:inventario_id (id, name, code, price, stock, categoria)
+      `)
+      .ilike("marca", veh.marca || "")
+      .or(`modelo.ilike.%${veh.modelo || ""}%,modelo.is.null`)
+      .lte("ano_desde", anoNum || 9999)
+      .gte("ano_hasta", anoNum || 0)
+      .order("veces_usado", { ascending: false })
+      .limit(15);
+
+    // Deduplicar por inventario_id (puede haber varios rangos)
+    const vistos = new Set();
+    const dedup  = (compat || []).filter(c => {
+      if (!c.inventario || vistos.has(c.inventario_id)) return false;
+      vistos.add(c.inventario_id);
+      return true;
+    });
+
+    res.json({ vehiculo: veh, sugeridos: dedup });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /inventario/:id/compatibilidad ──────────────────────────────────────
+app.get("/inventario/:id/compatibilidad", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("repuesto_compatibilidad")
+      .select("*")
+      .eq("inventario_id", req.params.id)
+      .order("marca").order("modelo").order("ano_desde");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── POST /repuesto-compatibilidad — agregar/confirmar manualmente ────────────
+app.post("/repuesto-compatibilidad", async (req, res) => {
+  try {
+    const { inventario_id, marca, modelo, ano_desde, ano_hasta, motor, combustible, notas } = req.body;
+    if (!inventario_id || !marca) return res.status(400).json({ error: "inventario_id y marca requeridos" });
+
+    // Upsert: si ya existe la combinación, incrementa veces_usado
+    const { data: existing } = await supabase
+      .from("repuesto_compatibilidad")
+      .select("id, veces_usado")
+      .eq("inventario_id", inventario_id)
+      .ilike("marca", marca)
+      .ilike("modelo", modelo || "")
+      .eq("ano_desde", ano_desde || 0)
+      .eq("ano_hasta", ano_hasta || 9999)
+      .maybeSingle();
+
+    if (existing) {
+      const { data, error } = await supabase
+        .from("repuesto_compatibilidad")
+        .update({ veces_usado: existing.veces_usado + 1, confirmado: true, updated_at: new Date().toISOString() })
+        .eq("id", existing.id)
+        .select();
+      if (error) return res.status(500).json({ error: error.message });
+      return res.json(data[0]);
+    }
+
+    const { data, error } = await supabase
+      .from("repuesto_compatibilidad")
+      .insert([{
+        inventario_id, marca, modelo: modelo || null,
+        ano_desde: ano_desde || 0, ano_hasta: ano_hasta || 9999,
+        motor: motor || null, combustible: combustible || null,
+        notas: notas || null, confirmado: true, origen: "manual",
+      }])
+      .select();
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data[0]);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── DELETE /repuesto-compatibilidad/:id ─────────────────────────────────────
+app.delete("/repuesto-compatibilidad/:id", async (req, res) => {
+  try {
+    await supabase.from("repuesto_compatibilidad").delete().eq("id", req.params.id);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+/**
+ * Registra compatibilidades aprendidas cuando se cierra una orden.
+ * Lee los repuestos usados en cotizaciones.items_detalle y los ata al vehículo.
+ */
+async function registrarCompatibilidadesDeOrden(ordenId) {
+  try {
+    const { data: orden } = await supabase
+      .from("ordenes_trabajo")
+      .select("vehiculo_id")
+      .eq("id", ordenId)
+      .maybeSingle();
+    if (!orden?.vehiculo_id) return;
+
+    const { data: veh } = await supabase
+      .from("vehiculos")
+      .select("marca, modelo, ano, motor, combustible")
+      .eq("id", orden.vehiculo_id)
+      .maybeSingle();
+    if (!veh?.marca) return;
+
+    const { data: diag } = await supabase
+      .from("diagnosticos")
+      .select("id")
+      .eq("orden_id", ordenId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!diag?.id) return;
+
+    const { data: cot } = await supabase
+      .from("cotizaciones")
+      .select("items_detalle")
+      .eq("diagnostico_id", diag.id)
+      .maybeSingle();
+    if (!cot?.items_detalle) return;
+
+    const items = Array.isArray(cot.items_detalle) ? cot.items_detalle : [];
+    const anoNum = parseInt(veh.ano) || 0;
+
+    for (const item of items) {
+      if (!item.inventario_id && !item.id) continue;
+      const invId = item.inventario_id || item.id;
+
+      // Buscar si ya existe esta combinación
+      const { data: ex } = await supabase
+        .from("repuesto_compatibilidad")
+        .select("id, veces_usado")
+        .eq("inventario_id", invId)
+        .ilike("marca", veh.marca)
+        .ilike("modelo", veh.modelo || "")
+        .maybeSingle();
+
+      if (ex) {
+        await supabase
+          .from("repuesto_compatibilidad")
+          .update({ veces_usado: ex.veces_usado + 1, updated_at: new Date().toISOString() })
+          .eq("id", ex.id);
+      } else {
+        await supabase.from("repuesto_compatibilidad").insert([{
+          inventario_id: invId,
+          marca:        veh.marca,
+          modelo:       veh.modelo  || null,
+          ano_desde:    anoNum > 0 ? anoNum : 0,
+          ano_hasta:    anoNum > 0 ? anoNum : 9999,
+          motor:        veh.motor   || null,
+          combustible:  veh.combustible || null,
+          origen:       "aprendido",
+          confirmado:   false,
+        }]).catch(() => {});
+      }
+    }
+    console.log(`📚 Compatibilidades aprendidas — orden ${ordenId}`);
+  } catch (e) {
+    console.warn("⚠️ registrarCompatibilidades error:", e.message);
+  }
+}
+
 app.get("/vehiculos/catalogo", (req, res) => {
   res.json({
     Toyota: ["Corolla", "Hilux", "Camry", "Venza", "RAV4", "4Runner", "Yaris"],
@@ -201,8 +480,12 @@ app.get("/vehiculos", async (req, res) => {
 });
 
 app.post("/vehiculos", async (req, res) => {
-  const { cliente_id, marca, modelo, ano, placa, color } = req.body;
-  const { data, error } = await supabase.from("vehiculos").insert([{ cliente_id, marca, modelo, ano, placa, color }]).select();
+  const { cliente_id, marca, modelo, ano, placa, color, vin, motor, combustible, vin_data } = req.body;
+  const { data, error } = await supabase.from("vehiculos")
+    .insert([{ cliente_id, marca, modelo, ano, placa, color,
+      vin: vin || null, motor: motor || null,
+      combustible: combustible || null, vin_data: vin_data || null }])
+    .select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
@@ -221,7 +504,7 @@ app.delete("/vehiculos/:id", async (req, res) => {
 
 app.patch("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
-  const campos = ["cliente_id","marca","modelo","ano","placa","color"].reduce((o, k) => {
+  const campos = ["cliente_id","marca","modelo","ano","placa","color","vin","motor","combustible","vin_data"].reduce((o, k) => {
     if (req.body[k] !== undefined) o[k] = req.body[k];
     return o;
   }, {});
@@ -5483,6 +5766,8 @@ app.post("/ordenes/:id/entregar", async (req, res) => {
       crearHistorialDesdeDiagnostico(diag.id).catch(console.error);
       crearMantenimientoDesdeDiagnostico(diag.id).catch(console.error);
     }
+    // Aprender compatibilidades de repuestos usados en esta orden
+    registrarCompatibilidadesDeOrden(Number(id)).catch(console.error);
     res.json({ ok: true, mensaje: "Vehículo ENTREGADO — orden cerrada" });
   } catch (err) {
     res.status(500).json({ error: err.message });

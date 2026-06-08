@@ -11,11 +11,14 @@ export default function Vehiculos() {
   const [busqueda, setBusqueda] = useState("");
 
   const [form, setForm] = useState({
-    cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: ""
+    cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "",
+    vin: "", motor: "", combustible: ""
   });
   const [editVehiculo, setEditVehiculo] = useState<any>(null);
-  const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "" });
+  const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "", vin: "", motor: "", combustible: "" });
   const [savingEdit, setSavingEdit] = useState(false);
+  const [decodandoVIN, setDecodandoVIN] = useState(false);
+  const [vinEstado, setVinEstado] = useState<"ok"|"error"|"">("");
 
   const getClientes = async () => {
     try { const r = await fetch(`${API}/clientes`); setClientes(await r.json()); } catch { setClientes([]); }
@@ -32,6 +35,32 @@ export default function Vehiculos() {
   useEffect(() => { getClientes(); getVehiculos(); getCatalogo(); }, []);
 
   const handleMarcaChange = (marca) => setForm({ ...form, marca, modelo: "" });
+
+  const decodificarVIN = async (vin: string) => {
+    const limpio = vin.trim().toUpperCase();
+    if (limpio.length !== 17) return;
+    setDecodandoVIN(true);
+    setVinEstado("");
+    try {
+      const res  = await fetch(`${API}/vin/${limpio}`);
+      const data = await res.json();
+      if (res.ok && data.marca) {
+        setForm(f => ({
+          ...f,
+          vin:        limpio,
+          marca:      data.marca  || f.marca,
+          modelo:     data.modelo || f.modelo,
+          ano:        data.ano    || f.ano,
+          motor:      data.motor  || f.motor,
+          combustible: data.combustible || f.combustible,
+        }));
+        setVinEstado("ok");
+      } else {
+        setVinEstado("error");
+      }
+    } catch { setVinEstado("error"); }
+    finally { setDecodandoVIN(false); }
+  };
 
   const validar = () => {
     if (!form.cliente_id) return "Selecciona un cliente";
@@ -51,17 +80,22 @@ export default function Vehiculos() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          cliente_id: Number(form.cliente_id),
-          marca: form.marca, modelo: form.modelo,
-          ano: Number(form.ano),
-          placa: form.placa.toUpperCase().trim(),
-          color: form.color
+          cliente_id:  Number(form.cliente_id),
+          marca:       form.marca,
+          modelo:      form.modelo,
+          ano:         Number(form.ano),
+          placa:       form.placa.toUpperCase().trim(),
+          color:       form.color,
+          vin:         form.vin.trim().toUpperCase() || null,
+          motor:       form.motor || null,
+          combustible: form.combustible || null,
         })
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
       alert("✅ Vehículo registrado correctamente");
-      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "" });
+      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "", vin: "", motor: "", combustible: "" });
+      setVinEstado("");
       await getVehiculos();
     } catch { alert("Error al guardar"); }
     finally { setLoading(false); }
@@ -79,7 +113,7 @@ export default function Vehiculos() {
 
   const abrirEdicion = (v: any) => {
     setEditVehiculo(v);
-    setEditForm({ marca: v.marca, modelo: v.modelo, ano: String(v.ano), placa: v.placa, color: v.color || "", cliente_id: String(v.cliente_id || "") });
+    setEditForm({ marca: v.marca, modelo: v.modelo, ano: String(v.ano), placa: v.placa, color: v.color || "", cliente_id: String(v.cliente_id || ""), vin: v.vin || "", motor: v.motor || "", combustible: v.combustible || "" });
   };
 
   const guardarEdicion = async () => {
@@ -117,6 +151,46 @@ export default function Vehiculos() {
         {/* FORMULARIO */}
         <div style={card}>
           <h2 style={cardTitle}>➕ Registrar Vehículo</h2>
+
+          {/* ── VIN Decoder ── */}
+          <div style={{ background: "#0f172a", border: "1px solid #1e3a5f", borderRadius: 10, padding: "12px 14px", marginBottom: 16 }}>
+            <label style={{ ...label, color: "#93c5fd", marginBottom: 6 }}>🔍 Decodificar VIN (opcional)</label>
+            <p style={{ fontSize: 11, color: "#64748b", marginTop: -4, marginBottom: 10 }}>
+              Ingresa el VIN de 17 caracteres para autocompletar marca, modelo, año, motor y combustible.
+            </p>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input
+                value={form.vin}
+                onChange={e => { setForm(f => ({ ...f, vin: e.target.value.toUpperCase() })); setVinEstado(""); }}
+                onBlur={e => decodificarVIN(e.target.value)}
+                placeholder="Ej: 1HGBH41JXMN109186"
+                maxLength={17}
+                style={{ ...input, flex: 1, marginBottom: 0, fontFamily: "monospace", letterSpacing: 1,
+                  borderColor: vinEstado === "ok" ? "#16a34a" : vinEstado === "error" ? "#dc2626" : "#1e3a5f" }}
+              />
+              <button
+                type="button"
+                onClick={() => decodificarVIN(form.vin)}
+                disabled={decodandoVIN || form.vin.length !== 17}
+                style={{ padding: "8px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                  background: vinEstado === "ok" ? "#16a34a" : vinEstado === "error" ? "#dc2626" : "#2563eb",
+                  color: "#fff", fontSize: 13, whiteSpace: "nowrap",
+                  opacity: (decodandoVIN || form.vin.length !== 17) ? 0.5 : 1 }}
+              >
+                {decodandoVIN ? "⏳ Consultando..." : vinEstado === "ok" ? "✅ Decodificado" : vinEstado === "error" ? "❌ No encontrado" : "🔍 Decodificar"}
+              </button>
+            </div>
+            {vinEstado === "ok" && (
+              <p style={{ fontSize: 11, color: "#4ade80", marginTop: 6 }}>
+                ✅ Datos completados automáticamente desde NHTSA
+                {form.motor && ` · Motor: ${form.motor}`}
+                {form.combustible && ` · ${form.combustible}`}
+              </p>
+            )}
+            {vinEstado === "error" && (
+              <p style={{ fontSize: 11, color: "#f87171", marginTop: 6 }}>VIN no reconocido. Completa los datos manualmente.</p>
+            )}
+          </div>
 
           <label style={label}>Cliente *</label>
           <select value={form.cliente_id}
@@ -159,6 +233,29 @@ export default function Vehiculos() {
           <input placeholder="Ej: Rojo, Negro, Blanco..." value={form.color}
             onChange={e => setForm({ ...form, color: e.target.value })} style={input} />
 
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+            <div>
+              <label style={label}>Motor</label>
+              <input placeholder="Ej: 1.5L L4" value={form.motor}
+                onChange={e => setForm({ ...form, motor: e.target.value })}
+                style={{ ...input, marginBottom: 0 }} />
+            </div>
+            <div>
+              <label style={label}>Combustible</label>
+              <select value={form.combustible} onChange={e => setForm({ ...form, combustible: e.target.value })}
+                style={{ ...input, marginBottom: 0 }}>
+                <option value="">— Seleccionar —</option>
+                <option>Gasolina</option>
+                <option>Diesel</option>
+                <option>Eléctrico</option>
+                <option>Híbrido</option>
+                <option>Híbrido Enchufable</option>
+                <option>Gas Natural</option>
+              </select>
+            </div>
+          </div>
+          <div style={{ height: 10 }} />
+
           <button onClick={crearVehiculo} disabled={loading} style={btnPrimary}>
             {loading ? "Guardando..." : "💾 Guardar Vehículo"}
           </button>
@@ -176,14 +273,14 @@ export default function Vehiculos() {
             <table style={table}>
               <thead>
                 <tr>
-                  {["Cliente", "Marca", "Modelo", "Año", "Placa", "Color", ""].map(h => (
+                  {["Cliente", "Marca", "Modelo", "Año", "Placa", "Motor", "Comb.", ""].map(h => (
                     <th key={h} style={th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {vehiculosFiltrados.length === 0 ? (
-                  <tr><td colSpan={7} style={{ ...td, textAlign: "center", color: "#aaa" }}>Sin vehículos</td></tr>
+                  <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#aaa" }}>Sin vehículos</td></tr>
                 ) : vehiculosFiltrados.map(v => (
                   <tr key={v.id}>
                     <td style={{ ...td, fontWeight: 700 }}>{v.cliente_nombre}</td>
@@ -195,7 +292,8 @@ export default function Vehiculos() {
                         {v.placa}
                       </span>
                     </td>
-                    <td style={td}>{v.color || "—"}</td>
+                    <td style={{ ...td, fontSize: 12 }}>{v.motor || "—"}</td>
+                    <td style={{ ...td, fontSize: 12 }}>{v.combustible || "—"}</td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6 }}>
                         <button onClick={() => abrirEdicion(v)}
@@ -257,7 +355,30 @@ export default function Vehiculos() {
             <label style={{ ...label, marginTop: 12 }}>Placa</label>
             <input value={editForm.placa} onChange={e => setEditForm(f => ({ ...f, placa: e.target.value.toUpperCase() }))} style={input} />
 
-            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+            <label style={label}>VIN</label>
+            <input value={editForm.vin} onChange={e => setEditForm(f => ({ ...f, vin: e.target.value.toUpperCase() }))}
+              placeholder="17 caracteres" maxLength={17}
+              style={{ ...input, fontFamily: "monospace", letterSpacing: 1 }} />
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={label}>Motor</label>
+                <input value={editForm.motor} onChange={e => setEditForm(f => ({ ...f, motor: e.target.value }))}
+                  placeholder="Ej: 1.5L L4" style={{ ...input, marginBottom: 0 }} />
+              </div>
+              <div>
+                <label style={label}>Combustible</label>
+                <select value={editForm.combustible} onChange={e => setEditForm(f => ({ ...f, combustible: e.target.value }))}
+                  style={{ ...input, marginBottom: 0 }}>
+                  <option value="">—</option>
+                  <option>Gasolina</option><option>Diesel</option>
+                  <option>Eléctrico</option><option>Híbrido</option>
+                  <option>Híbrido Enchufable</option><option>Gas Natural</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
               <button onClick={guardarEdicion} disabled={savingEdit}
                 style={{ ...btnPrimary, flex: 2, background: "#2563eb" }}>
                 {savingEdit ? "Guardando..." : "💾 Guardar cambios"}

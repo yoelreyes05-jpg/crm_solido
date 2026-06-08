@@ -38,6 +38,60 @@ export default function InventarioPage() {
   const [saving, setSaving]     = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
 
+  // ── Compatibilidad ─────────────────────────────────────────────────────────
+  const [compatPart,    setCompatPart]    = useState<any>(null);  // item activo
+  const [compatList,    setCompatList]    = useState<any[]>([]);
+  const [loadingCompat, setLoadingCompat] = useState(false);
+  const [savingCompat,  setSavingCompat]  = useState(false);
+  const emptyCompat = { marca: "", modelo: "", ano_desde: "", ano_hasta: "", motor: "", combustible: "", notas: "" };
+  const [compatForm, setCompatForm] = useState(emptyCompat);
+
+  const abrirCompatibilidad = async (p: any) => {
+    setCompatPart(p);
+    setCompatForm(emptyCompat);
+    setLoadingCompat(true);
+    try {
+      const res  = await fetch(`${API}/inventario/${p.id}/compatibilidad`);
+      const data = await res.json();
+      setCompatList(Array.isArray(data) ? data : (data.compatibilidades ?? []));
+    } catch { setCompatList([]); }
+    setLoadingCompat(false);
+  };
+
+  const guardarCompat = async () => {
+    if (!compatForm.marca.trim()) return alert("La marca es requerida");
+    setSavingCompat(true);
+    try {
+      await fetch(`${API}/repuesto-compatibilidad`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          inventario_id: compatPart.id,
+          marca:         compatForm.marca,
+          modelo:        compatForm.modelo     || null,
+          ano_desde:     compatForm.ano_desde  ? Number(compatForm.ano_desde)  : null,
+          ano_hasta:     compatForm.ano_hasta  ? Number(compatForm.ano_hasta)  : null,
+          motor:         compatForm.motor      || null,
+          combustible:   compatForm.combustible || null,
+          notas:         compatForm.notas       || null,
+          origen:        "manual",
+          confirmado:    true,
+        }),
+      });
+      setCompatForm(emptyCompat);
+      const res  = await fetch(`${API}/inventario/${compatPart.id}/compatibilidad`);
+      const data = await res.json();
+      setCompatList(Array.isArray(data) ? data : (data.compatibilidades ?? []));
+    } catch { alert("Error al guardar compatibilidad"); }
+    setSavingCompat(false);
+  };
+
+  const eliminarCompat = async (cid: number) => {
+    if (!confirm("¿Eliminar esta compatibilidad?")) return;
+    await fetch(`${API}/repuesto-compatibilidad/${cid}`, { method: "DELETE" });
+    setCompatList(prev => prev.filter(c => c.id !== cid));
+  };
+
   const emptyForm = {
     name: "", code: "", price: "", stock: "0", min_stock: "5", supplier_id: "",
     categoria: "General", descripcion: "", marcas_compatibles: "", observaciones: "",
@@ -251,6 +305,11 @@ export default function InventarioPage() {
                         style={{ padding:"6px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
                         ✏️
                       </button>
+                      <button onClick={() => abrirCompatibilidad(p)}
+                        title="Ver compatibilidad de vehículos"
+                        style={{ padding:"6px 12px", background:"#f0fdf4", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
+                        🔗
+                      </button>
                       <button onClick={() => setDeleteId(p.id)}
                         style={{ padding:"6px 12px", background:"#fee2e2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
                         🗑️
@@ -366,6 +425,129 @@ export default function InventarioPage() {
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* MODAL COMPATIBILIDAD */}
+      {compatPart && (
+        <div style={overlay}>
+          <div style={{ ...modal, maxWidth: 720 }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 16 }}>
+              <div>
+                <h2 style={{ fontSize: 18, fontWeight: 700, margin: 0 }}>🔗 Compatibilidad de Vehículos</h2>
+                <p style={{ margin: "4px 0 0", fontSize: 13, color: "#888" }}>
+                  {compatPart.name}{compatPart.code ? ` · ${compatPart.code}` : ""}
+                </p>
+              </div>
+              <button onClick={() => setCompatPart(null)}
+                style={{ background: "none", border: "none", fontSize: 22, cursor: "pointer", color: "#888", lineHeight: 1 }}>✕</button>
+            </div>
+
+            {/* Agregar nueva compatibilidad */}
+            <div style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: 10, padding: 16, marginBottom: 18 }}>
+              <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 12, color: "#374151" }}>➕ Agregar compatibilidad</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={mlabel}>Marca *</label>
+                  <input placeholder="Toyota, Honda…" value={compatForm.marca}
+                    onChange={e => setCompatForm(f => ({ ...f, marca: e.target.value }))} style={minput} />
+                </div>
+                <div>
+                  <label style={mlabel}>Modelo</label>
+                  <input placeholder="Corolla, Civic…" value={compatForm.modelo}
+                    onChange={e => setCompatForm(f => ({ ...f, modelo: e.target.value }))} style={minput} />
+                </div>
+                <div>
+                  <label style={mlabel}>Combustible</label>
+                  <select value={compatForm.combustible}
+                    onChange={e => setCompatForm(f => ({ ...f, combustible: e.target.value }))} style={minput}>
+                    <option value="">Cualquiera</option>
+                    {["Gasolina","Diesel","Híbrido","Eléctrico","GLP"].map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label style={mlabel}>Año desde</label>
+                  <input type="number" placeholder="2015" value={compatForm.ano_desde}
+                    onChange={e => setCompatForm(f => ({ ...f, ano_desde: e.target.value }))} style={minput} />
+                </div>
+                <div>
+                  <label style={mlabel}>Año hasta</label>
+                  <input type="number" placeholder="2023" value={compatForm.ano_hasta}
+                    onChange={e => setCompatForm(f => ({ ...f, ano_hasta: e.target.value }))} style={minput} />
+                </div>
+                <div>
+                  <label style={mlabel}>Motor</label>
+                  <input placeholder="1.5L, 2.0L…" value={compatForm.motor}
+                    onChange={e => setCompatForm(f => ({ ...f, motor: e.target.value }))} style={minput} />
+                </div>
+              </div>
+              <label style={mlabel}>Notas</label>
+              <input placeholder="Observaciones adicionales…" value={compatForm.notas}
+                onChange={e => setCompatForm(f => ({ ...f, notas: e.target.value }))} style={{ ...minput, marginBottom: 10 }} />
+              <button onClick={guardarCompat} disabled={savingCompat}
+                style={{ padding: "10px 20px", background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                {savingCompat ? "Guardando…" : "💾 Guardar compatibilidad"}
+              </button>
+            </div>
+
+            {/* Lista de compatibilidades */}
+            <div style={{ fontWeight: 700, fontSize: 13, marginBottom: 10, color: "#374151" }}>
+              📋 Compatibilidades registradas ({compatList.length})
+            </div>
+            {loadingCompat ? (
+              <p style={{ color: "#888", textAlign: "center", padding: "16px 0" }}>Cargando…</p>
+            ) : compatList.length === 0 ? (
+              <p style={{ color: "#aaa", textAlign: "center", padding: "16px 0", fontSize: 13 }}>
+                Sin compatibilidades registradas. Agrega una arriba o se aprenderán automáticamente con cada reparación.
+              </p>
+            ) : (
+              <div style={{ maxHeight: 300, overflowY: "auto" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+                  <thead>
+                    <tr style={{ background: "#f1f5f9" }}>
+                      {["Marca","Modelo","Años","Motor","Combustible","Origen","Usos","Notas",""].map(h => (
+                        <th key={h} style={{ padding: "8px 10px", textAlign: "left", fontSize: 11, fontWeight: 700, color: "#64748b" }}>{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {compatList.map((c: any) => (
+                      <tr key={c.id} style={{ borderBottom: "1px solid #f0f0f0" }}>
+                        <td style={{ padding: "8px 10px", fontWeight: 700 }}>{c.marca}</td>
+                        <td style={{ padding: "8px 10px", color: "#555" }}>{c.modelo || <span style={{ color: "#bbb" }}>Todos</span>}</td>
+                        <td style={{ padding: "8px 10px", color: "#555", whiteSpace: "nowrap" }}>
+                          {c.ano_desde || c.ano_hasta
+                            ? `${c.ano_desde ?? "…"} – ${c.ano_hasta ?? "…"}`
+                            : <span style={{ color: "#bbb" }}>Todos</span>}
+                        </td>
+                        <td style={{ padding: "8px 10px", color: "#555" }}>{c.motor || <span style={{ color: "#bbb" }}>—</span>}</td>
+                        <td style={{ padding: "8px 10px", color: "#555" }}>{c.combustible || <span style={{ color: "#bbb" }}>—</span>}</td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <span style={{
+                            padding: "2px 8px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                            background: c.origen === "aprendido" ? "#dbeafe" : "#dcfce7",
+                            color: c.origen === "aprendido" ? "#1d4ed8" : "#166534",
+                          }}>
+                            {c.origen === "aprendido" ? "⚡ Auto" : "✋ Manual"}
+                          </span>
+                        </td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", color: "#555" }}>{c.veces_usado}</td>
+                        <td style={{ padding: "8px 10px", color: "#777", fontSize: 12 }}>{c.notas || ""}</td>
+                        <td style={{ padding: "8px 10px" }}>
+                          <button onClick={() => eliminarCompat(c.id)}
+                            style={{ background: "none", border: "none", color: "#dc2626", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>
+                            ✕
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
         </div>
       )}

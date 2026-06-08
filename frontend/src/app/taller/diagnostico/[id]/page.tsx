@@ -177,6 +177,9 @@ export default function DiagnosticoPage() {
   const [busqInv,        setBusqInv]        = useState("");
   const [showInvPanel,   setShowInvPanel]   = useState(false);
   const [loadingInv,     setLoadingInv]     = useState(false);
+  // Repuestos sugeridos por compatibilidad
+  const [sugeridos,      setSugeridos]      = useState<any[]>([]);
+  const [loadingSuger,   setLoadingSuger]   = useState(false);
 
   // Total calculado
   const totalRepuestos = repuestosItems.reduce((s, r) => s + r.subtotal, 0);
@@ -337,6 +340,17 @@ export default function DiagnosticoPage() {
   }, [id]);
 
   useEffect(() => { cargar(); }, [cargar]);
+
+  // ── Repuestos sugeridos por compatibilidad ────────────────────────────────
+  useEffect(() => {
+    if (!orden?.vehiculo_id) return;
+    setLoadingSuger(true);
+    fetch(`${API}/vehiculos/${orden.vehiculo_id}/repuestos-sugeridos`)
+      .then(r => r.ok ? r.json() : { sugeridos: [] })
+      .then(d => setSugeridos(Array.isArray(d.sugeridos) ? d.sugeridos : []))
+      .catch(() => setSugeridos([]))
+      .finally(() => setLoadingSuger(false));
+  }, [orden?.vehiculo_id]);
 
   // ── Guardar ───────────────────────────────────────────────────────────────
   const guardar = async (cerrar = false) => {
@@ -785,6 +799,70 @@ export default function DiagnosticoPage() {
                 />
               </div>
             </div>
+
+            {/* Repuestos sugeridos por compatibilidad */}
+            {(loadingSuger || sugeridos.length > 0) && (
+              <div style={{ background: "#0f1f0f", border: "1px solid #16a34a44", borderRadius: 10, padding: 16, marginBottom: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#4ade80", marginBottom: 10 }}>
+                  ✨ Repuestos sugeridos para este vehículo
+                  <span style={{ fontSize: 11, fontWeight: 400, color: "#86efac", marginLeft: 8 }}>
+                    basado en reparaciones anteriores
+                  </span>
+                </div>
+                {loadingSuger ? (
+                  <p style={{ fontSize: 13, color: C.muted }}>Buscando sugerencias…</p>
+                ) : (
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+                    {sugeridos.map((s: any) => {
+                      const yaAgregado = repuestosItems.some(r => r.inventario_id === s.inventario_id);
+                      return (
+                        <div
+                          key={s.inventario_id}
+                          style={{
+                            background: yaAgregado ? "#16a34a22" : "#162032",
+                            border: `1px solid ${yaAgregado ? "#16a34a" : C.border}`,
+                            borderRadius: 8, padding: "8px 12px",
+                            display: "flex", alignItems: "center", gap: 10,
+                          }}
+                        >
+                          <div>
+                            <div style={{ fontSize: 13, color: C.text, fontWeight: 600 }}>{s.nombre}</div>
+                            <div style={{ fontSize: 11, color: C.muted, marginTop: 1 }}>
+                              {s.codigo && <span style={{ fontFamily: "monospace" }}>{s.codigo} · </span>}
+                              usado {s.veces_usado}× · stock: {s.stock ?? "—"}
+                            </div>
+                          </div>
+                          {!diagnostico?.terminado && !yaAgregado && (
+                            <button
+                              onClick={() => {
+                                const inv: InventarioItem = {
+                                  id: s.inventario_id,
+                                  name: s.nombre,
+                                  code: s.codigo,
+                                  price: s.precio ?? 0,
+                                  stock: s.stock ?? 99,
+                                };
+                                agregarRepuesto(inv);
+                              }}
+                              style={{
+                                background: "#16a34a", color: "#fff", border: "none",
+                                borderRadius: 6, padding: "5px 10px", fontSize: 12,
+                                cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap",
+                              }}
+                            >
+                              + Agregar
+                            </button>
+                          )}
+                          {yaAgregado && (
+                            <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>✓ En lista</span>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Repuestos del inventario */}
             <div style={{ background: "#162032", border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 18 }}>
