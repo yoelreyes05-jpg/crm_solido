@@ -391,7 +391,7 @@ if (esPublica) return (
               <span style={{ fontSize: 13, color: "#888" }}>
                 Rol: <b style={{ color: "#111", textTransform: "capitalize" }}>{usuario.rol}</b>
               </span>
-              <span style={{ fontSize: 13, color: "#888" }}>📞 809-712-2027</span>
+              <span style={{ fontSize: 13, color: "#888" }}>📞 849-569-2027</span>
             </div>
           </div>
 

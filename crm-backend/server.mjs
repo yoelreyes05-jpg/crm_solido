@@ -3045,7 +3045,7 @@ Eres el asistente virtual de Sólido Auto Servicio, un taller automotriz profesi
 
 INFORMACIÓN DEL TALLER:
 - Nombre: Sólido Auto Servicio
-- Teléfono / WhatsApp: 809-712-2027
+- Teléfono / WhatsApp: 849-569-2027
 - Dirección: Santo Domingo, República Dominicana
 - Horario: Lunes–Viernes 8:00 AM–6:00 PM | Sábados 8:00 AM–4:00 PM | Domingos 9:00 AM–2:00 PM
 
@@ -3071,7 +3071,7 @@ CITAS Y AGENDAMIENTO:
 - Los clientes pueden agendar citas en línea en: https://crm-automotriz-3wde-production.up.railway.app/cita
 - Solo necesitan: placa, teléfono, tipo de servicio, fecha y hora deseada.
 - El taller confirma o cancela la cita. El cliente recibe una notificación push 1 hora antes.
-- También pueden llamar al 809-712-2027 para agendar.
+- También pueden llamar al 849-569-2027 para agendar.
 
 NOTIFICACIONES DE CAMBIO DE ACEITE:
 - El sistema envía alertas automáticas cuando se acerca la fecha del próximo cambio de aceite.
@@ -3084,7 +3084,7 @@ REGLAS PARA RESPONDER:
 - Si preguntan por agendar una cita, dales el enlace: https://crm-automotriz-3wde-production.up.railway.app/cita
 - Si preguntan por presupuestos específicos o reparaciones complejas, diles que un técnico los contactará pronto.
 - No inventes precios exactos. Puedes decir que los precios varían según el vehículo y el diagnóstico.
-- Si no sabes algo con certeza, sugiere llamar al 809-712-2027.
+- Si no sabes algo con certeza, sugiere llamar al 849-569-2027.
 - Respuestas máximo 3 párrafos cortos.
 `.trim();
 
@@ -3168,10 +3168,10 @@ async function preguntarIA(userMsg) {
     });
     const data = await resp.json();
     return data.choices?.[0]?.message?.content?.trim()
-      || "Lo siento, no pude procesar tu consulta. Por favor llámanos al 809-712-2027.";
+      || "Lo siento, no pude procesar tu consulta. Por favor llámanos al 849-569-2027.";
   } catch (e) {
     console.error("OpenAI error:", e.message);
-    return "Lo siento, hubo un problema. Por favor llámanos al 809-712-2027.";
+    return "Lo siento, hubo un problema. Por favor llámanos al 849-569-2027.";
   }
 }
 
@@ -3289,7 +3289,7 @@ app.post("/telegram/webhook", async (req, res) => {
         `• El tipo de servicio que necesitas\n` +
         `• Fecha y hora de tu preferencia\n\n` +
         `⏰ Te recordaremos tu cita <b>1 hora antes</b> por notificación.\n\n` +
-        `También puedes llamarnos directamente al <b>809-712-2027</b> para reservar. 😊`
+        `También puedes llamarnos directamente al <b>849-569-2027</b> para reservar. 😊`
       );
       return;
     }
@@ -3304,7 +3304,7 @@ app.post("/telegram/webhook", async (req, res) => {
         `y presiona el botón <b>🔔 Activar Notificaciones</b>.\n\n` +
         `Si ya se te acercó el mantenimiento, <b>agenda tu cita ahora</b>:\n` +
         `📅 <a href="https://crm-automotriz-3wde-production.up.railway.app/cita">Reservar cita</a>\n\n` +
-        `📞 También puedes llamarnos al <b>809-712-2027</b>.`
+        `📞 También puedes llamarnos al <b>849-569-2027</b>.`
       );
       return;
     }
@@ -3322,7 +3322,7 @@ app.post("/telegram/webhook", async (req, res) => {
           `¿Es correcta la placa? Escríbela sin guiones ni espacios.\n` +
           `Ej: <code>A123456</code> o <code>AB12345</code>\n\n` +
           `Si el número es correcto, puedes usar <code>/debug ${placaDetectada}</code> para diagnóstico,\n` +
-          `o llámanos al <b>809-712-2027</b>.`
+          `o llámanos al <b>849-569-2027</b>.`
         );
         return;
       }
@@ -3418,10 +3418,10 @@ app.post("/telegram/webhook", async (req, res) => {
         const estado = ultimo?.estado;
         if (estado === "LISTO") {
           msg1 += `\n\n🎉 <b>¡Tu vehículo te espera!</b> Pasa a buscarlo.\n`;
-          msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, voy a buscar mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Avisar por WhatsApp</a>`;
+          msg1 += `💬 <a href="https://wa.me/18495692027?text=${encodeURIComponent(`Hola, voy a buscar mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Avisar por WhatsApp</a>`;
         } else if (estado === "ESPERANDO_APROBACION") {
           msg1 += `\n\n📲 <b>¿Apruebas la reparación?</b> Contáctanos:\n`;
-          msg1 += `💬 <a href="https://wa.me/18097122027?text=${encodeURIComponent(`Hola, apruebo la reparación de mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Aprobar por WhatsApp</a>`;
+          msg1 += `💬 <a href="https://wa.me/18495692027?text=${encodeURIComponent(`Hola, apruebo la reparación de mi ${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa}).`)}">Aprobar por WhatsApp</a>`;
         } else if (estado === "CONTROL_CALIDAD") {
           msg1 += `\n\n🔎 <i>Revisión final en curso. Tu vehículo estará listo muy pronto.</i>`;
         } else if (["RECIBIDO","DIAGNOSTICO","REPARACION"].includes(estado)) {
@@ -3452,10 +3452,10 @@ app.post("/telegram/webhook", async (req, res) => {
         });
         if (historial.length > BLOQUES_MAX)
           msg2 += `\n<i>... y ${historial.length - BLOQUES_MAX} visitas más en el historial.</i>\n`;
-        msg2 += `\n📞 ¿Alguna pregunta? Llámanos al <b>809-712-2027</b>.`;
+        msg2 += `\n📞 ¿Alguna pregunta? Llámanos al <b>849-569-2027</b>.`;
         await tgSend(chatId, msg2);
       } else {
-        await tgSend(chatId, `📞 ¿Alguna consulta? Llámanos al <b>809-712-2027</b> o escríbenos por WhatsApp.`);
+        await tgSend(chatId, `📞 ¿Alguna consulta? Llámanos al <b>849-569-2027</b> o escríbenos por WhatsApp.`);
       }
 
       return;
@@ -3474,12 +3474,12 @@ app.post("/telegram/webhook", async (req, res) => {
         ).join("\n");
         await tgSend(chatId,
           `🔩 <b>Repuestos disponibles</b>\n\n${lista}\n\n` +
-          `Para apartar o consultar disponibilidad escríbenos al WhatsApp <b>809-712-2027</b>.`
+          `Para apartar o consultar disponibilidad escríbenos al WhatsApp <b>849-569-2027</b>.`
         );
       } else {
         await tgSend(chatId,
           `🔩 En este momento no hay repuestos con stock registrado.\n` +
-          `Para consultas de disponibilidad llámanos al <b>809-712-2027</b>.`
+          `Para consultas de disponibilidad llámanos al <b>849-569-2027</b>.`
         );
       }
       return;
@@ -3504,7 +3504,7 @@ app.post("/telegram/webhook", async (req, res) => {
         msg += `Disfruta mientras esperas tu vehículo. 😊`;
         await tgSend(chatId, msg);
       } else {
-        await tgSend(chatId, `☕ El menú no está disponible en este momento. Visítanos directamente o llámanos al <b>809-712-2027</b>.`);
+        await tgSend(chatId, `☕ El menú no está disponible en este momento. Visítanos directamente o llámanos al <b>849-569-2027</b>.`);
       }
       return;
     }
@@ -3522,7 +3522,7 @@ app.post("/telegram/webhook", async (req, res) => {
         `• Motor y Transmisión\n` +
         `• Aire Acondicionado\n` +
         `• Alineación y Balanceo computarizado\n\n` +
-        `Para cotizaciones escríbenos al WhatsApp <b>809-712-2027</b>.`
+        `Para cotizaciones escríbenos al WhatsApp <b>849-569-2027</b>.`
       );
       return;
     }
@@ -3531,8 +3531,8 @@ app.post("/telegram/webhook", async (req, res) => {
     if (/contacto|horario|hora|abierto|abren|cierran|direcci|dónde|donde|ubicaci|📞/i.test(texto)) {
       await tgSend(chatId,
         `📍 <b>Sólido Auto Servicio</b>\n\n` +
-        `📞 Teléfono: <b>809-712-2027</b>\n` +
-        `💬 WhatsApp: <a href="https://wa.me/18097122027">+1 809-712-2027</a>\n` +
+        `📞 Teléfono: <b>849-569-2027</b>\n` +
+        `💬 WhatsApp: <a href="https://wa.me/18495692027">+1 849-569-2027</a>\n` +
         `📍 Santo Domingo, República Dominicana\n\n` +
         `⏰ <b>Horario de Atención</b>\n` +
         `Lunes – Viernes: 8:00 AM – 6:00 PM\n` +
@@ -3546,8 +3546,8 @@ app.post("/telegram/webhook", async (req, res) => {
     if (/hablar|persona|humano|agente|técnico|tecnico|presupuest|cotizaci|precio de|cuánto cuesta|cuanto cuesta|💬 hablar/i.test(texto)) {
       await tgSend(chatId,
         `👨‍🔧 Entendido, <b>${nombre}</b>. Te conectaré con nuestro equipo.\n\n` +
-        `📞 Llámanos: <b>809-712-2027</b>\n` +
-        `💬 WhatsApp: <a href="https://wa.me/18097122027?text=Hola, necesito hablar con un técnico">Escríbenos aquí</a>\n\n` +
+        `📞 Llámanos: <b>849-569-2027</b>\n` +
+        `💬 WhatsApp: <a href="https://wa.me/18495692027?text=Hola, necesito hablar con un técnico">Escríbenos aquí</a>\n\n` +
         `Horario: Lunes–Viernes 8AM–6PM | Sábados 8AM–4PM.`
       );
       return;
@@ -4844,7 +4844,7 @@ const WA_VERIFY   = process.env.WHATSAPP_VERIFY_TOKEN || "solido_auto_wa_verify"
 
 /**
  * Normaliza un número de teléfono dominicano al formato internacional E.164
- * Entrada: "809-712-2027" | "8097122027" | "18097122027" → "18097122027"
+ * Entrada: "849-569-2027" | "8495692027" | "18495692027" → "18495692027"
  */
 function normalizarTelefono(tel) {
   if (!tel) return null;
@@ -4954,9 +4954,9 @@ async function notificarClienteWA(ordenId, mensaje) {
 // Mensajes por estado
 const WA_MENSAJES = {
   DIAGNOSTICO:          "🔧 Hola {cliente}, su {vehiculo} ya está en diagnóstico. Le avisaremos cuando tengamos novedades. — Sólido Auto Servicio",
-  ESPERANDO_APROBACION: "📋 Hola {cliente}, tenemos lista la cotización de su {vehiculo} (Orden {orden}). Por favor contáctenos para aprobar la reparación. 📞 809-712-2027 — Sólido Auto Servicio",
+  ESPERANDO_APROBACION: "📋 Hola {cliente}, tenemos lista la cotización de su {vehiculo} (Orden {orden}). Por favor contáctenos para aprobar la reparación. 📞 849-569-2027 — Sólido Auto Servicio",
   REPARACION:           "⚙️ Hola {cliente}, iniciamos la reparación de su {vehiculo}. Le notificaremos cuando esté listo. — Sólido Auto Servicio",
-  LISTO:                "✅ ¡Hola {cliente}! Su {vehiculo} está LISTO para retirar. 🎉 Pase cuando guste. Horario: Lun–Vie 8AM–6PM | Sáb 8AM–4PM. 📞 809-712-2027 — Sólido Auto Servicio",
+  LISTO:                "✅ ¡Hola {cliente}! Su {vehiculo} está LISTO para retirar. 🎉 Pase cuando guste. Horario: Lun–Vie 8AM–6PM | Sáb 8AM–4PM. 📞 849-569-2027 — Sólido Auto Servicio",
   ENTREGADO:            "🙏 Hola {cliente}, gracias por confiar en Sólido Auto Servicio. ¡Fue un placer atenderle! Recuerde que estamos disponibles para su próximo mantenimiento. 🚗",
 };
 
@@ -5027,7 +5027,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
     if (!cliente) {
       await responder(
         "👋 Hola, soy el asistente de *Sólido Auto Servicio*.\n\n" +
-        "No encontré su número en nuestro sistema. Para consultas llámenos al 📞 *809-712-2027*.\n\n" +
+        "No encontré su número en nuestro sistema. Para consultas llámenos al 📞 *849-569-2027*.\n\n" +
         "Horario: Lun–Vie 8AM–6PM | Sáb 8AM–4PM."
       );
       return;
@@ -5067,10 +5067,10 @@ app.post("/webhook/whatsapp", async (req, res) => {
           await responder(
             `✅ *${cliente.nombre}*, actualmente no tiene órdenes activas.\n\n` +
             `Último servicio: ${ultimaOrden[0].vehiculos?.marca} ${ultimaOrden[0].vehiculos?.modelo} — estado: *${ultimaOrden[0].estado}*\n\n` +
-            `Para agendar un nuevo servicio: 📞 *809-712-2027*`
+            `Para agendar un nuevo servicio: 📞 *849-569-2027*`
           );
         } else {
-          await responder(`Hola *${cliente.nombre}*, no encontré órdenes registradas a su nombre.\nLlámenos: 📞 *809-712-2027*`);
+          await responder(`Hola *${cliente.nombre}*, no encontré órdenes registradas a su nombre.\nLlámenos: 📞 *849-569-2027*`);
         }
         return;
       }
@@ -5093,7 +5093,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
         respuesta += `   Orden: ${ord.numero_orden}\n`;
         respuesta += `   Estado: *${ESTADO_LABEL[ord.estado] || ord.estado}*\n\n`;
       }
-      respuesta += `📞 ¿Preguntas? Llámenos: *809-712-2027*`;
+      respuesta += `📞 ¿Preguntas? Llámenos: *849-569-2027*`;
       await responder(respuesta);
       return;
     }
@@ -5108,7 +5108,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
         .limit(5);
 
       if (!historial?.length) {
-        await responder(`*${cliente.nombre}*, aún no hay historial de servicios registrado a su nombre.\n📞 *809-712-2027*`);
+        await responder(`*${cliente.nombre}*, aún no hay historial de servicios registrado a su nombre.\n📞 *849-569-2027*`);
         return;
       }
 
@@ -5126,7 +5126,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
     if (/^(3|contacto|agente|humano|persona|hablar|llamar|tel[eé]fono)/.test(texto)) {
       await responder(
         "📞 Para hablar con nuestro equipo:\n\n" +
-        "☎️ Teléfono: *809-712-2027*\n" +
+        "☎️ Teléfono: *849-569-2027*\n" +
         "📍 Santo Domingo, República Dominicana\n\n" +
         "⏰ *Horario de Atención*\n" +
         "Lun–Vie: 8:00 AM – 6:00 PM\n" +
@@ -5143,7 +5143,7 @@ app.post("/webhook/whatsapp", async (req, res) => {
       "1️⃣ *estado* — Estado de su vehículo\n" +
       "2️⃣ *historial* — Historial de servicios\n" +
       "3️⃣ *contacto* — Teléfono y horarios\n\n" +
-      "📞 *809-712-2027* — Sólido Auto Servicio"
+      "📞 *849-569-2027* — Sólido Auto Servicio"
     );
 
   } catch (e) {
@@ -5774,7 +5774,7 @@ Eres el asistente de correo oficial de SÓLIDO AUTO SERVICIO, un taller automotr
 
 INFORMACIÓN DE LA EMPRESA:
 - Nombre: Sólido Auto Servicio
-- Teléfono: 809-712-2027 | WhatsApp: +1 (809) 712-2027
+- Teléfono: 849-569-2027 | WhatsApp: +1 (809) 712-2027
 - Ubicación: Santo Domingo, República Dominicana
 - Horario: Lun-Vie 7:30 AM – 6:00 PM | Sáb 8:00 AM – 2:00 PM | Dom Cerrado
 - Misión: Brindar servicio de mantenimiento automotriz de calidad, con equipo de profesionales guiados por la mejora continua.

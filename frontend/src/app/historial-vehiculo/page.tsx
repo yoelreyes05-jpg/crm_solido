@@ -367,7 +367,7 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
     <img src="${logoUrl}" alt="Logo" style="height:40px;max-width:120px;object-fit:contain;border-radius:4px" onerror="this.style.display='none'"/>
     <div>
       <div style="font-size:13px;font-weight:900;line-height:1.2">SÓLIDO AUTO SERVICIO</div>
-      <div style="font-size:9px;color:#6b7280">Mecánica &amp; Detallado · Tel: 809-712-2027 · Santo Domingo, RD</div>
+      <div style="font-size:9px;color:#6b7280">Mecánica &amp; Detallado · Tel: 849-569-2027 · Santo Domingo, RD</div>
     </div>
   </div>
   <div style="text-align:right">
@@ -404,7 +404,7 @@ ${secTrabSol}${secInsp}${secDiag}${secTrabajos}${secFinanciero}${secQC}${secEntr
 
 <!-- PIE -->
 <div style="margin-top:10px;padding-top:6px;border-top:1px dashed #cbd5e1;text-align:center;font-size:9px;color:#9ca3af">
-  Expediente generado el ${fmtD(new Date().toISOString())} · <b>SÓLIDO AUTO SERVICIO</b> · Tel: 809-712-2027
+  Expediente generado el ${fmtD(new Date().toISOString())} · <b>SÓLIDO AUTO SERVICIO</b> · Tel: 849-569-2027
 </div>
 </body></html>`;
 

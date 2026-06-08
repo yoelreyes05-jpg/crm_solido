@@ -102,7 +102,7 @@ function imprimirRecibo(cuenta: any, pagos: any[], tipo: "cobrar" | "pagar") {
   <div class="row total"><span>Saldo pendiente</span><span>${fmt(saldo)}</span></div>
   <table><thead><tr><th>Fecha</th><th>Monto</th><th>Método</th><th>Referencia</th><th>Usuario</th></tr></thead>
   <tbody>${rows}</tbody></table>
-  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
+  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 849-569-2027 · Santo Domingo, R.D.<br/>Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
   <script>setTimeout(()=>window.print(),500);<\/script></body></html>`;
   const w = window.open("", "_blank", "width=700,height=600");
   if (w) { w.document.write(html); w.document.close(); }
@@ -179,7 +179,7 @@ export default function ContabilidadPage() {
 
 // Imprimir un cuadre de caja
 function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
-  const EMPRESA = { nombre: "SÓLIDO AUTO SERVICIO SRL", tel: "809-712-2027", dir: "Santo Domingo, R.D." };
+  const EMPRESA = { nombre: "SÓLIDO AUTO SERVICIO SRL", tel: "849-569-2027", dir: "Santo Domingo, R.D." };
   const saldoEsperado = Number(c.ventas_efectivo) - Number(c.gastos);
   const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
     ? Number(c.efectivo_contado) - saldoEsperado

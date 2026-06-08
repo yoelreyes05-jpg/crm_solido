@@ -312,7 +312,7 @@ export default function CotizacionPage() {
             <div>
               <div style={{ fontSize: 20, fontWeight: 900, letterSpacing: 0.5, color: "#fff" }}>SÓLIDO AUTO SERVICIO</div>
               <div style={{ fontSize: 12, color: "#93c5fd", marginTop: 3 }}>Taller Automotriz · Reparación &amp; Mantenimiento</div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>RNC: 1-31-12345-6 · Tel: 809-712-2027</div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>RNC: 1-31-12345-6 · Tel: 849-569-2027</div>
             </div>
           </div>
           <div style={{ textAlign: "right", flexShrink: 0 }}>

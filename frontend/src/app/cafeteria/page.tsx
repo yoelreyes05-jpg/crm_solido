@@ -6,7 +6,7 @@ import { API_URL as API } from "@/config";
 const EMPRESA = {
   nombre: "SÓLIDO CAFÉ GARAJE",
   razon_social: "SÓLIDO AUTO SERVICIO SRL",
-  telefono: "809-712-2027",
+  telefono: "849-569-2027",
   rnc: "RNC: 000-000000-0",
   direccion: "Santo Domingo, República Dominicana",
   logo: "/logo-cafe.png",
@@ -628,7 +628,7 @@ function imprimirCuadreCafe(c: any) {
     <div style="text-align:center;"><div class="sig"></div><div>Supervisado por</div></div>
   </div>
 
-  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 809-712-2027 · Santo Domingo, R.D.<br/>
+  <div class="footer">SÓLIDO AUTO SERVICIO SRL · 849-569-2027 · Santo Domingo, R.D.<br/>
   Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
   <script>setTimeout(()=>window.print(),400);<\/script>
   </body></html>`;

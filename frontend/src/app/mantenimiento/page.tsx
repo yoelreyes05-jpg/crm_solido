@@ -364,7 +364,7 @@ export default function MantenimientoPage() {
                         }} style={S.btnSmall}>✅ Completar</button>
                         {p.cliente_telefono && (
                           <a
-                            href={`https://wa.me/${p.cliente_telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${p.cliente_nombre} 👋, le recordamos desde *Sólido Auto Servicio* que su vehículo *${p.vehiculo_info}* tiene programado un servicio de *${TIPO_LABEL[p.tipo_servicio] || p.tipo_servicio}* para el *${p.proximo_fecha ? new Date(p.proximo_fecha + "T12:00:00").toLocaleDateString("es-DO", { day:"2-digit", month:"long", year:"numeric" }) : "próximamente"}*.\n\n¿Desea agendar su cita? Llámenos al 809-712-2027 o responda este mensaje. ¡Gracias!`)}`}
+                            href={`https://wa.me/${p.cliente_telefono.replace(/\D/g,"")}?text=${encodeURIComponent(`Hola ${p.cliente_nombre} 👋, le recordamos desde *Sólido Auto Servicio* que su vehículo *${p.vehiculo_info}* tiene programado un servicio de *${TIPO_LABEL[p.tipo_servicio] || p.tipo_servicio}* para el *${p.proximo_fecha ? new Date(p.proximo_fecha + "T12:00:00").toLocaleDateString("es-DO", { day:"2-digit", month:"long", year:"numeric" }) : "próximamente"}*.\n\n¿Desea agendar su cita? Llámenos al 849-569-2027 o responda este mensaje. ¡Gracias!`)}`}
                             target="_blank" rel="noreferrer"
                             style={{ display:"inline-flex", alignItems:"center", gap:4, padding:"5px 9px", background:"#25d366", color:"#fff", borderRadius:6, fontSize:11, fontWeight:700, textDecoration:"none" }}>
                             💬 Recordar

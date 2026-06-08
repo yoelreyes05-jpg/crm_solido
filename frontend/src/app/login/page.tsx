@@ -265,7 +265,7 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <p className="login-footer">Tel: 809-712-2027 · Santo Domingo, RD</p>
+          <p className="login-footer">Tel: 849-569-2027 · Santo Domingo, RD</p>
         </div>
       </div>
     </>

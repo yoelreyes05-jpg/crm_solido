@@ -14,8 +14,8 @@ CREATE TABLE IF NOT EXISTS config_sistema (
 -- Insertar / actualizar valores iniciales de la empresa
 INSERT INTO config_sistema (clave, valor) VALUES
   ('nombre_empresa',    '"SÓLIDO AUTO SERVICIO"'),
-  ('telefono_empresa',  '"809-712-2027"'),
-  ('whatsapp_numero',   '"18097122027"'),
+  ('telefono_empresa',  '"849-569-2027"'),
+  ('whatsapp_numero',   '"18495692027"'),
   ('email_empresa',     '"info@solidoauto.com"'),
   ('direccion_empresa', '"Santo Domingo, República Dominicana"'),
   ('rnc_empresa',       '"000-000000-0"'),

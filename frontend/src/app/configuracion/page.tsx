@@ -12,8 +12,8 @@ interface NcfRow  { tipo: string; prefijo: string; secuencia_actual: number; }
 const EMPRESA_FIELDS = [
   { key: "nombre_empresa",    label: "Nombre de la Empresa",           ph: "SÓLIDO AUTO SERVICIO", type: "text" },
   { key: "rnc_empresa",       label: "RNC",                            ph: "000-000000-0",          type: "text" },
-  { key: "telefono_empresa",  label: "Teléfono",                       ph: "809-712-2027",          type: "text" },
-  { key: "whatsapp_numero",   label: "WhatsApp (con código país)",      ph: "18097122027",           type: "text" },
+  { key: "telefono_empresa",  label: "Teléfono",                       ph: "849-569-2027",          type: "text" },
+  { key: "whatsapp_numero",   label: "WhatsApp (con código país)",      ph: "18495692027",           type: "text" },
   { key: "email_empresa",     label: "Correo Electrónico",             ph: "info@empresa.com",      type: "email" },
   { key: "direccion_empresa", label: "Dirección",                      ph: "Santo Domingo, RD",     type: "text" },
 ];
@@ -353,7 +353,7 @@ export default function ConfiguracionPage() {
               style={s.input}
               value={editMap.whatsapp_numero ?? ""}
               onChange={e => set("whatsapp_numero", e.target.value)}
-              placeholder="18097122027"
+              placeholder="18495692027"
             />
 
             <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>

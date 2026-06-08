@@ -5,7 +5,7 @@ import { API_URL as API } from "@/config";
 // ─── DATOS EMPRESA (mismo que FacturaPage) ─────────────────────────────────
 const EMPRESA = {
   nombre: "SÓLIDO AUTO SERVICIO SRL",
-  telefono: "809-712-2027",
+  telefono: "849-569-2027",
   rnc: "1-32-XXXXX-X",
   direccion: "Santo Domingo, República Dominicana",
   email: "info@solidoauto.com",

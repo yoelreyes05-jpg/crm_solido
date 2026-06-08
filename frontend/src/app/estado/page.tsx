@@ -87,8 +87,8 @@ export default function EstadoVehiculoPage() {
 
             <div style={{ marginTop: 24, paddingTop: 20, borderTop: "1px solid #f0f0f0", textAlign: "center" }}>
               <p style={{ margin: 0, fontSize: 12, color: "#aaa" }}>¿Necesitas hablar con nosotros?</p>
-              <a href="tel:8097122027" style={{ fontSize: 15, fontWeight: 700, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 6 }}>
-                📞 809-712-2027
+              <a href="tel:8495692027" style={{ fontSize: 15, fontWeight: 700, color: "#3b82f6", textDecoration: "none", display: "block", marginTop: 6 }}>
+                📞 849-569-2027
               </a>
             </div>
           </div>
@@ -229,7 +229,7 @@ export default function EstadoVehiculoPage() {
 
             {/* ACCIONES */}
             <div style={{ ...card, marginTop: 16, display: "flex", flexDirection: "column", gap: 10 }}>
-              <a href="tel:8097122027" style={{ ...btnPrimary, textAlign: "center", textDecoration: "none", display: "block" }}>
+              <a href="tel:8495692027" style={{ ...btnPrimary, textAlign: "center", textDecoration: "none", display: "block" }}>
                 📞 Llamar al Taller
               </a>
               <button
@@ -328,7 +328,7 @@ export default function EstadoVehiculoPage() {
         {/* FOOTER */}
         <div style={{ textAlign: "center", padding: "24px 0 8px", color: "#bbb", fontSize: 12 }}>
           <div style={{ fontWeight: 700, color: "#888", marginBottom: 4 }}>SÓLIDO AUTO SERVICIO</div>
-          Tel: 809-712-2027 · Santo Domingo, RD
+          Tel: 849-569-2027 · Santo Domingo, RD
         </div>
       </div>
     </div>

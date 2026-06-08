@@ -375,7 +375,7 @@ function TabClientesRiesgo({ d, loading }: { d: any[]; loading: boolean }) {
               `Hola ${c.nombre}, le saludamos desde SÓLIDO AUTO SERVICIO SRL. ` +
               `Han pasado ${c.dias_sin_visita} días desde su última visita. ` +
               `¿Desea agendar un mantenimiento o revisión para su vehículo? ` +
-              `Llámenos al 809-712-2027 o responda este mensaje. ¡Gracias!`
+              `Llámenos al 849-569-2027 o responda este mensaje. ¡Gracias!`
             );
             const urlWA = `https://wa.me/${telLimpio}?text=${msgWA}`;
 

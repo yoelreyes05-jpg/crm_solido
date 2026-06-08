@@ -122,7 +122,7 @@ function imprimirHistorialCompleto(resultado: any, historialPerm: any[]) {
 <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:20px">
   <div>
     <div style="font-size:22px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div style="font-size:12px;color:#6b7280;margin-top:3px">Tel: 809-712-2027 · Santo Domingo, RD</div>
+    <div style="font-size:12px;color:#6b7280;margin-top:3px">Tel: 849-569-2027 · Santo Domingo, RD</div>
   </div>
   <div style="text-align:right">
     <div style="font-size:18px;font-weight:900;color:#1e40af">${v.marca || ""} ${v.modelo || ""} ${v.ano || ""}</div>
@@ -163,7 +163,7 @@ ${ordenes.slice(0, 10).map((o: any) => `
 
 <div style="text-align:center;margin-top:32px;padding-top:14px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:11px;line-height:2">
   <p>Documento generado el ${new Date().toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" })}</p>
-  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 849-569-2027 — Santo Domingo, República Dominicana</p>
 </div>
 
 </body>
@@ -257,7 +257,7 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
 <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:14px;margin-bottom:18px">
   <div>
     <div style="font-size:20px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div style="font-size:11px;color:#6b7280;margin-top:2px">Tel: 809-712-2027 · Santo Domingo, RD</div>
+    <div style="font-size:11px;color:#6b7280;margin-top:2px">Tel: 849-569-2027 · Santo Domingo, RD</div>
   </div>
   <div style="text-align:right">
     <div style="font-size:16px;font-weight:900;color:#1e40af">${h.marca || h.vehiculo_marca || ""} ${h.modelo || h.vehiculo_modelo || ""} ${h.ano || h.vehiculo_ano || ""}</div>
@@ -463,7 +463,7 @@ ${h.observaciones ? `
 <!-- ══ Pie de página ══ -->
 <div style="text-align:center;margin-top:28px;padding-top:12px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:11px;line-height:2">
   <p>Documento generado el ${new Date().toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"})}</p>
-  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, República Dominicana</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 849-569-2027 — Santo Domingo, República Dominicana</p>
 </div>
 
 </body>
@@ -972,7 +972,7 @@ export default function ClienteApp() {
               onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
             />
             <div className="sas-title">SÓLIDO AUTO SERVICIO & CAFE</div>
-            <div className="sas-subtitle">Portal del Cliente · 809-712-2027</div>
+            <div className="sas-subtitle">Portal del Cliente · 849-569-2027</div>
 
             {instalable && (
               <button onClick={instalarApp} className="btn-install">
@@ -1001,7 +1001,7 @@ export default function ClienteApp() {
                 ☕ {showCafe ? "Ocultar" : "Menú Café"}
               </button>
               <button
-                onClick={() => window.open("https://wa.me/18097122027","_blank")}
+                onClick={() => window.open("https://wa.me/18495692027","_blank")}
                 className="btn-quick btn-wa-q"
               >
                 💬 WhatsApp
@@ -1238,7 +1238,7 @@ export default function ClienteApp() {
 
                     {ultimaOrden.estado === "LISTO" && (
                       <a
-                        href={`https://wa.me/18097122027?text=${encodeURIComponent(
+                        href={`https://wa.me/18495692027?text=${encodeURIComponent(
                           `Hola, soy el dueño del vehículo *${resultado.vehiculo.marca} ${resultado.vehiculo.modelo}* · Placa *${resultado.vehiculo.placa}*. Ya estoy en camino a buscarlo. Llegaré aproximadamente en 20 minutos. 🚗`
                         )}`}
                         target="_blank"
@@ -1290,7 +1290,7 @@ export default function ClienteApp() {
                           <button
                             onClick={() => {
                               const msg = `Hola, quiero info de mi vehículo (${resultado.vehiculo.placa}), orden #${o.id}`;
-                              window.open(`https://wa.me/18097122027?text=${encodeURIComponent(msg)}`,"_blank");
+                              window.open(`https://wa.me/18495692027?text=${encodeURIComponent(msg)}`,"_blank");
                             }}
                             className="btn-wa-card"
                           >
@@ -2017,13 +2017,13 @@ export default function ClienteApp() {
             <footer className="footer">
               <div style={{ fontSize:22 }}>🔧</div>
               <div className="footer-brand">Sólido Auto Servicio</div>
-              <div>809-712-2027</div>
+              <div>849-569-2027</div>
             </footer>
           </div>
         </div>
 
         {/* BOTÓN FLOTANTE WHATSAPP */}
-        <a href="https://wa.me/18097122027" target="_blank" className="wa-float">💬</a>
+        <a href="https://wa.me/18495692027" target="_blank" className="wa-float">💬</a>
       </div>
     </>
   );

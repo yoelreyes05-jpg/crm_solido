@@ -6,7 +6,7 @@ import { API_URL as API } from "@/config";
 const EMPRESA = {
   nombre: "SÓLIDO CAFE GARAGE",
   sub: "Sólido Auto Servicio SRL",
-  telefono: "809-712-2027",
+  telefono: "849-569-2027",
 };
 
 // ─── Categorías predefinidas ──────────────────────────────────────────────────

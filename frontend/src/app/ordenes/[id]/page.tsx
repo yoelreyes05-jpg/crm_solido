@@ -123,7 +123,7 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
       <img src="${logoUrl}" alt="Logo" onerror="this.style.display='none'"/>
       <div>
         <div class="empresa-nombre">SÓLIDO AUTO SERVICIO</div>
-        <div class="empresa-meta">Expertos en Mecánica &amp; Detallado<br>Tel: 809-712-2027 · Santo Domingo, Rep. Dom.</div>
+        <div class="empresa-meta">Expertos en Mecánica &amp; Detallado<br>Tel: 849-569-2027 · Santo Domingo, Rep. Dom.</div>
       </div>
     </div>
     <div style="text-align:right">
@@ -156,7 +156,7 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
     <div><div style="height:36px"></div><div class="firma-linea">Técnico Responsable: ${tecnicoNombre}</div></div>
     <div><div style="height:36px"></div><div class="firma-linea">Firma del Cliente — Conforme</div></div>
   </div>
-  <div class="footer"><p>Este informe tiene validez de 15 días hábiles.</p><p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 809-712-2027 — Santo Domingo, RD</p></div>
+  <div class="footer"><p>Este informe tiene validez de 15 días hábiles.</p><p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 849-569-2027 — Santo Domingo, RD</p></div>
   </body></html>`;
   abrirImpresion(html);
 }
@@ -387,7 +387,7 @@ function imprimirOrdenCompleta(
     <img src="${window.location.origin}/logo.png" alt="Logo" style="height:60px;max-width:180px;object-fit:contain;border-radius:6px" onerror="this.style.display='none'"/>
     <div>
       <div style="font-size:18px;font-weight:900;letter-spacing:-0.5px">SÓLIDO AUTO SERVICIO</div>
-      <div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.4">Expertos en Mecánica &amp; Detallado<br>Tel: 809-712-2027 · Santo Domingo, Rep. Dom.</div>
+      <div style="font-size:10px;color:#6b7280;margin-top:2px;line-height:1.4">Expertos en Mecánica &amp; Detallado<br>Tel: 849-569-2027 · Santo Domingo, Rep. Dom.</div>
     </div>
   </div>
   <div style="text-align:right">
@@ -442,7 +442,7 @@ ${historial.length > 0 ? `<div class="section-title" style="border-left-color:#6
 </div>
 <div class="footer">
   <p>Este documento certifica que el vehículo fue recibido, diagnosticado y devuelto conforme a lo indicado.</p>
-  <p><strong>SÓLIDO AUTO SERVICIO</strong> · Tel: 809-712-2027 · Santo Domingo, República Dominicana · Impreso el ${new Date().toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"})}</p>
+  <p><strong>SÓLIDO AUTO SERVICIO</strong> · Tel: 849-569-2027 · Santo Domingo, República Dominicana · Impreso el ${new Date().toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"})}</p>
 </div>
 </body></html>`;
   abrirImpresion(html);

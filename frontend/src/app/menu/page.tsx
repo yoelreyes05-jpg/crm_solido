@@ -46,7 +46,7 @@ export default function MenuPublicoPage() {
           </div>
         </div>
         <a
-          href="https://wa.me/18097122027"
+          href="https://wa.me/18495692027"
           target="_blank"
           rel="noopener noreferrer"
           style={styles.waBtn}
@@ -92,7 +92,7 @@ export default function MenuPublicoPage() {
           <div style={styles.emptyWrap}>
             <div style={{ fontSize: 52, marginBottom: 12 }}>☕</div>
             <p style={{ color: "#9ca3af", fontSize: 16, fontWeight: 600 }}>El menú no está disponible en este momento</p>
-            <a href="https://wa.me/18097122027" style={styles.waLink}>
+            <a href="https://wa.me/18495692027" style={styles.waLink}>
               💬 Consultar disponibilidad
             </a>
           </div>
@@ -134,12 +134,12 @@ export default function MenuPublicoPage() {
       <div style={styles.footer}>
         <div style={styles.footerBrand}>SÓLIDO AUTO SERVICIO</div>
         <div style={styles.footerInfo}>
-          <a href="tel:8097122027" style={styles.footerLink}>📞 809-712-2027</a>
+          <a href="tel:8495692027" style={styles.footerLink}>📞 849-569-2027</a>
           <span style={{ color: "#374151" }}>·</span>
           <span style={{ color: "#6b7280" }}>Santo Domingo, RD</span>
         </div>
         <a
-          href="https://wa.me/18097122027"
+          href="https://wa.me/18495692027"
           target="_blank"
           rel="noopener noreferrer"
           style={styles.footerWa}
