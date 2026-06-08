@@ -4835,6 +4835,323 @@ app.patch("/api/contabilidad/cuentas-pagar/:id", async (req, res) => {
 });
 
 // =====================================================
+// 📱 WHATSAPP BUSINESS API (Meta Cloud API)
+// =====================================================
+
+const WA_TOKEN    = process.env.WHATSAPP_TOKEN    || "";
+const WA_PHONE_ID = process.env.WHATSAPP_PHONE_ID || "";
+const WA_VERIFY   = process.env.WHATSAPP_VERIFY_TOKEN || "solido_auto_wa_verify";
+
+/**
+ * Normaliza un número de teléfono dominicano al formato internacional E.164
+ * Entrada: "809-712-2027" | "8097122027" | "18097122027" → "18097122027"
+ */
+function normalizarTelefono(tel) {
+  if (!tel) return null;
+  const digits = tel.replace(/\D/g, "");
+  if (digits.length === 10) return `1${digits}`;          // 809xxxxxxx → 1809xxxxxxx
+  if (digits.length === 11 && digits.startsWith("1")) return digits; // ya tiene código país
+  if (digits.length === 12 && digits.startsWith("1")) return digits;
+  if (digits.length >= 10) return `1${digits.slice(-10)}`; // fallback
+  return null;
+}
+
+/**
+ * Envía un mensaje de WhatsApp usando la Cloud API de Meta.
+ * @param {string} telefono - número del destinatario (cualquier formato dominicano)
+ * @param {string} mensaje  - texto a enviar (soporta emojis y saltos de línea)
+ * @returns {Promise<{ok: boolean, error?: string}>}
+ */
+async function enviarWhatsApp(telefono, mensaje) {
+  if (!WA_TOKEN || !WA_PHONE_ID) {
+    console.warn("⚠️ WhatsApp no configurado (WHATSAPP_TOKEN o WHATSAPP_PHONE_ID faltante)");
+    return { ok: false, error: "WhatsApp no configurado" };
+  }
+  const to = normalizarTelefono(telefono);
+  if (!to) return { ok: false, error: `Teléfono inválido: ${telefono}` };
+
+  try {
+    const res = await fetch(
+      `https://graph.facebook.com/v19.0/${WA_PHONE_ID}/messages`,
+      {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${WA_TOKEN}`,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to,
+          type: "text",
+          text: { body: mensaje },
+        }),
+      }
+    );
+    const data = await res.json();
+    if (!res.ok) {
+      console.error("❌ WhatsApp API error:", JSON.stringify(data));
+      return { ok: false, error: data?.error?.message || "Error de API" };
+    }
+    console.log(`✅ WhatsApp enviado a ${to} — msg_id: ${data?.messages?.[0]?.id}`);
+    return { ok: true };
+  } catch (e) {
+    console.error("❌ WhatsApp fetch error:", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
+/**
+ * Obtiene config de WhatsApp desde la tabla config_sistema.
+ * Retorna { habilitado, numero } — cacheable por llamada.
+ */
+async function waConfig() {
+  const { data } = await supabase
+    .from("config_sistema")
+    .select("clave, valor")
+    .in("clave", ["notif_whatsapp", "whatsapp_numero"])
+    .catch(() => ({ data: [] }));
+  const map = Object.fromEntries((data || []).map(r => [r.clave, cfgVal(r)]));
+  return {
+    habilitado: map.notif_whatsapp === "true",
+    numero:     map.whatsapp_numero || "",
+  };
+}
+
+/**
+ * Envía notificación WhatsApp al cliente de una orden si las notificaciones están activas.
+ * Obtiene el teléfono del cliente desde la BD.
+ * @param {number} ordenId
+ * @param {string} mensaje
+ */
+async function notificarClienteWA(ordenId, mensaje) {
+  const cfg = await waConfig();
+  if (!cfg.habilitado) return;
+
+  const { data: orden } = await supabase
+    .from("ordenes_trabajo")
+    .select("cliente_id, numero_orden, vehiculos(marca, modelo, placa)")
+    .eq("id", ordenId)
+    .maybeSingle();
+  if (!orden) return;
+
+  const { data: cliente } = await supabase
+    .from("clientes")
+    .select("nombre, telefono")
+    .eq("id", orden.cliente_id)
+    .maybeSingle();
+  if (!cliente?.telefono) return;
+
+  const vehiculo = orden.vehiculos;
+  const infoVeh  = vehiculo ? `${vehiculo.marca} ${vehiculo.modelo} (${vehiculo.placa})` : "su vehículo";
+  const textoFinal = mensaje
+    .replace("{cliente}", cliente.nombre || "Cliente")
+    .replace("{vehiculo}", infoVeh)
+    .replace("{orden}", orden.numero_orden || String(ordenId));
+
+  await enviarWhatsApp(cliente.telefono, textoFinal);
+}
+
+// Mensajes por estado
+const WA_MENSAJES = {
+  DIAGNOSTICO:          "🔧 Hola {cliente}, su {vehiculo} ya está en diagnóstico. Le avisaremos cuando tengamos novedades. — Sólido Auto Servicio",
+  ESPERANDO_APROBACION: "📋 Hola {cliente}, tenemos lista la cotización de su {vehiculo} (Orden {orden}). Por favor contáctenos para aprobar la reparación. 📞 809-712-2027 — Sólido Auto Servicio",
+  REPARACION:           "⚙️ Hola {cliente}, iniciamos la reparación de su {vehiculo}. Le notificaremos cuando esté listo. — Sólido Auto Servicio",
+  LISTO:                "✅ ¡Hola {cliente}! Su {vehiculo} está LISTO para retirar. 🎉 Pase cuando guste. Horario: Lun–Vie 8AM–6PM | Sáb 8AM–4PM. 📞 809-712-2027 — Sólido Auto Servicio",
+  ENTREGADO:            "🙏 Hola {cliente}, gracias por confiar en Sólido Auto Servicio. ¡Fue un placer atenderle! Recuerde que estamos disponibles para su próximo mantenimiento. 🚗",
+};
+
+// ── GET /test-whatsapp?tel=18091234567 — prueba manual desde el panel ──────
+app.get("/test-whatsapp", async (req, res) => {
+  const { tel, msg } = req.query;
+  if (!tel) return res.status(400).json({ error: "Falta parámetro tel" });
+  const result = await enviarWhatsApp(tel, msg || "✅ Prueba de WhatsApp desde Sólido Auto Servicio. Si recibe esto, ¡la integración funciona!");
+  res.json(result);
+});
+
+// ── GET /webhook/whatsapp — verificación de Meta ───────────────────────────
+app.get("/webhook/whatsapp", (req, res) => {
+  const mode      = req.query["hub.mode"];
+  const token     = req.query["hub.verify_token"];
+  const challenge = req.query["hub.challenge"];
+  if (mode === "subscribe" && token === WA_VERIFY) {
+    console.log("✅ Webhook WhatsApp verificado");
+    return res.status(200).send(challenge);
+  }
+  res.sendStatus(403);
+});
+
+// ── POST /webhook/whatsapp — recibe mensajes entrantes (chatbot) ───────────
+app.post("/webhook/whatsapp", async (req, res) => {
+  res.sendStatus(200); // responder inmediatamente para evitar reintentos de Meta
+
+  try {
+    const entry   = req.body?.entry?.[0];
+    const changes = entry?.changes?.[0];
+    const value   = changes?.value;
+    if (!value?.messages) return;
+
+    const msg      = value.messages[0];
+    const from     = msg.from;   // número en formato E.164 sin +
+    const texto    = (msg.text?.body || "").trim().toLowerCase();
+    const msgId    = msg.id;
+    const phoneId  = value.metadata?.phone_number_id;
+
+    // Función helper para responder
+    const responder = async (cuerpo) => {
+      if (!WA_TOKEN || !phoneId) return;
+      await fetch(`https://graph.facebook.com/v19.0/${phoneId}/messages`, {
+        method: "POST",
+        headers: {
+          "Authorization": `Bearer ${WA_TOKEN}`,
+          "Content-Type":  "application/json",
+        },
+        body: JSON.stringify({
+          messaging_product: "whatsapp",
+          to:   from,
+          type: "text",
+          text: { body: cuerpo },
+          context: { message_id: msgId },
+        }),
+      }).catch(e => console.error("❌ chatbot respuesta error:", e.message));
+    };
+
+    // Buscar cliente por teléfono (normalizado)
+    const telSufijo = from.slice(-10);
+    const { data: clientes } = await supabase
+      .from("clientes")
+      .select("id, nombre, telefono")
+      .ilike("telefono", `%${telSufijo}`)
+      .limit(1);
+    const cliente = clientes?.[0];
+
+    if (!cliente) {
+      await responder(
+        "👋 Hola, soy el asistente de *Sólido Auto Servicio*.\n\n" +
+        "No encontré su número en nuestro sistema. Para consultas llámenos al 📞 *809-712-2027*.\n\n" +
+        "Horario: Lun–Vie 8AM–6PM | Sáb 8AM–4PM."
+      );
+      return;
+    }
+
+    // Saludos / menú
+    if (/^(hola|hi|buenas|buenos|buen|hey|ola|menu|menú|ayuda|help|inicio|start|0)/.test(texto)) {
+      await responder(
+        `👋 Hola *${cliente.nombre}*, bienvenido a *Sólido Auto Servicio*.\n\n` +
+        "¿En qué le puedo ayudar?\n\n" +
+        "1️⃣ *estado* — Ver estado de su vehículo\n" +
+        "2️⃣ *historial* — Ver historial de servicios\n" +
+        "3️⃣ *contacto* — Hablar con un agente\n\n" +
+        "_Responda con el número o la palabra clave._"
+      );
+      return;
+    }
+
+    // Estado de la orden activa
+    if (/^(1|estado|orden|veh[ií]culo|carro|auto|mi veh)/.test(texto)) {
+      const { data: ordenes } = await supabase
+        .from("ordenes_trabajo")
+        .select("id, numero_orden, estado, created_at, vehiculos(marca, modelo, placa)")
+        .eq("cliente_id", cliente.id)
+        .not("estado", "in", '("ENTREGADO","CANCELADA")')
+        .order("created_at", { ascending: false })
+        .limit(3);
+
+      if (!ordenes?.length) {
+        const { data: ultimaOrden } = await supabase
+          .from("ordenes_trabajo")
+          .select("estado, vehiculos(marca, modelo), created_at")
+          .eq("cliente_id", cliente.id)
+          .order("created_at", { ascending: false })
+          .limit(1);
+        if (ultimaOrden?.[0]) {
+          await responder(
+            `✅ *${cliente.nombre}*, actualmente no tiene órdenes activas.\n\n` +
+            `Último servicio: ${ultimaOrden[0].vehiculos?.marca} ${ultimaOrden[0].vehiculos?.modelo} — estado: *${ultimaOrden[0].estado}*\n\n` +
+            `Para agendar un nuevo servicio: 📞 *809-712-2027*`
+          );
+        } else {
+          await responder(`Hola *${cliente.nombre}*, no encontré órdenes registradas a su nombre.\nLlámenos: 📞 *809-712-2027*`);
+        }
+        return;
+      }
+
+      const ESTADO_LABEL = {
+        RECIBIDO:             "📥 Recibido en taller",
+        DIAGNOSTICO:          "🔍 En diagnóstico",
+        ESPERANDO_APROBACION: "📋 Esperando su aprobación",
+        REPARACION:           "⚙️ En reparación",
+        CONTROL_CALIDAD:      "🔎 Control de calidad",
+        LISTO:                "✅ ¡LISTO para retirar!",
+        ENTREGADO:            "🏁 Entregado",
+        CANCELADA:            "❌ Cancelada",
+      };
+
+      let respuesta = `🔍 *Estado de sus vehículos — ${cliente.nombre}*\n\n`;
+      for (const ord of ordenes) {
+        const veh = ord.vehiculos;
+        respuesta += `🚗 *${veh?.marca} ${veh?.modelo}* (${veh?.placa})\n`;
+        respuesta += `   Orden: ${ord.numero_orden}\n`;
+        respuesta += `   Estado: *${ESTADO_LABEL[ord.estado] || ord.estado}*\n\n`;
+      }
+      respuesta += `📞 ¿Preguntas? Llámenos: *809-712-2027*`;
+      await responder(respuesta);
+      return;
+    }
+
+    // Historial
+    if (/^(2|historial|servicios|anteriores|pasad)/.test(texto)) {
+      const { data: historial } = await supabase
+        .from("vehiculo_historial")
+        .select("marca, modelo, placa, fecha_entrega, descripcion_diagnostico")
+        .eq("cliente_id", cliente.id)
+        .order("fecha_entrega", { ascending: false })
+        .limit(5);
+
+      if (!historial?.length) {
+        await responder(`*${cliente.nombre}*, aún no hay historial de servicios registrado a su nombre.\n📞 *809-712-2027*`);
+        return;
+      }
+
+      let resp = `📋 *Historial de Servicios — ${cliente.nombre}*\n\n`;
+      for (const h of historial) {
+        const fecha = h.fecha_entrega ? new Date(h.fecha_entrega).toLocaleDateString("es-DO") : "—";
+        resp += `• ${fecha} — *${h.marca} ${h.modelo}* (${h.placa})\n`;
+        if (h.descripcion_diagnostico) resp += `  _${h.descripcion_diagnostico.slice(0, 80)}_\n`;
+      }
+      await responder(resp);
+      return;
+    }
+
+    // Contacto / agente
+    if (/^(3|contacto|agente|humano|persona|hablar|llamar|tel[eé]fono)/.test(texto)) {
+      await responder(
+        "📞 Para hablar con nuestro equipo:\n\n" +
+        "☎️ Teléfono: *809-712-2027*\n" +
+        "📍 Santo Domingo, República Dominicana\n\n" +
+        "⏰ *Horario de Atención*\n" +
+        "Lun–Vie: 8:00 AM – 6:00 PM\n" +
+        "Sáb: 8:00 AM – 4:00 PM\n" +
+        "Dom: 9:00 AM – 2:00 PM"
+      );
+      return;
+    }
+
+    // Respuesta genérica
+    await responder(
+      `Hola *${cliente.nombre}* 👋\n\n` +
+      "Responda con una de estas opciones:\n\n" +
+      "1️⃣ *estado* — Estado de su vehículo\n" +
+      "2️⃣ *historial* — Historial de servicios\n" +
+      "3️⃣ *contacto* — Teléfono y horarios\n\n" +
+      "📞 *809-712-2027* — Sólido Auto Servicio"
+    );
+
+  } catch (e) {
+    console.error("❌ Error webhook WhatsApp:", e.message);
+  }
+});
+
+// =====================================================
 // 🔄 MÁQUINA DE ESTADOS — FLUJO AUTOMÁTICO DE ÓRDENES
 // =====================================================
 
@@ -4916,6 +5233,13 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
     metadata:        extra,
     created_at:      new Date().toISOString(),
   }]).then(r => r).catch(err => console.warn("⚠️ No se pudo escribir log (¿tabla existe?):", err.message));
+
+  // 📱 Notificación automática por WhatsApp
+  if (WA_MENSAJES[nuevoEstado]) {
+    notificarClienteWA(idNum, WA_MENSAJES[nuevoEstado]).catch(e =>
+      console.warn("⚠️ WhatsApp notif error:", e.message)
+    );
+  }
 
   return { ok: true };
 }
