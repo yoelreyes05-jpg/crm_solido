@@ -9,9 +9,37 @@ type Suplidor = {
   direccion?: string;
   telefono?: string;
   correo?: string;
+  tipo_servicio?: string;
 };
 
-const vacioForm = { name: "", rnc: "", direccion: "", telefono: "", correo: "" };
+const TIPOS_SERVICIO = [
+  { value: "",             label: "— Sin clasificar —" },
+  { value: "repuestos",    label: "🔩 Repuestos y Autopartes" },
+  { value: "lubricantes",  label: "🛢️ Lubricantes y Aceites" },
+  { value: "neumaticos",   label: "🛞 Neumáticos y Llantas" },
+  { value: "herramientas", label: "🔧 Herramientas y Equipos" },
+  { value: "carroceria",   label: "🎨 Carrocería y Pintura" },
+  { value: "electrico",    label: "⚡ Eléctrico y Electrónico" },
+  { value: "limpieza",     label: "🧴 Limpieza y Detailing" },
+  { value: "varios",       label: "📦 Servicios Varios" },
+];
+
+const TIPO_LABEL: Record<string, string> = Object.fromEntries(
+  TIPOS_SERVICIO.filter(t => t.value).map(t => [t.value, t.label])
+);
+
+const TIPO_COLOR: Record<string, string> = {
+  repuestos:    "#6366f1",
+  lubricantes:  "#f59e0b",
+  neumaticos:   "#64748b",
+  herramientas: "#0ea5e9",
+  carroceria:   "#ec4899",
+  electrico:    "#eab308",
+  limpieza:     "#10b981",
+  varios:       "#94a3b8",
+};
+
+const vacioForm = { name: "", rnc: "", direccion: "", telefono: "", correo: "", tipo_servicio: "" };
 
 export default function SuplidoresPage() {
   const [suppliers, setSuppliers] = useState<Suplidor[]>([]);
@@ -20,6 +48,7 @@ export default function SuplidoresPage() {
   const [editando, setEditando]   = useState<Suplidor | null>(null);
   const [saving, setSaving]       = useState(false);
   const [busqueda, setBusqueda]   = useState("");
+  const [filtroTipo, setFiltroTipo] = useState("");
   const [buscandoRNC, setBuscandoRNC]           = useState(false);
   const [rncEstado, setRncEstado]               = useState<"ok" | "notfound" | "">("");
   const [busqNombre, setBusqNombre]             = useState("");
@@ -110,9 +139,16 @@ export default function SuplidoresPage() {
     setSaving(false);
   };
 
-  const iniciarEdicion = (s: Suplidor) => {
-    setEditando(s);
-    setForm({ name: s.name, rnc: s.rnc || "", direccion: s.direccion || "", telefono: s.telefono || "", correo: s.correo || "" });
+  const iniciarEdicion = (sup: Suplidor) => {
+    setEditando(sup);
+    setForm({
+      name:          sup.name,
+      rnc:           sup.rnc           || "",
+      direccion:     sup.direccion     || "",
+      telefono:      sup.telefono      || "",
+      correo:        sup.correo        || "",
+      tipo_servicio: sup.tipo_servicio || "",
+    });
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
@@ -121,19 +157,28 @@ export default function SuplidoresPage() {
     setForm({ ...vacioForm });
   };
 
-  const eliminar = async (s: Suplidor) => {
-    if (!confirm(`¿Eliminar el suplidor "${s.name}"?\nEsta acción no se puede deshacer.`)) return;
-    await fetch(`${API}/suplidores/${s.id}`, { method: "DELETE" });
+  const eliminar = async (sup: Suplidor) => {
+    if (!confirm(`¿Eliminar el suplidor "${sup.name}"?\nEsta acción no se puede deshacer.`)) return;
+    await fetch(`${API}/suplidores/${sup.id}`, { method: "DELETE" });
     cargar();
   };
 
-  const filtrados = suppliers.filter(s =>
-    !busqueda ||
-    s.name?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    s.rnc?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    s.telefono?.toLowerCase().includes(busqueda.toLowerCase()) ||
-    s.correo?.toLowerCase().includes(busqueda.toLowerCase())
-  );
+  const filtrados = suppliers.filter(sup => {
+    const q = busqueda.toLowerCase();
+    const matchTexto = !q ||
+      sup.name?.toLowerCase().includes(q) ||
+      sup.rnc?.toLowerCase().includes(q) ||
+      sup.telefono?.toLowerCase().includes(q) ||
+      sup.correo?.toLowerCase().includes(q);
+    const matchTipo = !filtroTipo || sup.tipo_servicio === filtroTipo;
+    return matchTexto && matchTipo;
+  });
+
+  // Conteo por tipo para los badges del filtro
+  const conteoTipos = TIPOS_SERVICIO.filter(t => t.value).map(t => ({
+    ...t,
+    count: suppliers.filter(s => s.tipo_servicio === t.value).length,
+  })).filter(t => t.count > 0);
 
   return (
     <div style={s.page}>
@@ -165,13 +210,8 @@ export default function SuplidoresPage() {
                 boxShadow: "0 8px 24px rgba(0,0,0,.4)", maxHeight: 260, overflowY: "auto",
               }}>
                 {resultadosNombre.map((r, i) => (
-                  <div
-                    key={i}
-                    onClick={() => seleccionarDeNombre(r)}
-                    style={{
-                      padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #334155",
-                      transition: "background .15s",
-                    }}
+                  <div key={i} onClick={() => seleccionarDeNombre(r)}
+                    style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #334155", transition: "background .15s" }}
                     onMouseEnter={e => (e.currentTarget.style.background = "#2563eb22")}
                     onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
                   >
@@ -207,20 +247,29 @@ export default function SuplidoresPage() {
               placeholder="Ej: 101XXXXX o 000XXXXXXX"
               style={{ ...s.input, flex: 1, marginBottom: 0 }}
             />
-            <button
-              type="button"
-              onClick={() => consultarRNC(form.rnc)}
+            <button type="button" onClick={() => consultarRNC(form.rnc)}
               disabled={buscandoRNC || form.rnc.replace(/\D/g,"").length < 9}
               style={{ padding: "8px 14px", borderRadius: 6, border: "none", cursor: "pointer",
                 background: rncEstado === "ok" ? "#16a34a" : rncEstado === "notfound" ? "#dc2626" : "#2563eb",
-                color: "#fff", fontSize: 13, whiteSpace: "nowrap", opacity: buscandoRNC ? 0.7 : 1 }}
-            >
+                color: "#fff", fontSize: 13, whiteSpace: "nowrap", opacity: buscandoRNC ? 0.7 : 1 }}>
               {buscandoRNC ? "⏳" : rncEstado === "ok" ? "✅ Encontrado" : rncEstado === "notfound" ? "❌ No hallado" : "🔍 Consultar DGII"}
             </button>
           </div>
           {rncEstado === "notfound" && (
             <p style={{ fontSize: 11, color: "#ef4444", marginTop: 3 }}>RNC no encontrado en el padrón DGII. Puede escribir el nombre manualmente.</p>
           )}
+
+          {/* ── TIPO DE SERVICIO (NUEVO) ── */}
+          <label style={{ ...s.label, marginTop: 12 }}>Tipo de servicio que suple</label>
+          <select
+            value={form.tipo_servicio}
+            onChange={e => setForm(f => ({ ...f, tipo_servicio: e.target.value }))}
+            style={{ ...s.input, cursor: "pointer" }}
+          >
+            {TIPOS_SERVICIO.map(t => (
+              <option key={t.value} value={t.value}>{t.label}</option>
+            ))}
+          </select>
 
           <label style={s.label}>Teléfono</label>
           <input value={form.telefono} onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))}
@@ -249,12 +298,34 @@ export default function SuplidoresPage() {
 
         {/* ── LISTA ── */}
         <div style={s.card}>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+          {/* Cabecera con buscador */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
             <h2 style={{ ...s.cardTitle, marginBottom: 0 }}>📋 Lista de Suplidores ({filtrados.length})</h2>
             <input placeholder="Buscar..." value={busqueda}
               onChange={e => setBusqueda(e.target.value)}
               style={{ ...s.input, width: 200, marginBottom: 0, fontSize: 13 }} />
           </div>
+
+          {/* Filtros rápidos por tipo */}
+          {conteoTipos.length > 0 && (
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+              <button onClick={() => setFiltroTipo("")}
+                style={{ ...s.chip, background: !filtroTipo ? "#111827" : "#f1f5f9", color: !filtroTipo ? "#fff" : "#374151" }}>
+                Todos ({suppliers.length})
+              </button>
+              {conteoTipos.map(t => (
+                <button key={t.value} onClick={() => setFiltroTipo(filtroTipo === t.value ? "" : t.value)}
+                  style={{
+                    ...s.chip,
+                    background: filtroTipo === t.value ? TIPO_COLOR[t.value] + "22" : "#f1f5f9",
+                    color:      filtroTipo === t.value ? TIPO_COLOR[t.value] : "#374151",
+                    border:     filtroTipo === t.value ? `1px solid ${TIPO_COLOR[t.value]}` : "1px solid transparent",
+                  }}>
+                  {t.label} ({t.count})
+                </button>
+              ))}
+            </div>
+          )}
 
           {loading ? (
             <p style={s.empty}>Cargando...</p>
@@ -265,7 +336,7 @@ export default function SuplidoresPage() {
               <table style={s.table}>
                 <thead>
                   <tr>
-                    {["#", "Nombre", "RNC", "Teléfono", "Correo", "Dirección", "Acciones"].map(h => (
+                    {["#", "Nombre", "Tipo de Servicio", "RNC", "Teléfono", "Correo", "Acciones"].map(h => (
                       <th key={h} style={s.th}>{h}</th>
                     ))}
                   </tr>
@@ -274,11 +345,27 @@ export default function SuplidoresPage() {
                   {filtrados.map(sup => (
                     <tr key={sup.id} style={{ background: editando?.id === sup.id ? "#eff6ff" : "transparent" }}>
                       <td style={s.td}>#{sup.id}</td>
-                      <td style={{ ...s.td, fontWeight: 700 }}>{sup.name}</td>
+                      <td style={{ ...s.td, fontWeight: 700 }}>
+                        <div>{sup.name}</div>
+                        {sup.direccion && <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>{sup.direccion}</div>}
+                      </td>
+                      <td style={s.td}>
+                        {sup.tipo_servicio ? (
+                          <span style={{
+                            padding: "4px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                            background: (TIPO_COLOR[sup.tipo_servicio] || "#94a3b8") + "22",
+                            color:      TIPO_COLOR[sup.tipo_servicio] || "#94a3b8",
+                            whiteSpace: "nowrap",
+                          }}>
+                            {TIPO_LABEL[sup.tipo_servicio] || sup.tipo_servicio}
+                          </span>
+                        ) : (
+                          <span style={{ color: "#cbd5e1", fontSize: 12 }}>—</span>
+                        )}
+                      </td>
                       <td style={{ ...s.td, fontFamily: "monospace", fontSize: 12 }}>{sup.rnc || "—"}</td>
                       <td style={s.td}>{sup.telefono || "—"}</td>
                       <td style={{ ...s.td, fontSize: 12 }}>{sup.correo || "—"}</td>
-                      <td style={{ ...s.td, maxWidth: 180, fontSize: 12 }}>{sup.direccion || "—"}</td>
                       <td style={s.td}>
                         <div style={{ display: "flex", gap: 6 }}>
                           <button onClick={() => iniciarEdicion(sup)}
@@ -312,6 +399,7 @@ const s = {
   label:     { display: "block", fontSize: 13, fontWeight: 600 as const, marginBottom: 4, color: "#555" } as React.CSSProperties,
   input:     { display: "block", marginBottom: 12, padding: "11px 13px", width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box" as const, fontSize: 14 } as React.CSSProperties,
   btnPrimary:{ padding: "13px", background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", fontWeight: 700, fontSize: 14 } as React.CSSProperties,
+  chip:      { padding: "6px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, border: "1px solid transparent", cursor: "pointer", whiteSpace: "nowrap" as const } as React.CSSProperties,
   table:     { width: "100%", borderCollapse: "collapse" as const } as React.CSSProperties,
   th:        { textAlign: "left" as const, padding: "10px 12px", background: "#f1f5f9", fontSize: 13, fontWeight: 700 as const } as React.CSSProperties,
   td:        { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 14 } as React.CSSProperties,

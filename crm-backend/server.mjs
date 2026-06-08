@@ -930,15 +930,15 @@ app.get("/suplidores", async (req, res) => {
 });
 
 app.post("/suplidores", async (req, res) => {
-  const { name, rnc, direccion, telefono, correo } = req.body;
-  const { data, error } = await supabase.from("suplidores").insert([{ name, rnc, direccion, telefono, correo }]).select();
+  const { name, rnc, direccion, telefono, correo, tipo_servicio } = req.body;
+  const { data, error } = await supabase.from("suplidores").insert([{ name, rnc, direccion, telefono, correo, tipo_servicio: tipo_servicio || null }]).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
 
 app.patch("/suplidores/:id", async (req, res) => {
   const { id } = req.params;
-  const campos = ["name","rnc","direccion","telefono","correo"].reduce((o, k) => {
+  const campos = ["name","rnc","direccion","telefono","correo","tipo_servicio"].reduce((o, k) => {
     if (req.body[k] !== undefined) o[k] = req.body[k];
     return o;
   }, {});
