@@ -2,16 +2,11 @@
 import { useEffect, useState, useRef } from "react";
 import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
+import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
 
 // ─── DATOS EMPRESA ─────────────────────────────────────────────────────────
-const EMPRESA = {
-  nombre: "SÓLIDO AUTO SERVICIO SRL",
-  telefono: "849-569-2027",
-  rnc: "1-32-XXXXX-X",
-  direccion: "Santo Domingo, República Dominicana",
-  email: "info@solidoauto.com",
-  logo: "/logo.png"
-};
+// Los datos se cargan dinámicamente desde Configuración via useEmpresa().
+// generarHTML() usa getEmpresaSync() para acceder a la caché sin hooks.
 
 // ─── GENERADOR HTML DGII COMPLIANT ─────────────────────────────────────────
 function generarHTML(
@@ -20,6 +15,8 @@ function generarHTML(
   clienteExtra: any = {},
   esCotizacion = false
 ) {
+  // Leer datos de empresa desde la caché dinámica (actualizada por Configuración)
+  const EMPRESA = getEmpresaSync();
   const subtotal = Number(factura.subtotal || 0);
   const itbis    = Number(factura.itbis    || 0);
   const total    = Number(factura.total    || 0);
@@ -255,6 +252,7 @@ const NCF_REQUIERE_RNC = ["B01", "B14", "B15"];
 
 // ═══════════════════════════════════════════════════════════════════════════
 export default function FacturaPage() {
+  const EMPRESA = useEmpresa(); // datos dinámicos desde Configuración
   const [clientes, setClientes]         = useState<any[]>([]);
   const [vehiculos, setVehiculos]       = useState<any[]>([]);
   const [items, setItems]               = useState<any[]>([]);

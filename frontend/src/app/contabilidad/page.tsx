@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
+import { getEmpresaSync } from "@/lib/empresa";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "";
 
@@ -179,7 +180,8 @@ export default function ContabilidadPage() {
 
 // Imprimir un cuadre de caja
 function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
-  const EMPRESA = { nombre: "SÓLIDO AUTO SERVICIO SRL", tel: "849-569-2027", dir: "Santo Domingo, R.D." };
+  const _e = getEmpresaSync();
+  const EMPRESA = { nombre: _e.nombre, tel: _e.telefono, dir: _e.direccion };
   const saldoEsperado = Number(c.ventas_efectivo) - Number(c.gastos);
   const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
     ? Number(c.efectivo_contado) - saldoEsperado

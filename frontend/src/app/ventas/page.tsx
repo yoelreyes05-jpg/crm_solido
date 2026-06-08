@@ -1,16 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo } from "react";
 import { API_URL as API } from "@/config";
-
-// ─── DATOS EMPRESA (mismo que FacturaPage) ─────────────────────────────────
-const EMPRESA = {
-  nombre: "SÓLIDO AUTO SERVICIO SRL",
-  telefono: "849-569-2027",
-  rnc: "1-32-XXXXX-X",
-  direccion: "Santo Domingo, República Dominicana",
-  email: "info@solidoauto.com",
-  logo: "/logo.png"
-};
+import { getEmpresaSync } from "@/lib/empresa";
 
 // ─── REIMPRIMIR (replica de FacturaPage para no depender de imports) ────────
 function abrirImpresion(html: string) {
@@ -30,6 +21,7 @@ function abrirImpresion(html: string) {
 }
 
 function generarHTMLReimpresion(fac: any, items: any[]) {
+  const EMPRESA = getEmpresaSync();
   const subtotal = Number(fac.subtotal || 0);
   const itbis    = Number(fac.itbis    || 0);
   const total    = Number(fac.total    || 0);

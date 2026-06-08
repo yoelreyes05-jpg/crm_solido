@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useRef } from "react";
+import { invalidarCacheEmpresa } from "@/lib/empresa";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:4000";
 
@@ -107,6 +108,7 @@ export default function ConfiguracionPage() {
       });
       if (!res.ok) throw new Error("Error del servidor");
       setCfgMap({ ...editMap });
+      invalidarCacheEmpresa(); // fuerza recarga en facturas/ventas al próximo render
       toast("✅ Configuración guardada correctamente.");
     } catch {
       toast("❌ No se pudo guardar. Verifica la conexión.", false);

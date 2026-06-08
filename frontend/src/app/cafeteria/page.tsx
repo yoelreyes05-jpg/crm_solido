@@ -2,15 +2,15 @@
 import { useEffect, useState, useRef, useCallback } from "react";
 
 import { API_URL as API } from "@/config";
+import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
 
-const EMPRESA = {
-  nombre: "SÓLIDO CAFÉ GARAJE",
-  razon_social: "SÓLIDO AUTO SERVICIO SRL",
-  telefono: "849-569-2027",
-  rnc: "RNC: 000-000000-0",
-  direccion: "Santo Domingo, República Dominicana",
-  logo: "/logo-cafe.png",
-};
+// Datos fijos de la cafetería (nombre y logo propios).
+// Sin RNC — operación informal dentro del taller, no constituida como empresa.
+const CAFE = { nombre: "SÓLIDO CAFÉ GARAJE", razon_social: "SÓLIDO AUTO SERVICIO SRL", logo: "/logo-cafe.png" };
+function getEmpresaCafe() {
+  const cfg = getEmpresaSync();
+  return { ...CAFE, telefono: cfg.telefono, direccion: cfg.direccion, email: cfg.email };
+}
 
 const NCF_LABEL_MAP: Record<string, string> = {
   B01: "Crédito Fiscal",
@@ -20,6 +20,7 @@ const NCF_LABEL_MAP: Record<string, string> = {
 };
 
 function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
+  const EMPRESA = getEmpresaCafe();
   const fecha = new Date(venta.created_at || Date.now()).toLocaleString("es-DO", {
     day: "2-digit", month: "2-digit", year: "numeric",
     hour: "2-digit", minute: "2-digit"
@@ -57,7 +58,7 @@ function generarHTMLCafe(venta: any, items: any, metodoPago: any) {
          onerror="this.style.display='none';document.getElementById('logo-fallback').style.display='block'"/>
     <div id="logo-fallback" style="display:none;font-size:26px;">☕</div>
     <div class="logo-txt">${EMPRESA.nombre}</div>
-    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono} | ${EMPRESA.rnc}<br/>${EMPRESA.direccion}</div>
+    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono}<br/>${EMPRESA.direccion}</div>
   </div>
   <div style="font-size:12px;margin-bottom:10px;">
     <b>Fecha:</b> ${fecha}<br/>
@@ -101,6 +102,8 @@ function imprimirHTMLCafe(html: string) {
 }
 
 export default function CafeteriaPage() {
+  const _cfg = useEmpresa();
+  const EMPRESA = { ...CAFE, telefono: _cfg.telefono, direccion: _cfg.direccion };
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
   const [metodoPago, setMetodoPago] = useState("EFECTIVO");
@@ -875,6 +878,7 @@ function fmtFechaHist(d: string) {
 }
 
 function imprimirFacturaHistorial(venta: any) {
+  const EMPRESA = getEmpresaCafe();
   const ncfLabel = NCF_MAP[venta.ncf_tipo] || venta.ncf_tipo || "B02";
   const fecha = fmtFechaHist(venta.created_at);
   const items: any[] = venta.cafeteria_detalle || [];
@@ -909,7 +913,7 @@ function imprimirFacturaHistorial(venta: any) {
          onerror="this.style.display='none';document.getElementById('lf').style.display='block'"/>
     <div id="lf" style="display:none;font-size:26px;">☕</div>
     <div class="logo-txt">${EMPRESA.nombre}</div>
-    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono} | ${EMPRESA.rnc}<br/>${EMPRESA.direccion}</div>
+    <div class="sub">${EMPRESA.razon_social}<br/>Tel: ${EMPRESA.telefono}<br/>${EMPRESA.direccion}</div>
   </div>
   <div style="font-size:12px;margin-bottom:10px;">
     <b>Factura #:</b> ${venta.id}<br/>
