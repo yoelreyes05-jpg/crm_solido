@@ -335,7 +335,7 @@ app.post("/api/ia/mejorar-texto", async (req, res) => {
 
   const ctx = [vehiculo ? `Vehículo: ${vehiculo}` : "", cliente ? `Cliente: ${cliente}` : ""].filter(Boolean).join(" | ");
 
-  const prompts = {
+  const prompts: Record<string, string> = {
     diagnostico: `Eres el asistente técnico oficial de "Sólido Auto Servicio", taller automotriz en República Dominicana.
 Un técnico escribió este diagnóstico de forma rápida${ctx ? ` (${ctx})` : ""}:
 """
@@ -358,11 +358,19 @@ OBSERVACIONES:
 Reglas: mantén TODA la información original sin inventar nada nuevo. Usa terminología técnica automotriz. Máximo 320 palabras. Responde SOLO con el diagnóstico.`,
 
     trabajos: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
-Un técnico escribió esta lista de trabajos de forma rápida${ctx ? ` (${ctx})` : ""}:
+Un técnico escribió esta lista de trabajos a realizar (es un DIAGNÓSTICO, NO un reporte de trabajos ya ejecutados)${ctx ? ` (${ctx})` : ""}:
 """
 ${texto.trim()}
 """
-Transfórmala en una DESCRIPCIÓN TÉCNICA PROFESIONAL de los trabajos realizados o a realizar. Usa lista numerada, descripción técnica breve por trabajo, menciona estándares cuando aplique. Máximo 220 palabras. Responde SOLO con la lista.`,
+Transfórmala en una lista numerada de TRABAJOS RECOMENDADOS, redactados en modo prescriptivo/recomendación (lo que SE DEBE HACER), NO en pasado ni como reporte de trabajos ya ejecutados. Usa verbos en infinitivo o futuro ("Sustituir...", "Verificar...", "Realizar..."). Descripción técnica breve por ítem, menciona estándares cuando aplique. Máximo 220 palabras. Responde SOLO con la lista.`,
+  };
+
+    avance: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
+Un técnico describió el trabajo que YA REALIZÓ (avance de reparación)${ctx ? ` (${ctx})` : ""}:
+"""
+${texto.trim()}
+"""
+Transfórmalo en un REPORTE TÉCNICO PROFESIONAL de trabajo ejecutado, redactado en pasado ("Se sustituyó...", "Se verificó...", "Se procedió a..."). Lista numerada, descripción técnica precisa por ítem, menciona materiales o estándares cuando aplique. Máximo 220 palabras. Responde SOLO con el reporte.`,
   };
 
   const prompt = prompts[tipo] || prompts.diagnostico;

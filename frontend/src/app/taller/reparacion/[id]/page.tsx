@@ -782,7 +782,7 @@ export default function ReparacionPage() {
                       headers: { "Content-Type": "application/json" },
                       body: JSON.stringify({
                         texto: descAvance,
-                        tipo: "trabajos",
+                        tipo: "avance",
                         vehiculo: vehiculoStr !== "—" ? vehiculoStr : undefined,
                         cliente: orden?.cliente_nombre,
                       }),
