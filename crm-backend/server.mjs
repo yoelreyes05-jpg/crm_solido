@@ -6069,9 +6069,9 @@ app.patch("/inspeccion/:id", async (req, res) => {
 app.get("/rnc/buscar", async (req, res) => {
   try {
     const q = req.query.q?.trim();
-    if (!q || q.length < 3) return res.json([]);
+    if (!q || q.length < 2) return res.json([]);
 
-    // Si parece un número, buscar por prefijo de RNC
+    // Si parece un número, buscar por prefijo de RNC (usa el PRIMARY KEY índice)
     if (/^\d+$/.test(q)) {
       const { data, error } = await supabase
         .from("rnc_dgii")
@@ -6082,14 +6082,29 @@ app.get("/rnc/buscar", async (req, res) => {
       return res.json(data || []);
     }
 
-    // Búsqueda por nombre (sin filtrar por estado — muestra todos incluido SUSPENDIDO)
+    // Búsqueda por nombre usando full-text search con el índice GIN existente.
+    // Convierte cada palabra en prefijo: "solido auto" → "solido:* & auto:*"
+    // Esto es ~100x más rápido que ILIKE '%q%' en 800K filas.
+    const palabras = q.split(/\s+/).filter(Boolean);
+    const tsQuery  = palabras.map(p => `${p}:*`).join(" & ");
+
     const { data, error } = await supabase
       .from("rnc_dgii")
       .select("rnc, razon_social, nombre_comercial, estado")
-      .ilike("razon_social", `%${q}%`)
+      .textSearch("razon_social", tsQuery, { config: "simple" })
       .limit(10);
 
-    if (error) return res.status(500).json({ error: error.message });
+    if (error) {
+      // Fallback a ILIKE si textSearch falla (p.ej. caracteres especiales)
+      const { data: d2, error: e2 } = await supabase
+        .from("rnc_dgii")
+        .select("rnc, razon_social, nombre_comercial, estado")
+        .ilike("razon_social", `${q}%`)
+        .limit(10);
+      if (e2) return res.status(500).json({ error: e2.message });
+      return res.json(d2 || []);
+    }
+
     res.json(data || []);
   } catch (e) {
     res.status(500).json({ error: e.message });

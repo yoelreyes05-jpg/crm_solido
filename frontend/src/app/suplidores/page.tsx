@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { API_URL as API } from "@/config";
 
 type Suplidor = {
@@ -25,6 +25,8 @@ export default function SuplidoresPage() {
   const [busqNombre, setBusqNombre]             = useState("");
   const [resultadosNombre, setResultadosNombre] = useState<any[]>([]);
   const [buscandoNombre, setBuscandoNombre]     = useState(false);
+  const nombreDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const nombreAbortCtrl = useRef<AbortController | null>(null);
 
   const consultarRNC = async (rnc: string) => {
     const limpio = rnc.replace(/\D/g, "");
@@ -44,16 +46,26 @@ export default function SuplidoresPage() {
     finally { setBuscandoRNC(false); }
   };
 
-  const buscarPorNombre = async (q: string) => {
+  const buscarPorNombre = (q: string) => {
     setBusqNombre(q);
-    if (q.length < 3) { setResultadosNombre([]); return; }
+    if (nombreDebounce.current) clearTimeout(nombreDebounce.current);
+    if (q.length < 2) { setResultadosNombre([]); setBuscandoNombre(false); return; }
+
     setBuscandoNombre(true);
-    try {
-      const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setResultadosNombre(Array.isArray(data) ? data : []);
-    } catch { setResultadosNombre([]); }
-    finally { setBuscandoNombre(false); }
+    nombreDebounce.current = setTimeout(async () => {
+      if (nombreAbortCtrl.current) nombreAbortCtrl.current.abort();
+      nombreAbortCtrl.current = new AbortController();
+      try {
+        const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`,
+          { signal: nombreAbortCtrl.current.signal });
+        const data = await res.json();
+        setResultadosNombre(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        if (e.name !== "AbortError") setResultadosNombre([]);
+      } finally {
+        setBuscandoNombre(false);
+      }
+    }, 320);
   };
 
   const seleccionarDeNombre = (item: any) => {

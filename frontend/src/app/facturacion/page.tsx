@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 
@@ -275,6 +275,8 @@ export default function FacturaPage() {
   const [busqNombreDGII, setBusqNombreDGII]         = useState("");
   const [resultadosNombreDGII, setResultadosNombreDGII] = useState<any[]>([]);
   const [buscandoNombreDGII, setBuscandoNombreDGII] = useState(false);
+  const dgiiDebounce  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dgiiAbortCtrl = useRef<AbortController | null>(null);
   const [loading, setLoading]                 = useState(false);
   const [tab, setTab]                         = useState("nueva");
   const [busqueda, setBusqueda]               = useState("");
@@ -359,16 +361,28 @@ export default function FacturaPage() {
     finally { setBuscandoRNC(false); }
   };
 
-  const buscarNombreDGII = async (q: string) => {
+  const buscarNombreDGII = (q: string) => {
     setBusqNombreDGII(q);
-    if (q.length < 3) { setResultadosNombreDGII([]); return; }
+    // Cancelar debounce anterior
+    if (dgiiDebounce.current) clearTimeout(dgiiDebounce.current);
+    if (q.length < 2) { setResultadosNombreDGII([]); setBuscandoNombreDGII(false); return; }
+
     setBuscandoNombreDGII(true);
-    try {
-      const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`);
-      const data = await res.json();
-      setResultadosNombreDGII(Array.isArray(data) ? data : []);
-    } catch { setResultadosNombreDGII([]); }
-    finally { setBuscandoNombreDGII(false); }
+    dgiiDebounce.current = setTimeout(async () => {
+      // Cancelar petición anterior en vuelo
+      if (dgiiAbortCtrl.current) dgiiAbortCtrl.current.abort();
+      dgiiAbortCtrl.current = new AbortController();
+      try {
+        const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`,
+          { signal: dgiiAbortCtrl.current.signal });
+        const data = await res.json();
+        setResultadosNombreDGII(Array.isArray(data) ? data : []);
+      } catch (e: any) {
+        if (e.name !== "AbortError") setResultadosNombreDGII([]);
+      } finally {
+        setBuscandoNombreDGII(false);
+      }
+    }, 320); // 320ms debounce — espera a que terminen de tipear
   };
 
   const seleccionarNombreDGII = (item: any) => {
