@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
-import { decodificarVIN as decodeVIN } from "@/lib/vin";
+import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 
 export default function Vehiculos() {
   const [clientes, setClientes] = useState([]);
@@ -53,8 +53,8 @@ export default function Vehiculos() {
         combustible: data.combustible || f.combustible,
       }));
       setVinEstado("ok");
-      // Guardar en caché del backend (fire-and-forget)
-      fetch(`${API}/vin/${limpio}`).catch(() => {});
+      // Registrar en historial VIN
+      registrarConsultaVIN(API, data, "vehiculos");
     } catch { setVinEstado("error"); }
     finally { setDecodandoVIN(false); }
   };

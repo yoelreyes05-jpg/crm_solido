@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
-import { decodificarVIN as decodeVIN } from "@/lib/vin";
+import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 
 // ─── DATOS EMPRESA ─────────────────────────────────────────────────────────
 const EMPRESA = {
@@ -389,6 +389,9 @@ export default function FacturaPage() {
       const perfil = await decodeVIN(v);
       setVinPerfilMostrador(perfil);
       setVinFacEstado("ok");
+
+      // Registrar en historial VIN
+      registrarConsultaVIN(API, perfil, "facturacion");
 
       // 2. Buscar sugeridos en catálogo propio (sí usa Railway)
       fetch(`${API}/vin/${v}/repuestos-sugeridos`)

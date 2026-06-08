@@ -25,19 +25,23 @@ export default function InteligenciaPage() {
   }, [datos]);
 
   useEffect(() => {
-    if (tab === "proyeccion")  cargarTab("proyeccion",  "/api/predictivo/proyeccion-ingresos");
-    if (tab === "inventario")  cargarTab("inventario",  "/api/predictivo/demanda-inventario");
-    if (tab === "fallas")      cargarTab("fallas",      "/api/predictivo/fallas-por-modelo");
-    if (tab === "clientes")    cargarTab("clientes",    "/api/predictivo/clientes-riesgo");
-    if (tab === "topclientes") cargarTab("topclientes", "/api/predictivo/top-clientes");
+    if (tab === "proyeccion")     cargarTab("proyeccion",     "/api/predictivo/proyeccion-ingresos");
+    if (tab === "inventario")     cargarTab("inventario",     "/api/predictivo/demanda-inventario");
+    if (tab === "fallas")         cargarTab("fallas",         "/api/predictivo/fallas-por-modelo");
+    if (tab === "clientes")       cargarTab("clientes",       "/api/predictivo/clientes-riesgo");
+    if (tab === "topclientes")    cargarTab("topclientes",    "/api/predictivo/top-clientes");
+    if (tab === "vinhistorial")   cargarTab("vinhistorial",   "/api/predictivo/vin-historial");
+    if (tab === "compatibilidad") cargarTab("compatibilidad", "/api/predictivo/compatibilidad-stats");
   }, [tab, cargarTab]);
 
   const TABS = [
-    { key: "proyeccion",  label: "📈 Proyección" },
-    { key: "inventario",  label: "📦 Inventario" },
-    { key: "fallas",      label: "🔩 Fallas por Modelo" },
-    { key: "clientes",    label: "📞 Llamar Clientes" },
-    { key: "topclientes", label: "🏆 Top Clientes" },
+    { key: "proyeccion",     label: "📈 Proyección" },
+    { key: "inventario",     label: "📦 Inventario" },
+    { key: "fallas",         label: "🔩 Fallas por Modelo" },
+    { key: "clientes",       label: "📞 Llamar Clientes" },
+    { key: "topclientes",    label: "🏆 Top Clientes" },
+    { key: "vinhistorial",   label: "🚗 Historial VIN" },
+    { key: "compatibilidad", label: "🔧 Compatibilidad" },
   ];
 
   return (
@@ -60,11 +64,13 @@ export default function InteligenciaPage() {
       </div>
 
       {/* CONTENIDO */}
-      {tab === "proyeccion"  && <TabProyeccion  d={datos["proyeccion"]}  loading={loading["proyeccion"]}  />}
-      {tab === "inventario"  && <TabInventario  d={datos["inventario"]}  loading={loading["inventario"]}  />}
-      {tab === "fallas"      && <TabFallas      d={datos["fallas"]}      loading={loading["fallas"]}      />}
-      {tab === "clientes"    && <TabClientesRiesgo d={datos["clientes"]} loading={loading["clientes"]}    />}
-      {tab === "topclientes" && <TabTopClientes d={datos["topclientes"]} loading={loading["topclientes"]} />}
+      {tab === "proyeccion"     && <TabProyeccion      d={datos["proyeccion"]}     loading={loading["proyeccion"]}     />}
+      {tab === "inventario"     && <TabInventario      d={datos["inventario"]}     loading={loading["inventario"]}     />}
+      {tab === "fallas"         && <TabFallas          d={datos["fallas"]}         loading={loading["fallas"]}         />}
+      {tab === "clientes"       && <TabClientesRiesgo  d={datos["clientes"]}       loading={loading["clientes"]}       />}
+      {tab === "topclientes"    && <TabTopClientes     d={datos["topclientes"]}    loading={loading["topclientes"]}    />}
+      {tab === "vinhistorial"   && <TabVinHistorial    d={datos["vinhistorial"]}   loading={loading["vinhistorial"]}   />}
+      {tab === "compatibilidad" && <TabCompatibilidad  d={datos["compatibilidad"]} loading={loading["compatibilidad"]} />}
     </div>
   );
 }
@@ -508,6 +514,194 @@ function TabTopClientes({ d, loading }: { d: any[]; loading: boolean }) {
           </table>
         </div>
         {d.length === 0 && <p style={S.empty}>No hay facturas con cliente asignado aún.</p>}
+      </div>
+    </div>
+  );
+}
+
+// ─── Historial VIN ───────────────────────────────────────────────────────────
+function TabVinHistorial({ d, loading }: { d: any[]; loading: boolean }) {
+  const [busqueda, setBusqueda] = React.useState("");
+  if (loading || !d) return <Spinner loading={loading} />;
+
+  const filtrados = (d || []).filter(r =>
+    !busqueda ||
+    r.vin?.includes(busqueda.toUpperCase()) ||
+    r.marca?.toLowerCase().includes(busqueda.toLowerCase()) ||
+    r.modelo?.toLowerCase().includes(busqueda.toLowerCase()) ||
+    r.cliente_nombre?.toLowerCase().includes(busqueda.toLowerCase()) ||
+    r.placa?.toLowerCase().includes(busqueda.toLowerCase())
+  );
+
+  const origenColor: Record<string, string> = {
+    vehiculos:   "#6366f1",
+    facturacion: "#10b981",
+    diagnostico: "#f59e0b",
+  };
+  const origenLabel: Record<string, string> = {
+    vehiculos:   "🚗 Vehículos",
+    facturacion: "🧾 Facturación",
+    diagnostico: "🔍 Diagnóstico",
+  };
+
+  return (
+    <div>
+      <div style={{ background: "#eff6ff", borderRadius: 10, padding: "12px 16px",
+        fontSize: 13, color: "#1e40af", marginBottom: 16 }}>
+        💡 Cada vez que se decodifica un VIN en el sistema queda registrado aquí.
+        Útil para auditar qué vehículos pasaron por el taller sin estar registrados formalmente.
+      </div>
+
+      <div style={{ display: "flex", gap: 10, marginBottom: 16, alignItems: "center" }}>
+        <input placeholder="🔍 Buscar por VIN, marca, modelo, placa o cliente..."
+          value={busqueda} onChange={e => setBusqueda(e.target.value)}
+          style={{ flex: 1, padding: "10px 14px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 14 }} />
+        <span style={{ fontSize: 13, color: "#888", whiteSpace: "nowrap" }}>
+          {filtrados.length} consulta{filtrados.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      <div style={S.card}>
+        <div style={{ overflowX: "auto" }}>
+          <table style={S.table}>
+            <thead>
+              <tr>
+                {["Fecha", "VIN", "Vehículo", "Motor", "Combustible", "Placa", "Cliente", "Origen"].map(h => (
+                  <th key={h} style={S.th}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filtrados.map((r: any) => (
+                <tr key={r.id}>
+                  <td style={{ ...S.td, color: "#888", fontSize: 12, whiteSpace: "nowrap" }}>
+                    {r.consultado_en
+                      ? new Date(r.consultado_en).toLocaleString("es-DO", {
+                          day: "2-digit", month: "short", year: "2-digit",
+                          hour: "2-digit", minute: "2-digit"
+                        })
+                      : "—"}
+                  </td>
+                  <td style={{ ...S.td, fontFamily: "monospace", fontSize: 12, fontWeight: 700, color: "#6366f1" }}>
+                    {r.vin}
+                  </td>
+                  <td style={{ ...S.td, fontWeight: 600 }}>
+                    {[r.marca, r.modelo, r.ano].filter(Boolean).join(" ") || "—"}
+                  </td>
+                  <td style={{ ...S.td, color: "#555" }}>{r.motor || "—"}</td>
+                  <td style={{ ...S.td, color: "#555" }}>{r.combustible || "—"}</td>
+                  <td style={{ ...S.td, fontWeight: 600 }}>{r.placa || "—"}</td>
+                  <td style={S.td}>{r.cliente_nombre || "—"}</td>
+                  <td style={S.td}>
+                    {r.origen ? (
+                      <span style={{
+                        padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700,
+                        background: origenColor[r.origen] + "22",
+                        color: origenColor[r.origen],
+                      }}>
+                        {origenLabel[r.origen] || r.origen}
+                      </span>
+                    ) : "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        {filtrados.length === 0 && (
+          <p style={S.empty}>
+            {d.length === 0
+              ? "No hay consultas VIN registradas aún. Se irán acumulando al usar el decodificador en Vehículos o Facturación."
+              : "No hay resultados para esa búsqueda."}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── Compatibilidad Auto-Aprendida ────────────────────────────────────────────
+function TabCompatibilidad({ d, loading }: { d: any; loading: boolean }) {
+  if (loading || !d) return <Spinner loading={loading} />;
+  const { resumen, top_repuestos, top_marcas } = d || {};
+
+  return (
+    <div>
+      <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "12px 16px",
+        fontSize: 13, color: "#166534", marginBottom: 16 }}>
+        🤖 El sistema aprende automáticamente qué repuestos son compatibles con cada vehículo
+        cada vez que se realiza una venta o reparación con VIN identificado.
+      </div>
+
+      {/* KPIs */}
+      <div style={S.kpiRow}>
+        <KpiCard icon="🤖" label="Aprendidos automáticamente" value={`${resumen?.total_auto || 0}`}     color="#6366f1" />
+        <KpiCard icon="✋" label="Agregados manualmente"      value={`${resumen?.total_manual || 0}`}   color="#f59e0b" />
+        <KpiCard icon="✅" label="Confirmados"                value={`${resumen?.total_confirmado || 0}`} color="#10b981" />
+        <KpiCard icon="📚" label="Total en catálogo"
+          value={`${(resumen?.total_auto || 0) + (resumen?.total_manual || 0)}`} color="#0ea5e9" />
+      </div>
+
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 }}>
+        {/* Top repuestos */}
+        <div style={S.card}>
+          <h3 style={S.cardTitle}>🔩 Repuestos más compatibles</h3>
+          {(top_repuestos || []).length === 0 ? (
+            <p style={S.empty}>Sin datos aún — se llena al vender repuestos con VIN.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {top_repuestos.map((r: any, i: number) => {
+                const maxUsos = top_repuestos[0]?.veces_usado || 1;
+                const pct = Math.max(6, (r.veces_usado / maxUsos) * 100);
+                return (
+                  <div key={r.inventario_id}>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                      fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700 }}>
+                        {i + 1}. {r.inventario?.name || `ID ${r.inventario_id}`}
+                      </span>
+                      <span style={{ color: "#888", fontSize: 12 }}>
+                        {r.veces_usado}x · {r.inventario?.categoria || ""}
+                      </span>
+                    </div>
+                    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 3 }}>
+                      <div style={{ height: "100%", width: `${pct}%`,
+                        background: "linear-gradient(90deg,#6366f1,#0ea5e9)", borderRadius: 3 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Top marcas */}
+        <div style={S.card}>
+          <h3 style={S.cardTitle}>🚗 Marcas con más compatibilidades</h3>
+          {(top_marcas || []).length === 0 ? (
+            <p style={S.empty}>Sin datos aún.</p>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+              {top_marcas.map((m: any, i: number) => {
+                const maxTotal = top_marcas[0]?.total || 1;
+                const pct = Math.max(6, (m.total / maxTotal) * 100);
+                return (
+                  <div key={m.marca}>
+                    <div style={{ display: "flex", justifyContent: "space-between",
+                      fontSize: 13, marginBottom: 4 }}>
+                      <span style={{ fontWeight: 700 }}>{i + 1}. {m.marca}</span>
+                      <span style={{ color: "#888", fontSize: 12 }}>{m.total} entradas</span>
+                    </div>
+                    <div style={{ height: 6, background: "#f1f5f9", borderRadius: 3 }}>
+                      <div style={{ height: "100%", width: `${pct}%`,
+                        background: "linear-gradient(90deg,#10b981,#0ea5e9)", borderRadius: 3 }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

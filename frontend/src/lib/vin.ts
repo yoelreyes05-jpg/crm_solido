@@ -85,3 +85,36 @@ export async function decodificarVIN(vin: string): Promise<VINData> {
 
   return { vin: v, ...parsed };
 }
+
+/**
+ * Registra en el historial del backend que se consultó este VIN.
+ * Fire-and-forget: no lanza errores al llamador.
+ *
+ * @param apiUrl   URL base del backend (API_URL de @/config)
+ * @param data     Resultado de decodificarVIN()
+ * @param origen   'vehiculos' | 'facturacion' | 'diagnostico'
+ * @param extra    IDs opcionales para enlazar al registro
+ */
+export function registrarConsultaVIN(
+  apiUrl: string,
+  data: VINData,
+  origen: "vehiculos" | "facturacion" | "diagnostico",
+  extra?: { vehiculo_id?: number; orden_id?: number; factura_id?: number }
+): void {
+  fetch(`${apiUrl}/vin/registrar-consulta`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      vin:         data.vin,
+      marca:       data.marca,
+      modelo:      data.modelo,
+      ano:         data.ano,
+      motor:       data.motor,
+      combustible: data.combustible,
+      origen,
+      vehiculo_id: extra?.vehiculo_id ?? null,
+      orden_id:    extra?.orden_id    ?? null,
+      factura_id:  extra?.factura_id  ?? null,
+    }),
+  }).catch(() => {}); // silencioso
+}

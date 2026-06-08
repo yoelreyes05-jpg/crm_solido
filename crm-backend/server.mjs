@@ -324,6 +324,105 @@ app.get("/vin/:vin/repuestos-sugeridos", async (req, res) => {
   }
 });
 
+// ── POST /vin/registrar-consulta ─────────────────────────────────────────────
+// Registra en vin_historial cada vez que se decodifica un VIN en el frontend.
+app.post("/vin/registrar-consulta", async (req, res) => {
+  try {
+    const { vin, marca, modelo, ano, motor, combustible,
+            origen, vehiculo_id, orden_id, factura_id } = req.body || {};
+    if (!vin || vin.length !== 17) return res.status(400).json({ error: "VIN inválido" });
+
+    await supabase.from("vin_historial").insert({
+      vin: vin.toUpperCase(),
+      marca: marca || null, modelo: modelo || null, ano: ano || null,
+      motor: motor || null, combustible: combustible || null,
+      origen: origen || null,
+      vehiculo_id: vehiculo_id ? Number(vehiculo_id) : null,
+      orden_id:    orden_id    ? Number(orden_id)    : null,
+      factura_id:  factura_id  ? Number(factura_id)  : null,
+      consultado_en: new Date().toISOString(),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/predictivo/vin-historial ────────────────────────────────────────
+// Retorna las últimas 60 consultas VIN con info del vehículo enlazado.
+app.get("/api/predictivo/vin-historial", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("vin_historial")
+      .select("id, vin, marca, modelo, ano, motor, combustible, origen, consultado_en, vehiculo_id, orden_id, factura_id")
+      .order("consultado_en", { ascending: false })
+      .limit(60);
+    if (error) throw error;
+
+    const rows = data || [];
+    const vehiculoIds = [...new Set(rows.filter(r => r.vehiculo_id).map(r => r.vehiculo_id))];
+    let vehiculoMap = {};
+    if (vehiculoIds.length > 0) {
+      const { data: vehs } = await supabase
+        .from("vehiculos")
+        .select("id, placa, clientes:cliente_id(nombre)")
+        .in("id", vehiculoIds);
+      (vehs || []).forEach(v => { vehiculoMap[v.id] = v; });
+    }
+
+    const enriched = rows.map(r => ({
+      ...r,
+      placa:          vehiculoMap[r.vehiculo_id]?.placa || null,
+      cliente_nombre: vehiculoMap[r.vehiculo_id]?.clientes?.nombre || null,
+    }));
+    res.json(enriched);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── GET /api/predictivo/compatibilidad-stats ─────────────────────────────────
+// Estadísticas del catálogo de compatibilidad auto-aprendido.
+app.get("/api/predictivo/compatibilidad-stats", async (req, res) => {
+  try {
+    const { data: totales } = await supabase
+      .from("repuesto_compatibilidad")
+      .select("origen, confirmado");
+
+    const totalAuto      = (totales || []).filter(r => r.origen === "auto").length;
+    const totalManual    = (totales || []).filter(r => r.origen === "manual").length;
+    const totalConfirmado = (totales || []).filter(r => r.confirmado).length;
+
+    const { data: topRepuestos } = await supabase
+      .from("repuesto_compatibilidad")
+      .select("inventario_id, veces_usado, inventario:inventario_id(name, code, categoria)")
+      .order("veces_usado", { ascending: false })
+      .limit(15);
+
+    const { data: topMarcasRaw } = await supabase
+      .from("repuesto_compatibilidad")
+      .select("marca")
+      .not("marca", "is", null);
+
+    const marcaCount = {};
+    (topMarcasRaw || []).forEach(r => {
+      const m = r.marca?.toUpperCase();
+      if (m) marcaCount[m] = (marcaCount[m] || 0) + 1;
+    });
+    const top_marcas = Object.entries(marcaCount)
+      .sort((a, b) => b[1] - a[1]).slice(0, 10)
+      .map(([marca, total]) => ({ marca, total }));
+
+    res.json({
+      resumen: { total_auto: totalAuto, total_manual: totalManual, total_confirmado: totalConfirmado },
+      top_repuestos: topRepuestos || [],
+      top_marcas,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /vehiculos/:id/repuestos-sugeridos ───────────────────────────────────
 // Retorna los repuestos más usados/compatibles con el vehículo de esa orden.
 app.get("/vehiculos/:id/repuestos-sugeridos", async (req, res) => {
