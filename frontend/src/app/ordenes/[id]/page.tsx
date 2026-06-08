@@ -556,7 +556,29 @@ export default function OrdenDetallePage() {
               } else if (diagRes && !Array.isArray(diagRes) && diagRes.id) {
                 diag = diagRes;
               }
-              if (diag) finalData = { ...finalData, diagnostico: diag };
+              if (diag) {
+                // Cargar avances y adjuntarlos al diagnóstico
+                let avances: any[] = [];
+                try {
+                  const avRes = await fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []);
+                  avances = Array.isArray(avRes) ? avRes : [];
+                } catch (_e2) {}
+                finalData = { ...finalData, diagnostico: { ...diag, avances } };
+              } else {
+                // Sin diagnóstico aún, igual cargamos avances por si acaso
+                try {
+                  const avRes = await fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []);
+                  const avances = Array.isArray(avRes) ? avRes : [];
+                  finalData = { ...finalData, _avances: avances };
+                } catch (_e2) {}
+              }
+            } catch (_e) {}
+          } else if (finalData.diagnostico) {
+            // diagnostico ya venía en la respuesta — cargar avances igual
+            try {
+              const avRes = await fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []);
+              const avances = Array.isArray(avRes) ? avRes : [];
+              finalData = { ...finalData, diagnostico: { ...finalData.diagnostico, avances } };
             } catch (_e) {}
           }
           setData(finalData);
