@@ -1281,6 +1281,7 @@ function CafeteriaRecetas() {
   const recetaDetalle = recetas.find((r: any) => r.id === verRecetaId);
 
   const imprimirReceta = (rec: any, ingrs: any[], costo: number) => {
+    const EMPRESA = getEmpresaCafe();
     const fecha = new Date().toLocaleDateString("es-DO", { day: "2-digit", month: "2-digit", year: "numeric" });
     const filasIngr = ingrs.sort((a: any, b: any) => a.orden - b.orden).map((ri: any) => `
       <tr>
