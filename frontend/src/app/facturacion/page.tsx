@@ -271,6 +271,9 @@ export default function FacturaPage() {
   const [rncManual, setRncManual]         = useState("");
   const [razonSocial, setRazonSocial]     = useState("");
   const [buscandoRNC, setBuscandoRNC]     = useState(false);
+  const [busqNombreDGII, setBusqNombreDGII]         = useState("");
+  const [resultadosNombreDGII, setResultadosNombreDGII] = useState<any[]>([]);
+  const [buscandoNombreDGII, setBuscandoNombreDGII] = useState(false);
   const [loading, setLoading]                 = useState(false);
   const [tab, setTab]                         = useState("nueva");
   const [busqueda, setBusqueda]               = useState("");
@@ -346,6 +349,25 @@ export default function FacturaPage() {
       }
     } catch { /* silencioso — el usuario escribe manualmente */ }
     finally { setBuscandoRNC(false); }
+  };
+
+  const buscarNombreDGII = async (q: string) => {
+    setBusqNombreDGII(q);
+    if (q.length < 3) { setResultadosNombreDGII([]); return; }
+    setBuscandoNombreDGII(true);
+    try {
+      const res  = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(q)}`);
+      const data = await res.json();
+      setResultadosNombreDGII(Array.isArray(data) ? data : []);
+    } catch { setResultadosNombreDGII([]); }
+    finally { setBuscandoNombreDGII(false); }
+  };
+
+  const seleccionarNombreDGII = (item: any) => {
+    setRncManual(item.rnc);
+    setRazonSocial(item.razon_social);
+    setBusqNombreDGII("");
+    setResultadosNombreDGII([]);
   };
   const buscarCliente = (q: string) => {
     setBusqRNC(q);
@@ -829,6 +851,56 @@ export default function FacturaPage() {
               {NCF_REQUIERE_RNC.includes(ncfTipo) && (
                 <div style={{ background: "#fef3c7", border: "1px solid #fde68a",
                   borderRadius: 10, padding: "12px 14px", marginTop: 4 }}>
+
+                  {/* ── Buscar por nombre en DGII ── */}
+                  {!clienteSeleccionado && (
+                    <div style={{ marginBottom: 10 }}>
+                      <label style={{ ...labelS, color: "#92400e" }}>🔎 Buscar en padrón DGII por nombre</label>
+                      <div style={{ position: "relative" }}>
+                        <input
+                          value={busqNombreDGII}
+                          onChange={e => buscarNombreDGII(e.target.value)}
+                          placeholder="Escribe el nombre de la empresa o persona…"
+                          style={{ ...input, marginBottom: 0, background: "#fffbeb", borderColor: "#fde68a" }}
+                        />
+                        {buscandoNombreDGII && (
+                          <span style={{ position: "absolute", right: 10, top: "50%", transform: "translateY(-50%)" }}>⏳</span>
+                        )}
+                        {resultadosNombreDGII.length > 0 && (
+                          <div style={{
+                            position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 200,
+                            background: "#1e293b", border: "1px solid #334155", borderRadius: 8,
+                            boxShadow: "0 8px 24px rgba(0,0,0,.5)", maxHeight: 240, overflowY: "auto",
+                          }}>
+                            {resultadosNombreDGII.map((r, i) => (
+                              <div
+                                key={i}
+                                onClick={() => seleccionarNombreDGII(r)}
+                                style={{ padding: "10px 14px", cursor: "pointer", borderBottom: "1px solid #334155" }}
+                                onMouseEnter={e => (e.currentTarget.style.background = "#2563eb22")}
+                                onMouseLeave={e => (e.currentTarget.style.background = "transparent")}
+                              >
+                                <div style={{ fontWeight: 600, fontSize: 13, color: "#f1f5f9" }}>{r.razon_social}</div>
+                                <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 2 }}>
+                                  RNC: {r.rnc}
+                                  {r.nombre_comercial && ` · ${r.nombre_comercial}`}
+                                  <span style={{
+                                    marginLeft: 8, padding: "1px 6px", borderRadius: 4, fontSize: 10,
+                                    background: r.estado === "ACTIVO" ? "#16a34a33" : "#dc262633",
+                                    color: r.estado === "ACTIVO" ? "#4ade80" : "#f87171",
+                                  }}>{r.estado}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {busqNombreDGII.length >= 3 && !buscandoNombreDGII && resultadosNombreDGII.length === 0 && (
+                          <p style={{ fontSize: 11, color: "#b45309", marginTop: 3 }}>Sin resultados. Escribe el RNC directamente.</p>
+                        )}
+                      </div>
+                    </div>
+                  )}
+
                   <label style={{ ...labelS, color: "#92400e" }}>
                     🏢 RNC / Cédula <span style={{ color: "#dc2626" }}>*</span>
                     <span style={{ fontWeight: 400, marginLeft: 6, fontSize: 11 }}>
