@@ -197,21 +197,44 @@ export default function Vehiculos() {
           </select>
 
           <label style={label}>Marca *</label>
-          <select value={form.marca} onChange={e => handleMarcaChange(e.target.value)} style={input}>
-            <option value="">— Seleccionar marca —</option>
-            {Object.keys(catalogo).map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
+          {vinEstado === "ok" ? (
+            <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+              <input
+                value={form.marca}
+                onChange={e => setForm(f => ({ ...f, marca: e.target.value }))}
+                style={{ ...input, marginBottom: 0, flex: 1, background: "#f0fdf4", borderColor: "#86efac" }}
+              />
+              <button type="button" onClick={() => { setVinEstado(""); setForm(f => ({ ...f, marca: "", modelo: "" })); }}
+                style={{ padding: "8px 10px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontSize: 12, color: "#555", whiteSpace: "nowrap" }}>
+                📋 Usar lista
+              </button>
+            </div>
+          ) : (
+            <select value={form.marca} onChange={e => handleMarcaChange(e.target.value)} style={input}>
+              <option value="">— Seleccionar marca —</option>
+              {Object.keys(catalogo).map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
 
           <label style={label}>Modelo *</label>
-          <select value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })}
-            style={input} disabled={!form.marca}>
-            <option value="">— Seleccionar modelo —</option>
-            {modelosDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
-          </select>
-
-          {form.marca === "OTRO" && (
-            <input placeholder="Escribe el modelo" value={form.modelo === "Personalizado" ? "" : form.modelo}
-              onChange={e => setForm({ ...form, modelo: e.target.value })} style={input} />
+          {vinEstado === "ok" ? (
+            <input
+              value={form.modelo}
+              onChange={e => setForm(f => ({ ...f, modelo: e.target.value }))}
+              style={{ ...input, background: "#f0fdf4", borderColor: "#86efac" }}
+            />
+          ) : (
+            <>
+              <select value={form.modelo} onChange={e => setForm({ ...form, modelo: e.target.value })}
+                style={input} disabled={!form.marca}>
+                <option value="">— Seleccionar modelo —</option>
+                {modelosDisponibles.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+              {form.marca === "OTRO" && (
+                <input placeholder="Escribe el modelo" value={form.modelo === "Personalizado" ? "" : form.modelo}
+                  onChange={e => setForm({ ...form, modelo: e.target.value })} style={input} />
+              )}
+            </>
           )}
 
           <label style={label}>Año *</label>
