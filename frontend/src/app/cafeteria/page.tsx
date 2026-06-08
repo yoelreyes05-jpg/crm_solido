@@ -633,11 +633,9 @@ function imprimirCuadreCafe(c: any) {
 
   <div class="footer">SÓLIDO AUTO SERVICIO SRL · 849-569-2027 · Santo Domingo, R.D.<br/>
   Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
-  <script>setTimeout(()=>window.print(),400);<\/script>
   </body></html>`;
 
-  const w = window.open("", "_blank", "width=660,height=680");
-  if (w) { w.document.write(html); w.document.close(); }
+  imprimirHTMLCafe(html);
 }
 
 function CafeteriaCuadre({ usuario }: { usuario: any }) {
