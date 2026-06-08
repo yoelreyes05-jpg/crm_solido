@@ -287,6 +287,13 @@ export default function FacturaPage() {
   const [resultRNC, setResultRNC] = useState<any[]>([]);
   const [modoRNC, setModoRNC]     = useState(false);
 
+  // ── VIN en mostrador ──────────────────────────────────────────────────────
+  const [vinMostrador,      setVinMostrador]      = useState("");
+  const [vinPerfilMostrador, setVinPerfilMostrador] = useState<any>(null);
+  const [vinSugeridosFac,   setVinSugeridosFac]   = useState<any[]>([]);
+  const [decodandoVINFac,   setDecodandoVINFac]   = useState(false);
+  const [vinFacEstado,      setVinFacEstado]       = useState<"ok"|"error"|"">("");
+
   const [modalFac, setModalFac]         = useState<any>(null);
   const [modalMethod, setModalMethod]   = useState("EFECTIVO");
   const [modalCliente, setModalCliente] = useState("");
@@ -369,6 +376,34 @@ export default function FacturaPage() {
     setBusqNombreDGII("");
     setResultadosNombreDGII([]);
   };
+  const decodificarVINFac = async (vin: string) => {
+    const v = vin.toUpperCase().trim();
+    if (v.length !== 17) return;
+    setDecodandoVINFac(true);
+    setVinFacEstado("");
+    setVinSugeridosFac([]);
+    setVinPerfilMostrador(null);
+    try {
+      const res  = await fetch(`${API}/vin/${v}/repuestos-sugeridos`);
+      const data = await res.json();
+      if (res.ok && data.perfil?.marca) {
+        setVinPerfilMostrador(data.perfil);
+        setVinSugeridosFac(data.sugeridos || []);
+        setVinFacEstado("ok");
+      } else {
+        setVinFacEstado("error");
+      }
+    } catch { setVinFacEstado("error"); }
+    finally { setDecodandoVINFac(false); }
+  };
+
+  const limpiarVINFac = () => {
+    setVinMostrador("");
+    setVinPerfilMostrador(null);
+    setVinSugeridosFac([]);
+    setVinFacEstado("");
+  };
+
   const buscarCliente = (q: string) => {
     setBusqRNC(q);
     if (q.length < 2) { setResultRNC([]); return; }
@@ -596,9 +631,32 @@ export default function FacturaPage() {
       setUltimaFactura({ factura: data, items: snap });
       abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false));
 
+      // ── Registrar compatibilidades aprendidas si teníamos VIN ──────────────
+      if (vinPerfilMostrador?.marca) {
+        const repuestosVendidos = snap.filter(p => p.tipo === "repuesto" && p.inventario_id);
+        repuestosVendidos.forEach(p => {
+          fetch(`${API}/repuesto-compatibilidad`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              inventario_id: p.inventario_id,
+              marca:         vinPerfilMostrador.marca,
+              modelo:        vinPerfilMostrador.modelo   || null,
+              ano_desde:     vinPerfilMostrador.ano      ? Number(vinPerfilMostrador.ano) : null,
+              ano_hasta:     vinPerfilMostrador.ano      ? Number(vinPerfilMostrador.ano) : null,
+              motor:         vinPerfilMostrador.motor    || null,
+              combustible:   vinPerfilMostrador.combustible || null,
+              origen:        "aprendido",
+              confirmado:    false,
+            }),
+          }).catch(() => {});
+        });
+      }
+
       setCarrito([]); setClienteId(""); setClienteSel(null);
       setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
       setRncManual(""); setRazonSocial(""); setNcfTipo("B02");
+      limpiarVINFac();
       fetchData();
     } catch (e: any) { alert("Error generando factura: " + e.message); }
     finally { setLoading(false); }
@@ -976,6 +1034,130 @@ export default function FacturaPage() {
             {/* REPUESTOS */}
             <div style={card}>
               <h2 style={cardTitle}>🔩 Repuestos del Inventario</h2>
+
+              {/* ── Buscador por VIN ── */}
+              <div style={{
+                background: vinPerfilMostrador ? "#0f1f0f" : "#f8fafc",
+                border: `1px solid ${vinFacEstado === "ok" ? "#16a34a" : vinFacEstado === "error" ? "#dc2626" : "#e2e8f0"}`,
+                borderRadius: 10, padding: "12px 14px", marginBottom: 14,
+              }}>
+                <div style={{ fontWeight: 700, fontSize: 13, color: vinPerfilMostrador ? "#4ade80" : "#374151", marginBottom: 8 }}>
+                  🚗 Buscar piezas compatibles por VIN
+                  <span style={{ fontWeight: 400, fontSize: 11, color: "#94a3b8", marginLeft: 8 }}>
+                    opcional — para venta de mostrador
+                  </span>
+                </div>
+
+                {!vinPerfilMostrador ? (
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <input
+                      value={vinMostrador}
+                      onChange={e => { setVinMostrador(e.target.value.toUpperCase()); setVinFacEstado(""); }}
+                      onBlur={e => decodificarVINFac(e.target.value)}
+                      placeholder="Ej: 1HGBH41JXMN109186  (17 caracteres)"
+                      maxLength={17}
+                      style={{
+                        flex: 1, padding: "9px 12px", borderRadius: 8,
+                        border: `1px solid ${vinFacEstado === "error" ? "#dc2626" : "#ddd"}`,
+                        fontFamily: "monospace", fontSize: 13, letterSpacing: 1,
+                        background: vinFacEstado === "error" ? "#fef2f2" : "#fff",
+                        textTransform: "uppercase",
+                        boxSizing: "border-box" as const,
+                      }}
+                    />
+                    <button
+                      onClick={() => decodificarVINFac(vinMostrador)}
+                      disabled={decodandoVINFac || vinMostrador.length !== 17}
+                      style={{
+                        padding: "9px 14px", borderRadius: 8, border: "none", cursor: "pointer",
+                        background: vinFacEstado === "error" ? "#dc2626" : "#111827",
+                        color: "#fff", fontWeight: 700, fontSize: 13, whiteSpace: "nowrap",
+                        opacity: (decodandoVINFac || vinMostrador.length !== 17) ? 0.5 : 1,
+                      }}
+                    >
+                      {decodandoVINFac ? "⏳" : "🔍 Decodificar"}
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    {/* Perfil del vehículo decodificado */}
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, fontSize: 15, color: "#e2e8f0" }}>
+                          {vinPerfilMostrador.marca} {vinPerfilMostrador.modelo} {vinPerfilMostrador.ano}
+                        </div>
+                        <div style={{ fontSize: 12, color: "#94a3b8", marginTop: 2 }}>
+                          {[vinPerfilMostrador.motor, vinPerfilMostrador.combustible].filter(Boolean).join(" · ")}
+                          <span style={{ marginLeft: 8, fontFamily: "monospace", color: "#64748b" }}>{vinMostrador}</span>
+                        </div>
+                      </div>
+                      <button onClick={limpiarVINFac}
+                        style={{ background: "none", border: "none", color: "#94a3b8", cursor: "pointer", fontSize: 16, padding: "2px 6px" }}>
+                        ✕
+                      </button>
+                    </div>
+
+                    {/* Sugeridos */}
+                    {vinSugeridosFac.length > 0 ? (
+                      <div style={{ marginTop: 12 }}>
+                        <div style={{ fontSize: 11, color: "#4ade80", fontWeight: 700, marginBottom: 8, textTransform: "uppercase", letterSpacing: 0.5 }}>
+                          ✨ {vinSugeridosFac.length} pieza{vinSugeridosFac.length !== 1 ? "s" : ""} compatible{vinSugeridosFac.length !== 1 ? "s" : ""} en tu inventario
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                          {vinSugeridosFac.map((s: any) => {
+                            const inv = s.inventario;
+                            const yaEnCarrito = carrito.some(c => c.inventario_id === inv?.id);
+                            const sinStock = (inv?.stock ?? 0) <= 0;
+                            return (
+                              <div key={s.inventario_id} style={{
+                                background: yaEnCarrito ? "#16a34a22" : sinStock ? "#1a0000" : "#162032",
+                                border: `1px solid ${yaEnCarrito ? "#16a34a" : sinStock ? "#7f1d1d" : "#334155"}`,
+                                borderRadius: 8, padding: "8px 12px",
+                                display: "flex", alignItems: "center", gap: 10,
+                                opacity: sinStock ? 0.6 : 1,
+                              }}>
+                                <div>
+                                  <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>{inv?.name}</div>
+                                  <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>
+                                    {inv?.code && <span style={{ fontFamily: "monospace" }}>{inv.code} · </span>}
+                                    RD$ {Number(inv?.price ?? 0).toFixed(2)} · stock: <span style={{ color: sinStock ? "#f87171" : "#4ade80" }}>{inv?.stock ?? 0}</span>
+                                    <span style={{ marginLeft: 6, color: "#64748b" }}>({s.veces_usado}× usado)</span>
+                                  </div>
+                                </div>
+                                {!yaEnCarrito && !sinStock && (
+                                  <button
+                                    onClick={() => inv && addItem({ id: inv.id, name: inv.name, code: inv.code, price: inv.price, stock: inv.stock })}
+                                    style={{
+                                      background: "#16a34a", color: "#fff", border: "none",
+                                      borderRadius: 6, padding: "5px 10px", fontSize: 12,
+                                      cursor: "pointer", fontWeight: 700, whiteSpace: "nowrap",
+                                    }}
+                                  >
+                                    + Agregar
+                                  </button>
+                                )}
+                                {yaEnCarrito && <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>✓ En carrito</span>}
+                                {sinStock && !yaEnCarrito && <span style={{ fontSize: 11, color: "#f87171" }}>Sin stock</span>}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: 12, color: "#64748b", marginTop: 10, fontStyle: "italic" }}>
+                        Sin compatibilidades aprendidas aún para este vehículo. Se irán registrando con cada venta.
+                      </p>
+                    )}
+                  </>
+                )}
+
+                {vinFacEstado === "error" && !vinPerfilMostrador && (
+                  <p style={{ fontSize: 12, color: "#dc2626", marginTop: 6 }}>
+                    ❌ VIN no reconocido. Verifica que tenga 17 caracteres y sea válido.
+                  </p>
+                )}
+              </div>
+
               <input placeholder="🔍 Buscar repuesto o código..." value={busqueda}
                 onChange={e => setBusqueda(e.target.value)}
                 style={{ ...input, marginBottom: 12 }} />

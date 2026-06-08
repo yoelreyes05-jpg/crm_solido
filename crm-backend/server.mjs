@@ -252,6 +252,69 @@ app.get("/vin/:vin", async (req, res) => {
   }
 });
 
+// ── GET /vin/:vin/repuestos-sugeridos ─────────────────────────────────────────
+// Para ventas de mostrador: decodifica el VIN y retorna repuestos compatibles
+// sin necesitar un vehiculo_id registrado en el sistema.
+app.get("/vin/:vin/repuestos-sugeridos", async (req, res) => {
+  try {
+    const vin = req.params.vin.toUpperCase().trim();
+    if (vin.length !== 17) return res.status(400).json({ error: "VIN debe tener 17 caracteres" });
+
+    // 1. Intentar cache primero
+    let perfil = null;
+    const { data: cached } = await supabase
+      .from("vin_cache")
+      .select("marca, modelo, ano, motor, combustible")
+      .eq("vin", vin)
+      .maybeSingle();
+
+    if (cached?.marca) {
+      perfil = cached;
+    } else {
+      // 2. Llamar NHTSA
+      const url = `https://vpic.nhtsa.dot.gov/api/vehicles/DecodeVin/${encodeURIComponent(vin)}?format=json`;
+      const r = await fetch(url);
+      const body = await r.json();
+      const results = body?.Results || [];
+      perfil = parsearNHTSA(results);
+
+      if (perfil.marca) {
+        await supabase.from("vin_cache").upsert({
+          vin, ...perfil, datos_raw: results, created_at: new Date().toISOString(),
+        }, { onConflict: "vin" }).catch(() => {});
+      }
+    }
+
+    if (!perfil?.marca) return res.status(404).json({ error: "VIN no reconocido", sugeridos: [] });
+
+    // 3. Buscar compatibilidades en catálogo
+    const anoNum = parseInt(perfil.ano) || 0;
+    const { data: compat } = await supabase
+      .from("repuesto_compatibilidad")
+      .select(`
+        inventario_id, veces_usado, confirmado, origen,
+        inventario:inventario_id (id, name, code, price, stock, categoria)
+      `)
+      .ilike("marca", perfil.marca || "")
+      .or(`modelo.ilike.%${perfil.modelo || ""}%,modelo.is.null`)
+      .lte("ano_desde", anoNum || 9999)
+      .gte("ano_hasta", anoNum || 0)
+      .order("veces_usado", { ascending: false })
+      .limit(15);
+
+    const vistos = new Set();
+    const sugeridos = (compat || []).filter(c => {
+      if (!c.inventario || vistos.has(c.inventario_id)) return false;
+      vistos.add(c.inventario_id);
+      return true;
+    });
+
+    res.json({ perfil, sugeridos, vin });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── GET /vehiculos/:id/repuestos-sugeridos ───────────────────────────────────
 // Retorna los repuestos más usados/compatibles con el vehículo de esa orden.
 app.get("/vehiculos/:id/repuestos-sugeridos", async (req, res) => {
