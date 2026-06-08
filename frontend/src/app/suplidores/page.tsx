@@ -20,6 +20,26 @@ export default function SuplidoresPage() {
   const [editando, setEditando]   = useState<Suplidor | null>(null);
   const [saving, setSaving]       = useState(false);
   const [busqueda, setBusqueda]   = useState("");
+  const [buscandoRNC, setBuscandoRNC] = useState(false);
+  const [rncEstado, setRncEstado]     = useState<"ok" | "notfound" | "">("");
+
+  const consultarRNC = async (rnc: string) => {
+    const limpio = rnc.replace(/\D/g, "");
+    if (limpio.length < 9) return;
+    setBuscandoRNC(true);
+    setRncEstado("");
+    try {
+      const res  = await fetch(`${API}/rnc/${limpio}`);
+      const data = await res.json();
+      if (res.ok && data?.razon_social) {
+        setForm(f => ({ ...f, name: data.razon_social }));
+        setRncEstado("ok");
+      } else {
+        setRncEstado("notfound");
+      }
+    } catch { setRncEstado("notfound"); }
+    finally { setBuscandoRNC(false); }
+  };
 
   const cargar = useCallback(async () => {
     try {
@@ -97,8 +117,28 @@ export default function SuplidoresPage() {
             placeholder="Nombre del suplidor" style={s.input} />
 
           <label style={s.label}>RNC / Cédula</label>
-          <input value={form.rnc} onChange={e => setForm(f => ({ ...f, rnc: e.target.value }))}
-            placeholder="Ej: 1-01-XXXXX-X" style={s.input} />
+          <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+            <input
+              value={form.rnc}
+              onChange={e => { setForm(f => ({ ...f, rnc: e.target.value })); setRncEstado(""); }}
+              onBlur={e => consultarRNC(e.target.value)}
+              placeholder="Ej: 101XXXXX o 000XXXXXXX"
+              style={{ ...s.input, flex: 1, marginBottom: 0 }}
+            />
+            <button
+              type="button"
+              onClick={() => consultarRNC(form.rnc)}
+              disabled={buscandoRNC || form.rnc.replace(/\D/g,"").length < 9}
+              style={{ padding: "8px 14px", borderRadius: 6, border: "none", cursor: "pointer",
+                background: rncEstado === "ok" ? "#16a34a" : rncEstado === "notfound" ? "#dc2626" : "#2563eb",
+                color: "#fff", fontSize: 13, whiteSpace: "nowrap", opacity: buscandoRNC ? 0.7 : 1 }}
+            >
+              {buscandoRNC ? "⏳" : rncEstado === "ok" ? "✅ Encontrado" : rncEstado === "notfound" ? "❌ No hallado" : "🔍 Consultar DGII"}
+            </button>
+          </div>
+          {rncEstado === "notfound" && (
+            <p style={{ fontSize: 11, color: "#ef4444", marginTop: 3 }}>RNC no encontrado en el padrón DGII. Puede escribir el nombre manualmente.</p>
+          )}
 
           <label style={s.label}>Teléfono</label>
           <input value={form.telefono} onChange={e => setForm(f => ({ ...f, telefono: e.target.value }))}
