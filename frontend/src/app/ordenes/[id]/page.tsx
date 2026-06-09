@@ -277,14 +277,25 @@ function imprimirOrdenCompleta(
     </div>` : "";
 
   // QC section
-  const qcHtml = orden.resultado_qc ? `
+  const moDetalle = diag?.mano_de_obra_detalle || "";
+  const moLineas  = moDetalle.split("\n").filter((l: string) => l.trim());
+  const trabajosHtmlQC = moLineas.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#5b21b6;margin-bottom:6px">🔧 Trabajos Realizados</div>
+      <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:8px 12px">
+        ${moLineas.map((l: string) => `<div style="font-size:12px;margin-bottom:4px;padding:3px 0;border-bottom:1px solid #ede9fe">✓ ${l.trim()}</div>`).join("")}
+      </div>
+    </div>` : "";
+
+  const qcHtml = `
     <div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#5b21b6;background:#f5f3ff;padding:6px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid #8b5cf6">
-        ✅ Control de Calidad — Resultado: ${orden.resultado_qc}
+        ✅ Control de Calidad${orden.resultado_qc ? ` — Resultado: ${orden.resultado_qc}` : ""}
       </div>
+      ${trabajosHtmlQC}
       ${orden.tecnico_qc ? `<div style="font-size:12px;margin-bottom:4px"><strong>Técnico QC:</strong> ${orden.tecnico_qc}</div>` : ""}
-      ${orden.observaciones_qc ? `<div style="font-size:12px;margin-bottom:8px"><strong>Observaciones:</strong> ${orden.observaciones_qc}</div>` : ""}
-    </div>` : "";
+      ${orden.observaciones_qc ? `<div style="font-size:12px;margin-bottom:8px"><strong>Observaciones QC:</strong> ${orden.observaciones_qc}</div>` : ""}
+    </div>`;
 
   // Entrega section
   const entregaHtml = orden.fecha_entrega ? `
@@ -1266,6 +1277,26 @@ export default function OrdenDetallePage() {
       {["CONTROL_CALIDAD","LISTO","ENTREGADO"].includes(estado) && (
         <div style={{ ...card, marginTop:16, borderLeft:"4px solid #8b5cf6" }}>
           <div style={sTitle as any}>✅ Control de Calidad</div>
+
+          {/* Trabajos realizados — campo mano_de_obra_detalle del diagnóstico */}
+          {diagnostico?.mano_de_obra_detalle && (
+            <div style={{ marginBottom:14, background:"#f5f3ff", border:"1px solid #ddd6fe", borderRadius:10, padding:"12px 14px" }}>
+              <p style={{ margin:"0 0 8px", fontSize:12, fontWeight:700, color:"#5b21b6", textTransform:"uppercase" }}>
+                🔧 Trabajos Realizados por el Técnico
+              </p>
+              <div style={{ display:"flex", flexDirection:"column", gap:4 }}>
+                {(diagnostico.mano_de_obra_detalle as string)
+                  .split("\n")
+                  .filter((l: string) => l.trim())
+                  .map((l: string, i: number) => (
+                    <div key={i} style={{ fontSize:13, color:"#374151", padding:"4px 0", borderBottom:"1px solid #ede9fe", display:"flex", gap:8 }}>
+                      <span style={{ color:"#7c3aed", fontWeight:700, flexShrink:0 }}>✓</span>
+                      <span style={{ whiteSpace:"pre-wrap" }}>{l.trim()}</span>
+                    </div>
+                  ))}
+              </div>
+            </div>
+          )}
 
           {estado === "CONTROL_CALIDAD" && !puedeCalidad ? (
             /* Técnico: solo puede ver que está pendiente de QC */
