@@ -1967,6 +1967,34 @@ app.get("/avances/:orden_id", async (req, res) => {
   res.json(data || []);
 });
 
+// ── GET /debug/avances/:orden_id — diagnóstico de avances en BD ──────────────
+app.get("/debug/avances/:orden_id", async (req, res) => {
+  const ordenId = parseInt(req.params.orden_id, 10);
+  if (isNaN(ordenId)) return res.json({ error: "ID inválido" });
+
+  const { data: diags } = await supabase.from("diagnosticos")
+    .select("id, orden_id, estado, tecnico_nombre")
+    .eq("orden_id", ordenId);
+
+  const diagIds = (diags || []).map(d => d.id);
+
+  const { data: avances, error: avErr } = await supabase.from("avances_reparacion")
+    .select("*")
+    .in("diagnostico_id", diagIds.length > 0 ? diagIds : [-1]);
+
+  const { data: avancesNull } = await supabase.from("avances_reparacion")
+    .select("*").is("diagnostico_id", null).limit(5);
+
+  res.json({
+    orden_id: ordenId,
+    diagnosticos: diags || [],
+    diagnostico_ids_buscados: diagIds,
+    avances_encontrados: avances || [],
+    avances_sin_diagnostico_id: avancesNull || [],
+    error_avances: avErr?.message || null,
+  });
+});
+
 app.post("/avances", async (req, res) => {
   const { diagnostico_id, orden_id, descripcion, tecnico_nombre, usuario_id } = req.body;
 

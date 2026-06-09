@@ -165,28 +165,31 @@ function imprimirDiagnostico(orden: any, cliente: any, vehiculo: any, diag: any)
 function imprimirSegunEstado(
   orden: any, cliente: any, vehiculo: any,
   diag: any, log: any[], inspeccion: any, historial: any[] = [],
-  trabajosItems: TrabajoItem[] = []
+  trabajosItems: TrabajoItem[] = [], avancesRep: any[] = []
 ) {
   const estado = orden.estado || "RECIBIDO";
   const ETAPAS = ["RECIBIDO","DIAGNOSTICO","ESPERANDO_APROBACION","REPARACION","CONTROL_CALIDAD","LISTO","ENTREGADO","CANCELADA"];
   const idxActual = ETAPAS.indexOf(estado);
+  // avancesEfectivos: preferir avancesRep (estado independiente), luego diag.avances
+  const avancesEfectivos = avancesRep.length > 0 ? avancesRep : (diag?.avances || []);
   const mostrar = {
     recepcion:   true,
     inspeccion:  !!inspeccion,
     diagnostico: !!diag && idxActual >= 1,
     cotizacion:  !!diag && idxActual >= 2,
-    reparacion:  (diag?.avances?.length > 0 || trabajosItems.length > 0) && idxActual >= 3,
+    reparacion:  (avancesEfectivos.length > 0 || trabajosItems.length > 0) && idxActual >= 3,
     calidad:     idxActual >= 4,
     entrega:     idxActual >= 6,
     cancelacion: estado === "CANCELADA",
   };
-  imprimirOrdenCompleta(orden, cliente, vehiculo, diag, log, inspeccion, historial, mostrar, trabajosItems);
+  imprimirOrdenCompleta(orden, cliente, vehiculo, diag, log, inspeccion, historial, mostrar, trabajosItems, avancesEfectivos);
 }
 
 // ── Imprimir resumen completo de la orden ─────────────────────────────────────
 function imprimirOrdenCompleta(
   orden: any, cliente: any, vehiculo: any, diag: any, log: any[],
-  inspeccion: any, historial: any[] = [], mostrar?: any, trabajosItems: TrabajoItem[] = []
+  inspeccion: any, historial: any[] = [], mostrar?: any, trabajosItems: TrabajoItem[] = [],
+  avancesRep: any[] = []
 ) {
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
   const fmtDate = (d: string) => d ? new Date(d).toLocaleString("es-DO",{ year:"numeric", month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
@@ -219,10 +222,12 @@ function imprimirOrdenCompleta(
       </td></tr>`;
   }).join("");
 
-  const avancesRows = (diag?.avances || []).map((av: any) => `
+  // Usar avancesRep (estado independiente) — si vacío, caer en diag.avances
+  const avancesEfectivos = avancesRep.length > 0 ? avancesRep : (diag?.avances || []);
+  const avancesRows = avancesEfectivos.map((av: any) => `
     <tr><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:top">
-      <div style="font-weight:600">${av.descripcion || "—"}</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px">👤 ${av.tecnico_nombre || "Técnico"} · ${fmtDate(av.created_at)}</div>
+      <div style="font-weight:600">${av.descripcion || av.detalle || "—"}</div>
+      <div style="font-size:11px;color:#9ca3af;margin-top:2px">👤 ${av.tecnico_nombre || av.usuario_nombre || "Técnico"} · ${fmtDate(av.created_at)}</div>
     </td></tr>`).join("");
 
   const repuestosItems: any[] = diag?.repuestos_items || [];
@@ -429,7 +434,7 @@ ${repuestosTabla}
 ${(mostrar ? mostrar.cotizacion : totalCot > 0) && totalCot > 0 ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#065f46;margin-bottom:6px">💰 Costos</div><table style="width:100%;border-collapse:collapse"><tr style="border-bottom:1px solid #d1fae5"><td style="padding:4px 0;font-size:11px">Mano de obra</td><td style="padding:4px 0;font-size:11px;text-align:right;font-weight:700">RD$ ${fmtMoney(manoObra)}</td></tr>${repuestos>0?`<tr style="border-bottom:1px solid #d1fae5"><td style="padding:4px 0;font-size:11px">Repuestos</td><td style="padding:4px 0;font-size:11px;text-align:right;font-weight:700">RD$ ${fmtMoney(repuestos)}</td></tr>`:""}<tr><td style="padding:8px 0 0;font-size:14px;font-weight:900;color:#065f46">TOTAL</td><td style="padding:8px 0 0;font-size:14px;font-weight:900;color:#065f46;text-align:right">RD$ ${fmtMoney(totalCot)}</td></tr></table></div>` : ""}
 ` : ""}
 ${(mostrar ? mostrar.reparacion : true) && trabajosItems.length > 0 ? trabajosTabla : ""}
-${(mostrar ? mostrar.reparacion : !!diag?.avances?.length) && (diag?.avances?.length > 0) ? `<div class="section-title">🔧 Avances de Reparación</div><table class="timeline">${avancesRows}</table>` : ""}
+${(mostrar ? mostrar.reparacion : avancesEfectivos.length > 0) && avancesEfectivos.length > 0 ? `<div class="section-title">🔧 Avances de Reparación</div><table class="timeline">${avancesRows}</table>` : ""}
 ${(mostrar ? mostrar.calidad : true) ? qcHtml : ""}
 ${(mostrar ? mostrar.entrega : true) ? entregaHtml : ""}
 ${(mostrar ? mostrar.cancelacion : true) ? cancelacionHtml : ""}
@@ -463,6 +468,9 @@ export default function OrdenDetallePage() {
   const [motivoModal,  setMotivoModal]  = useState("");
   const [procesando,   setProcesando]   = useState(false);
   const [mostrarInspFotos, setMostrarInspFotos] = useState(false);
+
+  // Avances cargados de forma independiente (siempre actualizados)
+  const [avancesReparacion, setAvancesReparacion] = useState<any[]>([]);
 
   // Nuevos estados
   const [trabajosItems,    setTrabajosItems]    = useState<TrabajoItem[]>([]);
@@ -668,6 +676,13 @@ export default function OrdenDetallePage() {
       setData(null);
     }
     setLoading(false);
+
+    // Siempre cargar avances por separado — fuente de verdad independiente
+    try {
+      const avRes = await fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []);
+      const lista = Array.isArray(avRes) ? avRes : [];
+      setAvancesReparacion(lista);
+    } catch (_e) {}
   }, [id]);
 
   useEffect(() => {
@@ -837,7 +852,7 @@ export default function OrdenDetallePage() {
           </a>
         )}
         <button
-          onClick={() => imprimirSegunEstado(orden, cliente, vehiculo, diagnostico, log, inspeccion, historial, trabajosItems)}
+          onClick={() => imprimirSegunEstado(orden, cliente, vehiculo, diagnostico, log, inspeccion, historial, trabajosItems, avancesReparacion)}
           style={{ background:"#111827", color:"#fff", padding:"7px 16px", borderRadius:8, fontWeight:700, fontSize:13, border:"none", cursor:"pointer", display:"flex", alignItems:"center", gap:6 }}>
           🖨️ Imprimir {estado === "RECIBIDO" ? "Recepción" : estado === "ESPERANDO_APROBACION" ? "Cotización" : estado === "REPARACION" ? "Reparación" : estado === "ENTREGADO" ? "Resumen Final" : "Resumen"}
         </button>
@@ -1218,18 +1233,24 @@ export default function OrdenDetallePage() {
         </div>
       )}
 
-      {/* ── Avances de Reparación ── */}
-      {diagnostico?.avances?.length > 0 && (
+      {/* ── Avances de Reparación ── fuente: avancesReparacion (estado independiente) */}
+      {(avancesReparacion.length > 0 || diagnostico?.avances?.length > 0) && (
         <div style={{ ...card, marginTop:16 }}>
           <div style={sTitle as any}>
             <span>📋 Avances de Reparación</span>
-            <span style={{ fontSize:12, color:"#9ca3af", fontWeight:500 }}>{diagnostico.avances.length} registros</span>
+            <span style={{ fontSize:12, color:"#9ca3af", fontWeight:500 }}>
+              {(avancesReparacion.length || diagnostico?.avances?.length || 0)} registros
+            </span>
           </div>
           <div style={{ display:"flex", flexDirection:"column", gap:8 }}>
-            {diagnostico.avances.map((av: any) => (
-              <div key={av.id} style={{ padding:"9px 12px", background:"#f9fafb", borderRadius:8, borderLeft:"3px solid #8b5cf6" }}>
-                <p style={{ margin:"0 0 3px", fontSize:13, fontWeight:600, whiteSpace:"pre-wrap" }}>{av.descripcion}</p>
-                <p style={{ margin:0, fontSize:11, color:"#9ca3af" }}>{av.tecnico_nombre} · {new Date(av.created_at).toLocaleString("es-DO")}</p>
+            {(avancesReparacion.length > 0 ? avancesReparacion : (diagnostico?.avances || [])).map((av: any, idx: number) => (
+              <div key={av.id ?? idx} style={{ padding:"9px 12px", background:"#f9fafb", borderRadius:8, borderLeft:"3px solid #8b5cf6" }}>
+                <p style={{ margin:"0 0 3px", fontSize:13, fontWeight:600, whiteSpace:"pre-wrap" }}>
+                  {av.descripcion || av.detalle || "—"}
+                </p>
+                <p style={{ margin:0, fontSize:11, color:"#9ca3af" }}>
+                  {av.tecnico_nombre || av.usuario_nombre || "Técnico"} · {new Date(av.created_at).toLocaleString("es-DO")}
+                </p>
               </div>
             ))}
           </div>
