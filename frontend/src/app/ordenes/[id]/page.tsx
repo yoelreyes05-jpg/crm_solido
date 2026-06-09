@@ -281,10 +281,30 @@ function imprimirOrdenCompleta(
   const moLineas  = moDetalle.split("\n").filter((l: string) => l.trim());
   const trabajosHtmlQC = moLineas.length > 0 ? `
     <div style="margin-bottom:10px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#5b21b6;margin-bottom:6px">🔧 Trabajos Realizados</div>
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#5b21b6;margin-bottom:6px">🔧 Trabajos a Realizar / Realizados</div>
       <div style="background:#f5f3ff;border:1px solid #ddd6fe;border-radius:6px;padding:8px 12px">
-        ${moLineas.map((l: string) => `<div style="font-size:12px;margin-bottom:4px;padding:3px 0;border-bottom:1px solid #ede9fe">✓ ${l.trim()}</div>`).join("")}
+        ${moLineas.map((l: string) => `<div style="font-size:11px;margin-bottom:4px;padding:3px 0;border-bottom:1px solid #ede9fe">✓ ${l.trim()}</div>`).join("")}
       </div>
+    </div>` : "";
+
+  const bitacoraHtmlQC = avancesRep.length > 0 ? `
+    <div style="margin-bottom:10px">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#374151;margin-bottom:6px">📋 Bitácora de Reparación</div>
+      <table style="width:100%;border-collapse:collapse;font-size:11px">
+        <thead><tr style="background:#111827;color:#fff">
+          <th style="padding:5px 8px;text-align:left;font-weight:700">Técnico</th>
+          <th style="padding:5px 8px;text-align:left;font-weight:700">Descripción del Trabajo</th>
+          <th style="padding:5px 8px;text-align:right;font-weight:700;white-space:nowrap">Fecha</th>
+        </tr></thead>
+        <tbody>
+          ${avancesRep.map((av: any, i: number) => `
+            <tr style="background:${i%2===0?"#fff":"#f9fafb"};border-bottom:1px solid #f1f5f9">
+              <td style="padding:6px 8px;font-weight:700;color:#5b21b6;white-space:nowrap;vertical-align:top">${av.tecnico_nombre || av.usuario_nombre || "Técnico"}</td>
+              <td style="padding:6px 8px;vertical-align:top">${(av.descripcion || av.detalle || "—").replace(/\n/g,"<br/>")}</td>
+              <td style="padding:6px 8px;color:#9ca3af;text-align:right;white-space:nowrap;vertical-align:top">${av.created_at ? new Date(av.created_at).toLocaleDateString("es-DO",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
+            </tr>`).join("")}
+        </tbody>
+      </table>
     </div>` : "";
 
   const qcHtml = `
@@ -293,6 +313,7 @@ function imprimirOrdenCompleta(
         ✅ Control de Calidad${orden.resultado_qc ? ` — Resultado: ${orden.resultado_qc}` : ""}
       </div>
       ${trabajosHtmlQC}
+      ${bitacoraHtmlQC}
       ${orden.tecnico_qc ? `<div style="font-size:12px;margin-bottom:4px"><strong>Técnico QC:</strong> ${orden.tecnico_qc}</div>` : ""}
       ${orden.observaciones_qc ? `<div style="font-size:12px;margin-bottom:8px"><strong>Observaciones QC:</strong> ${orden.observaciones_qc}</div>` : ""}
     </div>`;
@@ -1294,6 +1315,37 @@ export default function OrdenDetallePage() {
                       <span style={{ whiteSpace:"pre-wrap" }}>{l.trim()}</span>
                     </div>
                   ))}
+              </div>
+            </div>
+          )}
+
+          {/* Avances de reparación anclados al QC — quién hizo qué y cuándo */}
+          {(avancesReparacion.length > 0) && (
+            <div style={{ marginBottom:14, border:"1px solid #e5e7eb", borderRadius:10, overflow:"hidden" }}>
+              <div style={{ background:"#111827", color:"#fff", padding:"8px 14px", fontSize:12, fontWeight:700, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                <span>📋 Bitácora de Reparación — {avancesReparacion.length} {avancesReparacion.length === 1 ? "entrada" : "entradas"}</span>
+                <span style={{ fontSize:11, color:"#9ca3af", fontWeight:400 }}>Para verificación QC</span>
+              </div>
+              <div style={{ display:"flex", flexDirection:"column" }}>
+                {avancesReparacion.map((av: any, idx: number) => (
+                  <div key={av.id ?? idx} style={{
+                    padding:"10px 14px",
+                    borderBottom: idx < avancesReparacion.length - 1 ? "1px solid #f3f4f6" : "none",
+                    background: idx % 2 === 0 ? "#fff" : "#fafafa",
+                  }}>
+                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12, marginBottom:4 }}>
+                      <span style={{ fontSize:12, fontWeight:700, color:"#7c3aed", background:"#f5f3ff", padding:"2px 8px", borderRadius:12, whiteSpace:"nowrap" }}>
+                        👤 {av.tecnico_nombre || av.usuario_nombre || "Técnico"}
+                      </span>
+                      <span style={{ fontSize:11, color:"#9ca3af", whiteSpace:"nowrap" }}>
+                        {new Date(av.created_at).toLocaleString("es-DO", { day:"2-digit", month:"short", year:"numeric", hour:"2-digit", minute:"2-digit" })}
+                      </span>
+                    </div>
+                    <p style={{ margin:0, fontSize:13, color:"#374151", whiteSpace:"pre-wrap", lineHeight:1.5 }}>
+                      {av.descripcion || av.detalle || "—"}
+                    </p>
+                  </div>
+                ))}
               </div>
             </div>
           )}
