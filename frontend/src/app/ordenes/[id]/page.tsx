@@ -591,6 +591,7 @@ export default function OrdenDetallePage() {
   const [guardandoTrabajos,setGuardandoTrabajos]= useState(false);
   const [qcData,           setQcData]           = useState({ tecnico_qc:"", checklist_qc:{} as Record<string,boolean>, observaciones_qc:"" });
   const [entregaData,      setEntregaData]      = useState({ notas_entrega:"", firma_entrega:"", usuario_entrego:"" });
+  const [facturaOrden,     setFacturaOrden]     = useState<any>(null);
 
   // Canvas de firma
   const firmaCanvasRef = useRef<HTMLCanvasElement>(null);
@@ -737,12 +738,13 @@ export default function OrdenDetallePage() {
       }
 
       // Fallback: construir desde listado
-      const [listRes, diagRes, logRes, inspRes, avRes] = await Promise.all([
+      const [listRes, diagRes, logRes, inspRes, avRes, facturasRes] = await Promise.all([
         fetch(`${API}/ordenes`).then(r => r.ok ? r.json() : []),
         fetch(`${API}/diagnosticos?orden_id=${id}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`${API}/ordenes/${id}/log`).then(r => r.ok ? r.json() : []).catch(() => []),
         fetch(`${API}/inspeccion/orden/${id}`).then(r => r.ok ? r.json() : null).catch(() => null),
         fetch(`${API}/avances/${id}`).then(r => r.ok ? r.json() : []).catch(() => []),
+        fetch(`${API}/facturas?orden_id=${id}`).then(r => r.ok ? r.json() : []).catch(() => []),
       ]);
 
       const lista = Array.isArray(listRes) ? listRes : [];
@@ -769,6 +771,11 @@ export default function OrdenDetallePage() {
         diagnostico: diag, log: Array.isArray(logRes) ? logRes : [], inspeccion: inspRes,
       };
       setData(finalData);
+
+      // Guardar factura activa de esta orden (para validar pago antes de entregar)
+      const facturasArr = Array.isArray(facturasRes) ? facturasRes : [];
+      const factActiva = facturasArr.find((f: any) => f.estado !== "CANCELADA") || null;
+      setFacturaOrden(factActiva);
 
       const rawItems2 = diag?.trabajos_realizados_items;
       let items2: any[] = [];
@@ -913,7 +920,7 @@ export default function OrdenDetallePage() {
   }
   // Los botones de QC viven dentro de la sección Control de Calidad (con checklist completo)
   // No se duplican aquí para evitar doble envío al servidor
-  if (estado === "LISTO" && puedeEntregar) {
+  if (estado === "LISTO" && puedeEntregar && facturaOrden) {
     accionesFlujo.push({ key:"entregar", label:"🏁 Vehículo Entregado", color:"#1d4ed8" });
   }
 
@@ -1536,6 +1543,17 @@ export default function OrdenDetallePage() {
             <div style={{ background:"#eff6ff", border:"1px solid #bfdbfe", borderRadius:10, padding:"16px 20px", textAlign:"center", color:"#1d4ed8" }}>
               <p style={{ margin:"0 0 4px", fontWeight:700, fontSize:14 }}>🎉 Vehículo listo para entrega</p>
               <p style={{ margin:0, fontSize:12, color:"#3b82f6" }}>La entrega al cliente será procesada por secretaría o gerencia.</p>
+            </div>
+          ) : estado === "LISTO" && !facturaOrden ? (
+            /* Sin factura pagada: bloquear entrega */
+            <div style={{ background:"#fef2f2", border:"2px solid #fca5a5", borderRadius:10, padding:"20px 24px", textAlign:"center" }}>
+              <p style={{ margin:"0 0 8px", fontWeight:800, fontSize:16, color:"#dc2626" }}>🚫 Pago pendiente</p>
+              <p style={{ margin:"0 0 12px", fontSize:13, color:"#7f1d1d" }}>
+                El cliente no ha realizado su pago. Debe pagar la factura antes de retirar el vehículo.
+              </p>
+              <p style={{ margin:0, fontSize:12, color:"#991b1b" }}>
+                Una vez registrado el pago en Facturación, podrá procesar la entrega aquí.
+              </p>
             </div>
           ) : estado === "LISTO" ? (
             /* Formulario de entrega */

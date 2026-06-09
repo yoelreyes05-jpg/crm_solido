@@ -2279,10 +2279,9 @@ app.get("/facturacion/rnc/:rnc", async (req, res) => {
 // 🧾 FACTURAS
 // =====================================================
 app.get("/facturas", async (req, res) => {
-  const { data, error } = await supabase
-    .from("facturas")
-    .select("*")
-    .order("id", { ascending: false });
+  let q = supabase.from("facturas").select("*").order("id", { ascending: false });
+  if (req.query.orden_id) q = q.eq("orden_id", parseInt(req.query.orden_id, 10));
+  const { data, error } = await q;
   if (error) return res.json({ error: error.message });
   res.json(data || []);
 });
