@@ -110,6 +110,15 @@ export default function ReparacionPage() {
   const [repuestosSeleccionados, setRepuestosSeleccionados] = useState<RepuestoSeleccionado[]>([]);
   const [mostrarInventario, setMostrarInventario] = useState(false);
 
+  // ── Ficha Técnica (NHTSA + IA) ────────────────────────────────────────────
+  const [tabActivo, setTabActivo] = useState<"avances" | "ficha">("avances");
+  const [fichaTecnica, setFichaTecnica] = useState<{ complaints: any[]; recalls: any[]; vehiculo?: any; motivo_entrada?: string; cached?: boolean } | null>(null);
+  const [fichaLoading, setFichaLoading] = useState(false);
+  const [fichaError, setFichaError] = useState<string | null>(null);
+  const [iaAnalisis, setIaAnalisis] = useState<string | null>(null);
+  const [iaAnalizando, setIaAnalizando] = useState(false);
+  const [fichaComponenteActivo, setFichaComponenteActivo] = useState<string | null>(null);
+
   const usuario: Record<string, string> =
     typeof window !== "undefined"
       ? JSON.parse(localStorage.getItem("usuario") || "{}")
@@ -406,6 +415,50 @@ export default function ReparacionPage() {
     </div>
   );
 
+  // ── Cargar Ficha Técnica ──────────────────────────────────────────────────
+  async function cargarFichaTecnica() {
+    if (fichaLoading) return;
+    setFichaLoading(true);
+    setFichaError(null);
+    setIaAnalisis(null);
+    try {
+      const res = await fetch(`${API}/ficha-tecnica/${id}`);
+      if (!res.ok) throw new Error(`Error ${res.status}`);
+      const data = await res.json();
+      setFichaTecnica(data);
+      if (data.complaints?.length > 0) setFichaComponenteActivo(data.complaints[0].component);
+    } catch (e: any) {
+      setFichaError(e.message || "Error al cargar boletines NHTSA");
+    } finally {
+      setFichaLoading(false);
+    }
+  }
+
+  async function analizarConIA() {
+    if (!fichaTecnica || iaAnalizando) return;
+    setIaAnalizando(true);
+    setIaAnalisis(null);
+    try {
+      const res = await fetch(`${API}/api/ia/analizar-falla`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          orden_id: id,
+          sintoma: orden.descripcion || fichaTecnica.motivo_entrada || "Sin síntoma registrado",
+          vehiculo: fichaTecnica.vehiculo,
+          complaints: fichaTecnica.complaints,
+          recalls: fichaTecnica.recalls,
+        }),
+      });
+      const data = await res.json();
+      setIaAnalisis(data.respuesta || data.error || "Sin respuesta");
+    } catch (e: any) {
+      setIaAnalisis("⚠️ Error al contactar la IA: " + e.message);
+    } finally {
+      setIaAnalizando(false);
+    }
+  }
+
   const estadoInfo = ESTADO_INFO[orden.estado] || { label: orden.estado, color: C.muted };
   const vehiculoStr = orden.vehiculo_marca && orden.vehiculo_modelo
     ? `${orden.vehiculo_marca} ${orden.vehiculo_modelo} ${orden.vehiculo_ano || ""}`.trim()
@@ -505,8 +558,41 @@ export default function ReparacionPage() {
 
       <div style={{ padding: 24, display: "grid", gridTemplateColumns: "1fr 420px", gap: 24, alignItems: "start" }}>
 
-        {/* Panel izquierdo: avances */}
+        {/* Panel izquierdo: tabs Avances / Ficha Técnica */}
         <div>
+
+          {/* ── Selector de pestaña ── */}
+          <div style={{ display: "flex", gap: 0, marginBottom: 18, borderBottom: `1px solid ${C.border}` }}>
+            {[
+              { key: "avances", label: `📋 Avances (${avances.length})` },
+              { key: "ficha",   label: "📡 Ficha Técnica" },
+            ].map(tab => (
+              <button
+                key={tab.key}
+                onClick={() => {
+                  setTabActivo(tab.key as "avances" | "ficha");
+                  if (tab.key === "ficha" && !fichaTecnica && !fichaLoading) cargarFichaTecnica();
+                }}
+                style={{
+                  background: "transparent",
+                  border: "none",
+                  borderBottom: tabActivo === tab.key ? `2px solid ${C.cyan}` : "2px solid transparent",
+                  color: tabActivo === tab.key ? C.cyan : C.muted,
+                  padding: "8px 18px",
+                  fontSize: 13,
+                  fontWeight: tabActivo === tab.key ? 700 : 400,
+                  cursor: "pointer",
+                  marginBottom: -1,
+                  transition: "all 0.15s",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          {/* ══════════════ TAB: AVANCES ══════════════ */}
+          {tabActivo === "avances" && (<>
           <h2 style={{ fontSize: 15, fontWeight: 700, margin: "0 0 16px", color: C.text }}>
             📋 Avances de Reparación
             <span style={{ marginLeft: 8, fontSize: 12, color: C.muted, fontWeight: 400 }}>
@@ -597,6 +683,249 @@ export default function ReparacionPage() {
               <div ref={avancesEndRef} />
             </div>
           )}
+          </>)}
+
+          {/* ══════════════ TAB: FICHA TÉCNICA ══════════════ */}
+          {tabActivo === "ficha" && (
+            <div>
+              {/* Estado: cargando */}
+              {fichaLoading && (
+                <div style={{ textAlign: "center", padding: 60, color: C.muted }}>
+                  <div style={{ fontSize: 32, marginBottom: 12 }}>📡</div>
+                  <p style={{ fontSize: 14 }}>Consultando base de datos NHTSA...</p>
+                  <p style={{ fontSize: 12, color: C.muted }}>Esto puede tomar unos segundos</p>
+                </div>
+              )}
+
+              {/* Estado: error */}
+              {fichaError && !fichaLoading && (
+                <div style={{ background: C.red + "15", border: `1px solid ${C.red}44`, borderRadius: 10, padding: 20, textAlign: "center" }}>
+                  <div style={{ fontSize: 28, marginBottom: 8 }}>⚠️</div>
+                  <p style={{ color: C.red, fontSize: 13, margin: "0 0 12px" }}>{fichaError}</p>
+                  <button
+                    onClick={cargarFichaTecnica}
+                    style={{ background: C.red + "22", color: C.red, border: `1px solid ${C.red}44`, borderRadius: 7, padding: "6px 16px", fontSize: 12, cursor: "pointer" }}
+                  >↻ Reintentar</button>
+                </div>
+              )}
+
+              {/* Sin datos cargados aún */}
+              {!fichaTecnica && !fichaLoading && !fichaError && (
+                <div style={{ background: C.card, border: `1px dashed ${C.border}`, borderRadius: 10, padding: 40, textAlign: "center" }}>
+                  <div style={{ fontSize: 40, marginBottom: 12 }}>📡</div>
+                  <p style={{ fontSize: 14, color: C.text, marginBottom: 6 }}>Boletines de Servicio NHTSA</p>
+                  <p style={{ fontSize: 12, color: C.muted, marginBottom: 20 }}>
+                    Quejas reales de propietarios y recalls del fabricante para este vehículo
+                  </p>
+                  <button
+                    onClick={cargarFichaTecnica}
+                    style={{ background: C.cyan + "22", color: C.cyan, border: `1px solid ${C.cyan}44`, borderRadius: 8, padding: "8px 20px", fontSize: 13, fontWeight: 700, cursor: "pointer" }}
+                  >
+                    Consultar NHTSA
+                  </button>
+                </div>
+              )}
+
+              {/* Datos cargados */}
+              {fichaTecnica && !fichaLoading && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+
+                  {/* Info del vehículo + badge cache */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                    <div>
+                      <span style={{ fontSize: 16, fontWeight: 800, color: C.text }}>
+                        {fichaTecnica.vehiculo?.marca} {fichaTecnica.vehiculo?.modelo} {fichaTecnica.vehiculo?.ano}
+                      </span>
+                      {fichaTecnica.vehiculo?.vin && (
+                        <span style={{ marginLeft: 10, fontSize: 11, color: C.muted }}>VIN: {fichaTecnica.vehiculo.vin}</span>
+                      )}
+                    </div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      {fichaTecnica.cached && (
+                        <span style={{ fontSize: 10, color: C.muted, background: C.card2, border: `1px solid ${C.border}`, borderRadius: 5, padding: "2px 7px" }}>
+                          📦 Cache
+                        </span>
+                      )}
+                      <button
+                        onClick={cargarFichaTecnica}
+                        style={{ fontSize: 11, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 6, padding: "3px 10px", cursor: "pointer" }}
+                      >↻ Actualizar</button>
+                    </div>
+                  </div>
+
+                  {/* Síntoma actual */}
+                  {fichaTecnica.motivo_entrada && (
+                    <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px" }}>
+                      <span style={{ fontSize: 11, color: C.muted, display: "block", marginBottom: 4 }}>MOTIVO DE ENTRADA</span>
+                      <span style={{ fontSize: 13, color: C.text }}>{fichaTecnica.motivo_entrada}</span>
+                    </div>
+                  )}
+
+                  {/* ── Recalls activos ── */}
+                  {fichaTecnica.recalls.length > 0 && (
+                    <div style={{ background: C.red + "10", border: `1px solid ${C.red}44`, borderRadius: 10, padding: 14 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.red }}>🔔 Recalls del Fabricante</span>
+                        <span style={{ background: C.red + "22", color: C.red, border: `1px solid ${C.red}44`, borderRadius: 20, padding: "1px 8px", fontSize: 11, fontWeight: 700 }}>
+                          {fichaTecnica.recalls.length}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                        {fichaTecnica.recalls.slice(0, 5).map((r: any, i: number) => (
+                          <div key={i} style={{ background: "#0f172a", borderRadius: 8, padding: "10px 12px", borderLeft: `3px solid ${C.red}` }}>
+                            {r.NHTSACampaignNumber && (
+                              <span style={{ fontSize: 10, color: C.muted, display: "block", marginBottom: 3 }}>
+                                Campaña: {r.NHTSACampaignNumber}
+                              </span>
+                            )}
+                            <p style={{ margin: 0, fontSize: 12, color: C.text, lineHeight: 1.5 }}>
+                              <strong>Consecuencia:</strong> {r.consequence || r.summary || "Ver detalles oficiales"}
+                            </p>
+                            {r.remedy && (
+                              <p style={{ margin: "4px 0 0", fontSize: 12, color: C.green }}>
+                                <strong>Remedio:</strong> {r.remedy}
+                              </p>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* ── Fallas más reportadas (por componente) ── */}
+                  {fichaTecnica.complaints.length > 0 ? (
+                    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, overflow: "hidden" }}>
+                      <div style={{ padding: "10px 16px", borderBottom: `1px solid ${C.border}`, display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.yellow }}>📊 Fallas Más Reportadas</span>
+                        <span style={{ fontSize: 11, color: C.muted }}>
+                          {fichaTecnica.complaints.reduce((s: number, c: any) => s + c.count, 0)} quejas totales · NHTSA
+                        </span>
+                      </div>
+
+                      {/* Ranking de componentes */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 8, padding: 12, borderBottom: `1px solid ${C.border}` }}>
+                        {fichaTecnica.complaints.map((c: any) => (
+                          <button
+                            key={c.component}
+                            onClick={() => setFichaComponenteActivo(fichaComponenteActivo === c.component ? null : c.component)}
+                            style={{
+                              background: fichaComponenteActivo === c.component ? C.yellow + "22" : C.card2,
+                              color:      fichaComponenteActivo === c.component ? C.yellow : C.muted,
+                              border:     `1px solid ${fichaComponenteActivo === c.component ? C.yellow + "55" : C.border}`,
+                              borderRadius: 20,
+                              padding: "4px 12px",
+                              fontSize: 11,
+                              fontWeight: fichaComponenteActivo === c.component ? 700 : 400,
+                              cursor: "pointer",
+                              transition: "all 0.15s",
+                            }}
+                          >
+                            {c.component.split(" ").slice(0, 3).join(" ")} ({c.count})
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Detalle del componente seleccionado */}
+                      {fichaComponenteActivo && (() => {
+                        const comp = fichaTecnica.complaints.find((c: any) => c.component === fichaComponenteActivo);
+                        if (!comp) return null;
+                        return (
+                          <div style={{ padding: 14 }}>
+                            <p style={{ fontSize: 12, fontWeight: 700, color: C.yellow, margin: "0 0 10px" }}>
+                              {comp.component} — {comp.count} reportes
+                            </p>
+                            <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                              {comp.items?.map((item: any, i: number) => (
+                                <div key={i} style={{ background: C.card2, borderRadius: 8, padding: "9px 12px", borderLeft: `2px solid ${C.yellow}55` }}>
+                                  <p style={{ margin: 0, fontSize: 12, color: C.text, lineHeight: 1.5, whiteSpace: "pre-wrap" }}>
+                                    {item.summary || "Sin descripción"}
+                                  </p>
+                                  {(item.injuries > 0 || item.deaths > 0) && (
+                                    <span style={{ fontSize: 10, color: C.red, marginTop: 4, display: "block" }}>
+                                      ⚠️ {item.injuries} heridos · {item.deaths} fallecidos
+                                    </span>
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })()}
+                    </div>
+                  ) : (
+                    <div style={{ background: C.card, border: `1px dashed ${C.border}`, borderRadius: 10, padding: 20, textAlign: "center", color: C.muted, fontSize: 13 }}>
+                      No hay quejas registradas en NHTSA para este vehículo.
+                    </div>
+                  )}
+
+                  {/* ── Análisis IA ── */}
+                  <div style={{ background: C.card, border: `1px solid ${C.purple}44`, borderRadius: 10, overflow: "hidden" }}>
+                    <div style={{ background: C.purple + "15", padding: "10px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+                      <div>
+                        <span style={{ fontSize: 13, fontWeight: 700, color: C.purple }}>🤖 Análisis IA</span>
+                        <span style={{ fontSize: 11, color: C.muted, marginLeft: 8 }}>
+                          Síntoma actual vs. historial NHTSA
+                        </span>
+                      </div>
+                      <button
+                        onClick={analizarConIA}
+                        disabled={iaAnalizando}
+                        style={{
+                          background: iaAnalizando ? C.border : C.purple + "22",
+                          color:      iaAnalizando ? C.muted   : C.purple,
+                          border:     `1px solid ${iaAnalizando ? C.border : C.purple + "55"}`,
+                          borderRadius: 8,
+                          padding: "6px 16px",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          cursor: iaAnalizando ? "not-allowed" : "pointer",
+                        }}
+                      >
+                        {iaAnalizando ? "⏳ Analizando..." : "✨ Analizar con síntoma actual"}
+                      </button>
+                    </div>
+
+                    {!iaAnalisis && !iaAnalizando && (
+                      <div style={{ padding: "14px 16px", fontSize: 12, color: C.muted }}>
+                        Presiona el botón para que la IA correlacione el síntoma actual del vehículo
+                        con las {fichaTecnica.complaints.reduce((s: number, c: any) => s + c.count, 0)} quejas
+                        registradas en NHTSA y sugiera los puntos de inspección más probables.
+                      </div>
+                    )}
+
+                    {iaAnalizando && (
+                      <div style={{ padding: 20, textAlign: "center", color: C.muted, fontSize: 13 }}>
+                        ⏳ Cruzando síntoma con datos NHTSA...
+                      </div>
+                    )}
+
+                    {iaAnalisis && (
+                      <div style={{ padding: "14px 16px" }}>
+                        <pre style={{
+                          margin: 0,
+                          fontSize: 13,
+                          color: C.text,
+                          lineHeight: 1.7,
+                          whiteSpace: "pre-wrap",
+                          fontFamily: "system-ui, sans-serif",
+                        }}>
+                          {iaAnalisis}
+                        </pre>
+                        <button
+                          onClick={analizarConIA}
+                          style={{ marginTop: 12, background: "transparent", color: C.muted, border: `1px solid ${C.border}`, borderRadius: 6, padding: "4px 12px", fontSize: 11, cursor: "pointer" }}
+                        >
+                          ↻ Regenerar análisis
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                </div>
+              )}
+            </div>
+          )}
+
         </div>
 
         {/* Panel derecho: acciones */}

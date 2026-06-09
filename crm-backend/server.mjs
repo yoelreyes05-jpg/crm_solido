@@ -7201,6 +7201,226 @@ REGLAS:
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 📡 FICHA TÉCNICA — Boletines NHTSA + IA de fallas
+// ══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /ficha-tecnica/:orden_id
+ * Devuelve complaints + recalls NHTSA para el vehículo de la orden.
+ * Cachea resultados en tsb_cache (TTL 30 días).
+ */
+app.get("/ficha-tecnica/:orden_id", async (req, res) => {
+  const ordenId = parseInt(req.params.orden_id, 10);
+  if (isNaN(ordenId)) return res.status(400).json({ error: "ID de orden inválido" });
+
+  try {
+    // 1. Obtener vehículo de la orden
+    const { data: orden, error: errOrden } = await supabase
+      .from("ordenes_trabajo")
+      .select("vehiculo_id, motivo_entrada")
+      .eq("id", ordenId)
+      .single();
+    if (errOrden || !orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+    const { data: vehiculo, error: errVeh } = await supabase
+      .from("vehiculos")
+      .select("marca, modelo, ano, vin")
+      .eq("id", orden.vehiculo_id)
+      .single();
+    if (errVeh || !vehiculo) return res.status(404).json({ error: "Vehículo no encontrado" });
+
+    const { marca, modelo, ano } = vehiculo;
+    if (!marca || !modelo || !ano) {
+      return res.json({
+        vehiculo: { marca, modelo, ano },
+        complaints: [],
+        recalls: [],
+        cached: false,
+        mensaje: "El vehículo no tiene marca/modelo/año completos para buscar boletines.",
+      });
+    }
+
+    // Normalizar para NHTSA: sin espacios, mayúsculas
+    const makeNH  = marca.trim().toUpperCase().replace(/\s+/g, "%20");
+    const modelNH = modelo.trim().toUpperCase().replace(/\s+/g, "%20");
+    const yearNH  = String(ano);
+    const vehicleKey = `${marca.trim().toUpperCase()}|${modelo.trim().toUpperCase().replace(/\s+/g, "")}|${yearNH}`;
+
+    // 2. Revisar cache (máx 30 días)
+    const { data: cache } = await supabase
+      .from("tsb_cache")
+      .select("*")
+      .eq("vehicle_key", vehicleKey)
+      .single();
+
+    if (cache) {
+      const age = Date.now() - new Date(cache.updated_at).getTime();
+      const thirtyDays = 30 * 24 * 60 * 60 * 1000;
+      if (age < thirtyDays) {
+        return res.json({
+          vehiculo: { marca, modelo, ano, vin: vehiculo.vin },
+          motivo_entrada: orden.motivo_entrada,
+          complaints: cache.complaints || [],
+          recalls: cache.recalls || [],
+          cached: true,
+          cache_fecha: cache.updated_at,
+        });
+      }
+    }
+
+    // 3. Llamar NHTSA API
+    const nhtsaBase = "https://api.nhtsa.gov";
+    let complaints = [];
+    let recalls    = [];
+
+    try {
+      const [cRes, rRes] = await Promise.allSettled([
+        fetch(`${nhtsaBase}/complaints/complaintsByVehicle?make=${makeNH}&model=${modelNH}&modelYear=${yearNH}`)
+          .then(r => r.ok ? r.json() : { results: [] }),
+        fetch(`${nhtsaBase}/recalls/recallsByVehicle?make=${makeNH}&model=${modelNH}&modelYear=${yearNH}`)
+          .then(r => r.ok ? r.json() : { results: [] }),
+      ]);
+
+      if (cRes.status === "fulfilled") complaints = cRes.value?.results || [];
+      if (rRes.status === "fulfilled") recalls    = rRes.value?.results || [];
+    } catch (nhErr) {
+      console.error("NHTSA fetch error:", nhErr.message);
+    }
+
+    // 4. Agrupar quejas por componente para ranking
+    const componentMap = {};
+    for (const c of complaints) {
+      const comp = c.components || c.component || "DESCONOCIDO";
+      if (!componentMap[comp]) componentMap[comp] = { component: comp, count: 0, items: [] };
+      componentMap[comp].count++;
+      if (componentMap[comp].items.length < 5) {
+        componentMap[comp].items.push({
+          summary:   c.summary         || c.description || "",
+          fecha:     c.dateOfIncident  || c.incidentDate || "",
+          mileage:   c.vehicleMileage  || null,
+          injuries:  c.numberOfInjuries || 0,
+          deaths:    c.numberOfDeaths   || 0,
+        });
+      }
+    }
+    const complaintsByComponent = Object.values(componentMap)
+      .sort((a, b) => b.count - a.count)
+      .slice(0, 15);  // top 15 componentes
+
+    // 5. Guardar / actualizar cache
+    const upsertData = {
+      vehicle_key: vehicleKey,
+      marca,
+      modelo,
+      ano,
+      complaints: complaintsByComponent,
+      recalls: recalls.slice(0, 30),
+      updated_at: new Date().toISOString(),
+    };
+    await supabase.from("tsb_cache").upsert(upsertData, { onConflict: "vehicle_key" });
+
+    return res.json({
+      vehiculo: { marca, modelo, ano, vin: vehiculo.vin },
+      motivo_entrada: orden.motivo_entrada,
+      complaints: complaintsByComponent,
+      recalls: recalls.slice(0, 30),
+      cached: false,
+    });
+
+  } catch (err) {
+    console.error("📡 /ficha-tecnica error:", err.message);
+    res.status(500).json({ error: "Error interno", detalle: err.message });
+  }
+});
+
+/**
+ * POST /api/ia/analizar-falla
+ * Recibe síntoma actual + datos NHTSA y devuelve diagnóstico dirigido con causas probables.
+ * Body: { orden_id, sintoma, vehiculo, complaints, recalls }
+ */
+app.post("/api/ia/analizar-falla", async (req, res) => {
+  const { orden_id, sintoma, vehiculo, complaints = [], recalls = [] } = req.body;
+
+  const OPENAI_KEY = process.env.OPENAI_API_KEY;
+  if (!OPENAI_KEY) return res.status(500).json({ error: "IA no configurada en el servidor." });
+
+  if (!sintoma || sintoma.trim().length < 5)
+    return res.status(400).json({ error: "El síntoma es requerido." });
+
+  // Construir resumen NHTSA compacto para el prompt
+  const topQuejas = complaints.slice(0, 8).map(c =>
+    `- ${c.component} (${c.count} reportes): ${c.items?.[0]?.summary?.slice(0, 120) || ""}...`
+  ).join("\n");
+
+  const topRecalls = recalls.slice(0, 5).map(r =>
+    `- [${r.NHTSACampaignNumber || r.campaignNumber || ""}] ${r.consequence || r.summary || ""}`.slice(0, 180)
+  ).join("\n");
+
+  const vehStr = vehiculo
+    ? `${vehiculo.marca || ""} ${vehiculo.modelo || ""} ${vehiculo.ano || ""}`.trim()
+    : "vehículo desconocido";
+
+  const prompt = `Eres el asistente técnico oficial de "Sólido Auto Servicio", taller automotriz en República Dominicana.
+
+VEHÍCULO: ${vehStr}
+SÍNTOMA REPORTADO POR EL CLIENTE / TÉCNICO: "${sintoma.trim()}"
+
+DATOS REALES DE LA BASE DE DATOS NHTSA (quejas de propietarios similares en EE.UU.):
+${topQuejas || "No se encontraron quejas registradas para este vehículo."}
+
+RECALLS ACTIVOS DEL FABRICANTE:
+${topRecalls || "No hay recalls activos registrados."}
+
+Basándote en el síntoma actual y los datos históricos reales de NHTSA para este vehículo, proporciona un análisis técnico dirigido con este formato EXACTO:
+
+🔍 DIAGNÓSTICO PROBABLE:
+[Causa más probable basada en síntoma + historial NHTSA. Sé específico, no genérico.]
+
+🛠️ PASOS DE VERIFICACIÓN:
+1. [Primer punto de inspección — el más probable]
+2. [Segundo punto]
+3. [Tercer punto]
+(máx. 5 pasos)
+
+⚠️ ALERTAS DE SEGURIDAD:
+[Si hay recalls relacionados, menciónalos. Si no aplica, escribe "Ninguna alerta crítica para este síntoma."]
+
+💡 NOTAS TÉCNICAS:
+[Datos relevantes del historial NHTSA que el técnico debe conocer para este modelo específico.]
+
+Reglas: NO inventes datos. Usa SOLO la información provista. Si los datos NHTSA no aplican al síntoma, dilo claramente. Responde en español técnico automotriz. Máximo 350 palabras.`;
+
+  try {
+    const openaiRes = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type":  "application/json",
+        "Authorization": `Bearer ${OPENAI_KEY}`,
+      },
+      body: JSON.stringify({
+        model: "gpt-4o-mini",
+        messages: [{ role: "user", content: prompt }],
+        max_tokens: 600,
+        temperature: 0.3,
+      }),
+    });
+
+    if (!openaiRes.ok) {
+      const errText = await openaiRes.text();
+      throw new Error(`OpenAI error ${openaiRes.status}: ${errText}`);
+    }
+
+    const data = await openaiRes.json();
+    const respuesta = data.choices?.[0]?.message?.content?.trim() || "No pude generar un análisis.";
+
+    res.json({ respuesta, orden_id, vehiculo: vehStr });
+  } catch (err) {
+    console.error("📡 /api/ia/analizar-falla error:", err.message);
+    res.status(500).json({ error: "Error interno", detalle: err.message });
+  }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
 // ══════════════════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 4000;
