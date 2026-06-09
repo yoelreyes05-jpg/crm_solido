@@ -272,22 +272,107 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
   const secTrabSol = descripcionTrabajo
     ? `${ST("📝","Trabajo Solicitado")}<div style="background:#eff6ff;border-radius:5px;padding:5px 10px;font-size:10.5px;color:#1e3a5f;white-space:pre-wrap;line-height:1.5">${descripcionTrabajo}</div>` : "";
 
-  // ── INSPECCIÓN (compacta — solo si hay datos)
+  // ── INSPECCIÓN con diagrama SVG + fotos ──────────────────────────────────
   const secInsp = inspec ? (() => {
     const zonas = Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : [];
-    const _dLabelH: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
-    const zonasTxt = zonas.length > 0
-      ? `<div style="margin-top:4px;font-size:9.5px;color:#92400e">⚠️ Daños: ${zonas.map((z:any)=>{
-          const lab = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+
+    // Tabla de datos de zonas para el SVG
+    const ZONAS_P = [
+      { id:"frontal_centro",  cx:200, cy:45  }, { id:"frontal_izq",    cx:110, cy:65  },
+      { id:"frontal_der",     cx:290, cy:65  }, { id:"lateral_izq_f",  cx:65,  cy:130 },
+      { id:"lateral_izq_t",  cx:65,  cy:230  }, { id:"lateral_der_f",  cx:335, cy:130 },
+      { id:"lateral_der_t",  cx:335, cy:230  }, { id:"techo",          cx:200, cy:175 },
+      { id:"trasero_izq",    cx:110, cy:295  }, { id:"trasero_der",    cx:290, cy:295 },
+      { id:"trasero_centro", cx:200, cy:315  },
+    ];
+    const DCOLOR: Record<string,string> = {
+      rayon_leve:"#f59e0b", rayon_profundo:"#ef4444",
+      golpe:"#7c3aed", falta_pieza:"#1d4ed8", sin_danio:"#10b981",
+    };
+    const DLABEL: Record<string,string> = {
+      rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo",
+      golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño",
+    };
+    const getZ = (id: string) => zonas.find((z:any)=>(z.zona_id||z.zona)===id);
+
+    // SVG top-view del vehículo con marcadores
+    const svgDiagram = zonas.length > 0 ? `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 370" width="160" height="148" style="display:block;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;flex-shrink:0">
+        <rect x="130" y="80" width="140" height="200" rx="20" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+        <path d="M145 80 Q200 20 255 80 Z" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+        <path d="M145 280 Q200 340 255 280 Z" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+        <rect x="90"  y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+        <rect x="90"  y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+        <rect x="270" y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+        <rect x="270" y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+        <rect x="145" y="135" width="110" height="90" rx="5" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1.5"/>
+        ${ZONAS_P.map(z => {
+          const d = getZ(z.id);
+          if (!d) return `<circle cx="${z.cx}" cy="${z.cy}" r="7" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1" opacity="0.4"/>`;
+          const tipo = d.tipo_danio||d.tipo||"";
+          const col  = DCOLOR[tipo] || "#94a3b8";
+          const sym  = tipo==="rayon_leve"?"R":tipo==="rayon_profundo"?"R!":tipo==="golpe"?"G":tipo==="falta_pieza"?"FP":"✓";
+          return `<circle cx="${z.cx}" cy="${z.cy}" r="13" fill="${col}" stroke="white" stroke-width="2" opacity="0.9"/>
+                  <text x="${z.cx}" y="${z.cy+4}" text-anchor="middle" fill="white" font-size="8" font-weight="bold">${sym}</text>`;
+        }).join("")}
+      </svg>` : "";
+
+    // Chips de zonas
+    const chipsHtml = zonas.length > 0
+      ? `<div style="display:flex;flex-wrap:wrap;gap:4px">${zonas.map((z:any)=>{
+          const lab  = z.label||(z.zona||z.zona_id||"").replace(/_/g," ");
           const tipo = z.tipo_danio||z.tipo||"";
-          return `${lab}: ${_dLabelH[tipo]||tipo.replace(/_/g," ")}`;
-        }).join(" · ")}</div>` : "";
+          const col  = DCOLOR[tipo]||"#94a3b8";
+          const tLab = DLABEL[tipo]||tipo.replace(/_/g," ")||"—";
+          return `<span style="display:inline-flex;align-items:center;gap:3px;background:#fef9c3;border:1px solid #fde68a;color:#92400e;border-radius:4px;padding:2px 7px;font-size:9.5px;font-weight:600">
+            <span style="width:7px;height:7px;border-radius:50%;background:${col};display:inline-block"></span>${lab}: ${tLab}
+          </span>`;
+        }).join("")}</div>` : "";
+
+    // Bloque SVG + chips lado a lado
+    const danosHtml = zonas.length > 0
+      ? `<div style="margin-top:6px">
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#92400e;margin-bottom:5px">⚠️ Daños al ingreso</div>
+          <div style="display:flex;gap:10px;align-items:flex-start">
+            ${svgDiagram}
+            <div style="flex:1">${chipsHtml}</div>
+          </div>
+        </div>` : "";
+
+    // Fotos de recepción
+    const slots = inspec.fotos_slots && typeof inspec.fotos_slots === "object" ? inspec.fotos_slots : {};
+    const fotoKeys = ["frente","trasero","lateral_izq","lateral_der","interior","tablero","danos_visibles"];
+    const fotoLbls: Record<string,string> = {
+      frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der.",
+      interior:"Interior", tablero:"Tablero", danos_visibles:"Daños Visibles",
+    };
+    const fotosArr: any[] = Array.isArray(inspec.fotos) ? inspec.fotos : [];
+    const fotoImgs = [
+      ...fotoKeys.filter(k => (slots as any)[k]).map(k => ({ src:(slots as any)[k], lbl:fotoLbls[k]||k })),
+      ...fotosArr.filter((f:any)=>f.data).map((f:any)=>({ src:f.data, lbl:f.label||f.tipo||"Foto" })),
+    ];
+    const fotosHtml = fotoImgs.length > 0
+      ? `<div style="margin-top:8px">
+          <div style="font-size:9px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:5px">📸 Fotos de Recepción</div>
+          <div style="display:flex;flex-wrap:wrap;gap:6px">
+            ${fotoImgs.map(f=>`<div style="text-align:center">
+              <img src="${f.src}" style="width:120px;height:90px;object-fit:cover;border-radius:5px;border:1px solid #e2e8f0;display:block"/>
+              <div style="font-size:8px;color:#9ca3af;margin-top:2px">${f.lbl}</div>
+            </div>`).join("")}
+          </div>
+        </div>` : "";
+
     const kmComb = [
       inspec.km_entrada != null ? `KM: ${Number(inspec.km_entrada).toLocaleString()}` : "",
       inspec.nivel_combustible != null ? `Comb: ${inspec.nivel_combustible}%` : "",
       inspec.condicion_general ? `Cond: ${inspec.condicion_general}` : "",
     ].filter(Boolean).join("  ·  ");
-    return `${ST("📋","Recepción")}<div style="font-size:10px;color:#374151">${kmComb}</div>${inspec.observaciones ? `<div style="font-size:10px;color:#555;margin-top:2px">${inspec.observaciones}</div>` : ""}${zonasTxt}`;
+
+    return `${ST("📋","Recepción")}
+      <div style="font-size:10px;color:#374151">${kmComb}</div>
+      ${inspec.observaciones ? `<div style="font-size:10px;color:#555;margin-top:2px">${inspec.observaciones}</div>` : ""}
+      ${danosHtml}
+      ${fotosHtml}`;
   })() : "";
 
   // ── DIAGNÓSTICO
@@ -637,23 +722,94 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
               )}
             </div>
 
-            {Array.isArray(inspec.zonas_danio) && inspec.zonas_danio.length > 0 && (
-              <div style={{ marginBottom: 14 }}>
-                <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>⚠️ Daños al Ingreso</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {inspec.zonas_danio.map((z: any, i: number) => {
-                    const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
-                    const tipo = z.tipo_danio||z.tipo||"";
-                    const tLab = ({rayon_leve:"Rayón leve",rayon_profundo:"Rayón profundo",golpe:"Golpe",falta_pieza:"Falta pieza",sin_danio:"Sin daño"} as any)[tipo] || tipo.replace(/_/g," ");
-                    return (
-                      <span key={i} style={{ background: "#fef9c3", border: "1px solid #fde68a", color: "#92400e", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600 }}>
-                        {lab}: {tLab}
-                      </span>
-                    );
-                  })}
+            {Array.isArray(inspec.zonas_danio) && inspec.zonas_danio.length > 0 && (() => {
+              const ZONAS_H = [
+                { id:"frontal_centro",  label:"Frontal centro",       cx:200, cy:45  },
+                { id:"frontal_izq",     label:"Frontal izquierdo",    cx:110, cy:65  },
+                { id:"frontal_der",     label:"Frontal derecho",      cx:290, cy:65  },
+                { id:"lateral_izq_f",   label:"Lat. izq. frente",     cx:65,  cy:130 },
+                { id:"lateral_izq_t",   label:"Lat. izq. trasero",    cx:65,  cy:230 },
+                { id:"lateral_der_f",   label:"Lat. der. frente",     cx:335, cy:130 },
+                { id:"lateral_der_t",   label:"Lat. der. trasero",    cx:335, cy:230 },
+                { id:"techo",           label:"Techo",                cx:200, cy:175 },
+                { id:"trasero_izq",     label:"Trasero izquierdo",    cx:110, cy:295 },
+                { id:"trasero_der",     label:"Trasero derecho",      cx:290, cy:295 },
+                { id:"trasero_centro",  label:"Trasero centro",       cx:200, cy:315 },
+              ];
+              const TIPO_COLOR_H: Record<string,string> = {
+                rayon_leve:"#f59e0b", rayon_profundo:"#ef4444",
+                golpe:"#7c3aed", falta_pieza:"#1d4ed8", sin_danio:"#10b981",
+              };
+              const TIPO_LABEL_H: Record<string,string> = {
+                rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo",
+                golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño",
+              };
+              const getZona = (id: string) => inspec.zonas_danio.find((z: any) => (z.zona_id||z.zona) === id);
+              return (
+                <div style={{ marginBottom: 14 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 10 }}>⚠️ Daños al Ingreso</div>
+                  <div style={{ display: "flex", gap: 18, alignItems: "flex-start", flexWrap: "wrap" }}>
+                    {/* Diagrama SVG */}
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 370" style={{ width: 200, height: 185, border: "1px solid #e5e7eb", borderRadius: 10, background: "#f8fafc", flexShrink: 0 }}>
+                      <rect x="130" y="80" width="140" height="200" rx="20" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2"/>
+                      <path d="M145 80 Q200 20 255 80 Z" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2"/>
+                      <path d="M145 280 Q200 340 255 280 Z" fill="#e2e8f0" stroke="#94a3b8" strokeWidth="2"/>
+                      <rect x="90" y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+                      <rect x="90" y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+                      <rect x="270" y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+                      <rect x="270" y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+                      <rect x="145" y="135" width="110" height="90" rx="5" fill="#cbd5e1" stroke="#94a3b8" strokeWidth="1.5"/>
+                      {ZONAS_H.map(z => {
+                        const d = getZona(z.id);
+                        if (!d) return <circle key={z.id} cx={z.cx} cy={z.cy} r={7} fill="#e2e8f0" stroke="#cbd5e1" strokeWidth={1} opacity={0.4}/>;
+                        const tipo = d.tipo_danio||d.tipo||"";
+                        const col = TIPO_COLOR_H[tipo] || "#94a3b8";
+                        return (
+                          <g key={z.id}>
+                            <circle cx={z.cx} cy={z.cy} r={13} fill={col} stroke="white" strokeWidth={2} opacity={0.9}/>
+                            <text x={z.cx} y={z.cy+4} textAnchor="middle" fill="white" fontSize={8} fontWeight="bold">
+                              {tipo==="rayon_leve"?"R":tipo==="rayon_profundo"?"R!":tipo==="golpe"?"G":tipo==="falta_pieza"?"FP":"✓"}
+                            </text>
+                          </g>
+                        );
+                      })}
+                    </svg>
+                    {/* Chips de detalle */}
+                    <div style={{ flex: 1, minWidth: 160 }}>
+                      {/* Leyenda */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 8 }}>
+                        {[
+                          { tipo:"rayon_leve", col:"#f59e0b", sym:"R", label:"Rayón leve" },
+                          { tipo:"rayon_profundo", col:"#ef4444", sym:"R!", label:"Rayón profundo" },
+                          { tipo:"golpe", col:"#7c3aed", sym:"G", label:"Golpe" },
+                          { tipo:"falta_pieza", col:"#1d4ed8", sym:"FP", label:"Falta pieza" },
+                        ].filter(l => inspec.zonas_danio.some((z: any) => (z.tipo_danio||z.tipo) === l.tipo)).map(l => (
+                          <span key={l.tipo} style={{ display:"inline-flex", alignItems:"center", gap:4, fontSize:11, color:"#555" }}>
+                            <span style={{ width:16, height:16, borderRadius:"50%", background:l.col, color:"#fff", fontSize:8, fontWeight:700, display:"inline-flex", alignItems:"center", justifyContent:"center" }}>{l.sym}</span>
+                            {l.label}
+                          </span>
+                        ))}
+                      </div>
+                      {/* Lista de zonas */}
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                        {inspec.zonas_danio.map((z: any, i: number) => {
+                          const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+                          const tipo = z.tipo_danio||z.tipo||"";
+                          const col  = TIPO_COLOR_H[tipo] || "#94a3b8";
+                          const tLab = TIPO_LABEL_H[tipo] || tipo.replace(/_/g," ");
+                          return (
+                            <span key={i} style={{ display:"inline-flex", alignItems:"center", gap:5, background:"#fef9c3", border:"1px solid #fde68a", color:"#92400e", borderRadius:6, padding:"4px 10px", fontSize:12, fontWeight:600 }}>
+                              <span style={{ width:8, height:8, borderRadius:"50%", background:col, display:"inline-block", flexShrink:0 }}/>
+                              {lab}: {tLab}
+                            </span>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {(() => {
               const items: [string, string][] = [

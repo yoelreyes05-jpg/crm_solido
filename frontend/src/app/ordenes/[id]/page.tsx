@@ -374,13 +374,22 @@ function imprimirOrdenCompleta(
 
   const inspFotos = (() => {
     const slots = inspeccion?.fotos_slots;
-    if (!slots) return "";
-    const labels: Record<string,string> = { frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der." };
-    const imgs = ["frente","trasero","lateral_izq","lateral_der"]
-      .filter(k => slots[k])
-      .map(k => `<div style="text-align:center"><img src="${slots[k]}" style="width:160px;height:120px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0"/><div style="font-size:10px;color:#6b7280;margin-top:3px">${labels[k]}</div></div>`)
-      .join("");
-    return imgs ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:10px">${imgs}</div>` : "";
+    const fotoLegacy: any[] = Array.isArray(inspeccion?.fotos) ? inspeccion.fotos : [];
+    const labels: Record<string,string> = {
+      frente:"Frente", trasero:"Trasero", lateral_izq:"Lat. Izq.", lateral_der:"Lat. Der.",
+      interior:"Interior", tablero:"Tablero", danos_visibles:"Daños Visibles",
+    };
+    const slotImgs = slots
+      ? ["frente","trasero","lateral_izq","lateral_der","interior","tablero","danos_visibles"]
+          .filter(k => (slots as any)[k])
+          .map(k => ({ src:(slots as any)[k], lbl:labels[k]||k }))
+      : [];
+    const legacyImgs = fotoLegacy.filter((f:any)=>f.data).map((f:any)=>({ src:f.data, lbl:f.label||f.tipo||"Foto" }));
+    const allImgs = [...slotImgs, ...legacyImgs];
+    const imgs = allImgs.map(f =>
+      `<div style="text-align:center"><img src="${f.src}" style="width:140px;height:105px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0"/><div style="font-size:10px;color:#6b7280;margin-top:3px">${f.lbl}</div></div>`
+    ).join("");
+    return imgs ? `<div style="margin-top:10px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px">📸 Fotos de Recepción</div><div style="display:flex;gap:10px;flex-wrap:wrap">${imgs}</div></div>` : "";
   })();
 
   const checklist = (() => {
