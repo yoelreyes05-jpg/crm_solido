@@ -350,10 +350,27 @@ function imprimirOrdenCompleta(
   const vColor  = vehiculo?.color  || orden.vehiculo_color  || "—";
   const vVin    = vehiculo?.vin    || orden.vehiculo_vin    || null;
 
-  const inspZonas = (inspeccion?.zonas_danio || []).map((z: any) =>
-    `<span style="background:#fef9c3;border:1px solid #fde68a;color:#92400e;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600;margin:2px">
-      ${(z.zona||"").replace(/_/g," ")}: ${z.tipo?.replace(/_/g," ")||""}
-    </span>`).join("");
+  // Normalizar zonas_danio: soporta ambos formatos
+  //   recepcion  → { zona_id, tipo_danio, label }
+  //   inspeccion → { zona,    tipo             }
+  const _danioColorMap: Record<string,string> = {
+    rayon_leve:"#f59e0b", rayon_profundo:"#ef4444",
+    golpe:"#7c3aed", falta_pieza:"#1d4ed8", sin_danio:"#10b981",
+  };
+  const _danioLabelMap: Record<string,string> = {
+    rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo",
+    golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño",
+  };
+  const inspZonas = (inspeccion?.zonas_danio || []).map((z: any) => {
+    const zonaLabel = z.label || (z.zona || z.zona_id || "").replace(/_/g," ");
+    const tipo      = z.tipo_danio || z.tipo || "";
+    const tipoLabel = _danioLabelMap[tipo] || tipo.replace(/_/g," ") || "—";
+    const color     = _danioColorMap[tipo] || "#94a3b8";
+    return `<span style="display:inline-flex;align-items:center;gap:4px;background:#fef9c3;border:1px solid #fde68a;color:#92400e;border-radius:5px;padding:2px 8px;font-size:11px;font-weight:600;margin:2px">
+      <span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;flex-shrink:0"></span>
+      ${zonaLabel}: ${tipoLabel}
+    </span>`;
+  }).join("");
 
   const inspFotos = (() => {
     const slots = inspeccion?.fotos_slots;
@@ -382,6 +399,54 @@ function imprimirOrdenCompleta(
     </div>`;
   })();
 
+  // ── Diagrama SVG de daños para el print ──────────────────────────────────
+  // Mismas coordenadas que ZONAS_DANIO_MAP / ZONAS en recepcion e inspeccion
+  const _ZONAS_PRINT = [
+    { id:"frontal_centro",  label:"Frontal centro",       cx:200, cy:45  },
+    { id:"frontal_izq",     label:"Frontal izquierdo",    cx:110, cy:65  },
+    { id:"frontal_der",     label:"Frontal derecho",      cx:290, cy:65  },
+    { id:"lateral_izq_f",   label:"Lat. izq. frente",     cx:65,  cy:130 },
+    { id:"lateral_izq_t",   label:"Lat. izq. trasero",    cx:65,  cy:230 },
+    { id:"lateral_der_f",   label:"Lat. der. frente",     cx:335, cy:130 },
+    { id:"lateral_der_t",   label:"Lat. der. trasero",    cx:335, cy:230 },
+    { id:"techo",           label:"Techo",                cx:200, cy:175 },
+    { id:"trasero_izq",     label:"Trasero izquierdo",    cx:110, cy:295 },
+    { id:"trasero_der",     label:"Trasero derecho",      cx:290, cy:295 },
+    { id:"trasero_centro",  label:"Trasero centro",       cx:200, cy:315 },
+  ];
+  const _zonasData = (inspeccion?.zonas_danio || []) as any[];
+  const getDanioById = (id: string) => _zonasData.find((z: any) => (z.zona_id || z.zona) === id);
+
+  const inspSvgDiagram = _zonasData.length > 0 ? `
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 370" width="200" height="185" style="display:block;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc">
+      <!-- Silueta del vehículo (top-view) -->
+      <!-- Cuerpo principal -->
+      <rect x="130" y="80" width="140" height="200" rx="20" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+      <!-- Capó frontal -->
+      <path d="M145 80 Q200 20 255 80 Z" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+      <!-- Maletero trasero -->
+      <path d="M145 280 Q200 340 255 280 Z" fill="#e2e8f0" stroke="#94a3b8" stroke-width="2"/>
+      <!-- Ruedas izq -->
+      <rect x="90" y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+      <rect x="90" y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+      <!-- Ruedas der -->
+      <rect x="270" y="110" width="40" height="50" rx="5" fill="#94a3b8"/>
+      <rect x="270" y="200" width="40" height="50" rx="5" fill="#94a3b8"/>
+      <!-- Techo / habitáculo -->
+      <rect x="145" y="135" width="110" height="90" rx="5" fill="#cbd5e1" stroke="#94a3b8" stroke-width="1.5"/>
+      <!-- Marcadores de daño -->
+      ${_ZONAS_PRINT.map(z => {
+        const d = getDanioById(z.id);
+        if (!d) return `<circle cx="${z.cx}" cy="${z.cy}" r="8" fill="#e2e8f0" stroke="#cbd5e1" stroke-width="1" opacity="0.5"/>`;
+        const tipo = d.tipo_danio || d.tipo || "";
+        const col = _danioColorMap[tipo] || "#94a3b8";
+        const sym = tipo === "rayon_leve" ? "R" : tipo === "rayon_profundo" ? "R!" : tipo === "golpe" ? "G" : tipo === "falta_pieza" ? "FP" : "✓";
+        return `<circle cx="${z.cx}" cy="${z.cy}" r="12" fill="${col}" stroke="white" stroke-width="2" opacity="0.9"/>
+                <text x="${z.cx}" y="${z.cy+4}" text-anchor="middle" fill="white" font-size="8" font-weight="bold">${sym}</text>`;
+      }).join("")}
+    </svg>
+  ` : "";
+
   const inspHtml = inspeccion ? `
     <div style="margin-bottom:16px">
       <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid #10b981">
@@ -394,7 +459,15 @@ function imprimirOrdenCompleta(
           <td style="padding:6px 12px;font-size:13px"><strong>Condición:</strong> ${inspeccion.condicion_general||"—"}</td>
         </tr>
       </table>
-      ${inspZonas ? `<div style="margin-top:8px"><div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:4px">DAÑOS AL INGRESO:</div>${inspZonas}</div>` : ""}
+      ${_zonasData.length > 0 ? `
+        <div style="margin-top:10px;display:flex;gap:16px;align-items:flex-start;flex-wrap:wrap">
+          ${inspSvgDiagram}
+          <div style="flex:1;min-width:160px">
+            <div style="font-size:11px;font-weight:700;color:#6b7280;margin-bottom:6px;text-transform:uppercase;letter-spacing:.5px">DAÑOS AL INGRESO</div>
+            <div style="display:flex;flex-wrap:wrap;gap:4px">${inspZonas}</div>
+          </div>
+        </div>
+      ` : `<div style="margin-top:6px;font-size:11px;color:#9ca3af">Sin daños marcados al ingreso.</div>`}
       ${checklist}
       ${inspeccion.observaciones?`<div style="margin-top:8px;font-size:13px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px;padding:8px 12px">📝 ${inspeccion.observaciones}</div>`:""}
       ${inspFotos}

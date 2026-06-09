@@ -409,14 +409,20 @@ export default function CotizacionPage() {
                 <div style={{ marginBottom: 12 }}>
                   <div style={{ fontSize: 12, color: "#6b7280", fontWeight: 700, marginBottom: 6 }}>DAÑOS OBSERVADOS AL INGRESO</div>
                   <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                    {inspeccion.zonas_danio.map((z, i) => (
-                      <span key={i} style={{
-                        background: "#fef9c3", color: "#92400e", border: "1px solid #fde68a",
-                        borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 600,
-                      }}>
-                        {z.zona.replace(/_/g, " ")}: {TIPO_LABEL[z.tipo] || z.tipo}
-                      </span>
-                    ))}
+                    {inspeccion.zonas_danio.map((z: any, i) => {
+                      // Soporta ambos formatos: recepcion {zona_id, tipo_danio, label} e inspeccion {zona, tipo}
+                      const zonaLabel = z.label || (z.zona || z.zona_id || "").replace(/_/g, " ");
+                      const tipo      = z.tipo_danio || z.tipo || "";
+                      const tipoLabel = TIPO_LABEL[tipo] || tipo.replace(/_/g, " ") || "—";
+                      return (
+                        <span key={i} style={{
+                          background: "#fef9c3", color: "#92400e", border: "1px solid #fde68a",
+                          borderRadius: 6, padding: "3px 10px", fontSize: 12, fontWeight: 600,
+                        }}>
+                          {zonaLabel}: {tipoLabel}
+                        </span>
+                      );
+                    })}
                   </div>
                 </div>
               )}

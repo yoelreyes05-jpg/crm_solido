@@ -144,7 +144,11 @@ export default function InspeccionPage() {
             setKmEntrada(ins.km_entrada?.toString() || "");
             setCombustible(ins.nivel_combustible ?? 50);
             setCondicion(ins.condicion_general || "Buena");
-            setZonas(ins.zonas_danio || []);
+            // Normalizar: recepcion guarda { zona_id, tipo_danio, label }, inspeccion usa { zona, tipo }
+            setZonas((ins.zonas_danio || []).map((z: any): ZonaDanio => ({
+              zona: z.zona || z.zona_id || "",
+              tipo: z.tipo_danio || z.tipo || "",
+            })));
             setRayones(ins.rayones || "");
             setGolpes(ins.golpes || "");
             setVidrios(ins.estado_vidrios || "");

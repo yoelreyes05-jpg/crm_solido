@@ -275,8 +275,13 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
   // ── INSPECCIÓN (compacta — solo si hay datos)
   const secInsp = inspec ? (() => {
     const zonas = Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : [];
+    const _dLabelH: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
     const zonasTxt = zonas.length > 0
-      ? `<div style="margin-top:4px;font-size:9.5px;color:#92400e">⚠️ Daños: ${zonas.map((z:any)=>`${(z.zona||"").replace(/_/g," ")}: ${(z.tipo||"").replace(/_/g," ")}`).join(" · ")}</div>` : "";
+      ? `<div style="margin-top:4px;font-size:9.5px;color:#92400e">⚠️ Daños: ${zonas.map((z:any)=>{
+          const lab = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+          const tipo = z.tipo_danio||z.tipo||"";
+          return `${lab}: ${_dLabelH[tipo]||tipo.replace(/_/g," ")}`;
+        }).join(" · ")}</div>` : "";
     const kmComb = [
       inspec.km_entrada != null ? `KM: ${Number(inspec.km_entrada).toLocaleString()}` : "",
       inspec.nivel_combustible != null ? `Comb: ${inspec.nivel_combustible}%` : "",
@@ -636,11 +641,16 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
               <div style={{ marginBottom: 14 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#92400e", marginBottom: 8 }}>⚠️ Daños al Ingreso</div>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
-                  {inspec.zonas_danio.map((z: any, i: number) => (
-                    <span key={i} style={{ background: "#fef9c3", border: "1px solid #fde68a", color: "#92400e", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600 }}>
-                      {(z.zona || "").replace(/_/g, " ")}: {(z.tipo || "").replace(/_/g, " ")}
-                    </span>
-                  ))}
+                  {inspec.zonas_danio.map((z: any, i: number) => {
+                    const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+                    const tipo = z.tipo_danio||z.tipo||"";
+                    const tLab = ({rayon_leve:"Rayón leve",rayon_profundo:"Rayón profundo",golpe:"Golpe",falta_pieza:"Falta pieza",sin_danio:"Sin daño"} as any)[tipo] || tipo.replace(/_/g," ");
+                    return (
+                      <span key={i} style={{ background: "#fef9c3", border: "1px solid #fde68a", color: "#92400e", borderRadius: 6, padding: "4px 10px", fontSize: 12, fontWeight: 600 }}>
+                        {lab}: {tLab}
+                      </span>
+                    );
+                  })}
                 </div>
               </div>
             )}

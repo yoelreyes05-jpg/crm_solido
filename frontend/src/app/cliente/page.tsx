@@ -294,7 +294,12 @@ ${inspec ? `
   ${inspec.zonas_danio && inspec.zonas_danio.length > 0 ? `
     <div style="margin-bottom:10px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:5px">Zonas con daño</div>
-      <div>${(Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : []).map((z: string) => `<span class="chip">${z}</span>`).join("")}</div>
+      <div>${(Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : []).map((z: any) => {
+        const _tl: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
+        const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+        const tipo = z.tipo_danio||z.tipo||"";
+        return `<span class="chip">${lab}: ${_tl[tipo]||tipo.replace(/_/g," ")||"—"}</span>`;
+      }).join("")}</div>
     </div>` : ""}
   ${inspec.kilometraje ? `<div class="row"><span class="label">Kilometraje</span><span>${Number(inspec.kilometraje).toLocaleString()} km</span></div>` : ""}
   ${inspec.combustible ? `<div class="row"><span class="label">Combustible</span><span>${inspec.combustible}%</span></div>` : ""}
@@ -1607,11 +1612,17 @@ export default function ClienteApp() {
                                 <div style={{ marginBottom:10 }}>
                                   <div style={{ fontSize:10, color:"#fb923c", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>⚠️ Zonas con Daño</div>
                                   <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                                    {zonas.map((z: any, i: number) => (
-                                      <span key={i} style={{ fontSize:11, padding:"3px 10px", background:"rgba(249,115,22,0.1)", color:"#fb923c", border:"1px solid rgba(249,115,22,0.2)", borderRadius:20, fontWeight:600 }}>
-                                        📍 {(z.zona||"").replace(/_/g," ")}{z.tipo ? ` — ${z.tipo}` : ""}
-                                      </span>
-                                    ))}
+                                    {zonas.map((z: any, i: number) => {
+                                      const _tl: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
+                                      const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+                                      const tipo = z.tipo_danio||z.tipo||"";
+                                      const tLab = _tl[tipo]||tipo.replace(/_/g," ");
+                                      return (
+                                        <span key={i} style={{ fontSize:11, padding:"3px 10px", background:"rgba(249,115,22,0.1)", color:"#fb923c", border:"1px solid rgba(249,115,22,0.2)", borderRadius:20, fontWeight:600 }}>
+                                          📍 {lab}{tLab ? ` — ${tLab}` : ""}
+                                        </span>
+                                      );
+                                    })}
                                   </div>
                                 </div>
                               )}
