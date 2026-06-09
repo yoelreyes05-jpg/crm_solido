@@ -101,6 +101,7 @@ export default function TallerPage() {
   const router = useRouter();
   const [ordenes,       setOrdenes]       = useState<Orden[]>([]);
   const [diagMap,       setDiagMap]       = useState<Record<number, DiagInfo>>({});
+  const [facturaMap,    setFacturaMap]    = useState<Record<number, boolean>>({}); // orden_id → tiene factura activa
   const [loading,       setLoading]       = useState(true);
   const [error,         setError]         = useState("");
   const [lastUpdate,    setLastUpdate]    = useState(new Date());
@@ -139,14 +140,17 @@ export default function TallerPage() {
         fetch(`${API}/ordenes`, { cache: "no-store" }),
         fetch(`${API}/diagnosticos`, { cache: "no-store" }),
       ]);
+      let ordenesCargadas: Orden[] = [];
       if (rOrdenes.ok) {
         const data = await rOrdenes.json();
-        setOrdenes(Array.isArray(data) ? data : []);
+        ordenesCargadas = Array.isArray(data) ? data : [];
+        setOrdenes(ordenesCargadas);
         setLastUpdate(new Date());
         setError("");
       } else {
         throw new Error(`Error ${rOrdenes.status}`);
       }
+
       if (rDiag.ok) {
         const diags: DiagInfo[] = await rDiag.json();
         const map: Record<number, DiagInfo> = {};
@@ -154,6 +158,25 @@ export default function TallerPage() {
           if (d.orden_id) map[d.orden_id] = d;
         }
         setDiagMap(map);
+      }
+
+      // Cargar facturas de órdenes LISTO para validar pago antes de entregar
+      const listasIds = ordenesCargadas.filter(o => o.estado === "LISTO").map(o => o.id);
+      if (listasIds.length > 0) {
+        const facResults = await Promise.all(
+          listasIds.map(oid =>
+            fetch(`${API}/facturas?orden_id=${oid}`, { cache: "no-store" })
+              .then(r => r.ok ? r.json() : []).catch(() => [])
+          )
+        );
+        const fMap: Record<number, boolean> = {};
+        listasIds.forEach((oid, i) => {
+          const arr = Array.isArray(facResults[i]) ? facResults[i] : [];
+          fMap[oid] = arr.some((f: any) => f.estado !== "CANCELADA");
+        });
+        setFacturaMap(fMap);
+      } else {
+        setFacturaMap({});
       }
     } catch (e: any) {
       setError(e.message || "Error de conexión");
@@ -170,6 +193,12 @@ export default function TallerPage() {
 
   // ── Acciones de flujo ─────────────────────────────────────────────────────
   async function ejecutarAccion(ordenId: number, accion: "aprobar"|"rechazar"|"calidad"|"entregar") {
+    // Bloquear entrega si no hay factura pagada
+    if (accion === "entregar" && !facturaMap[ordenId]) {
+      showToast("⚠️ El cliente no ha pagado. Registre la factura antes de entregar.", "err");
+      setConfirmId(null); setConfirmAction(null);
+      return;
+    }
     setActionLoading(ordenId);
     try {
       const endpoints: Record<string, string> = {
@@ -424,13 +453,28 @@ export default function TallerPage() {
           {/* Listo → Entregar + WhatsApp aviso */}
           {orden.estado === "LISTO" && !isConfirming && (
             <>
-              {puedeEntregar && (
-                <button onClick={() => { setConfirmId(orden.id); setConfirmAction("entregar"); }} disabled={isLoading}
-                  style={{ background: C.green, color: "#fff", border: "none", borderRadius: 7,
-                    padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
-                  🏁 Entregar al Cliente
-                </button>
-              )}
+              {puedeEntregar && (() => {
+                const tienePago = facturaMap[orden.id] === true;
+                return tienePago ? (
+                  <button onClick={() => { setConfirmId(orden.id); setConfirmAction("entregar"); }} disabled={isLoading}
+                    style={{ background: C.green, color: "#fff", border: "none", borderRadius: 7,
+                      padding: "7px 13px", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>
+                    🏁 Entregar al Cliente
+                  </button>
+                ) : (
+                  <div title="El cliente debe pagar la factura antes de retirar el vehículo"
+                    style={{ display:"flex", flexDirection:"column", gap:2 }}>
+                    <button disabled
+                      style={{ background: "#9ca3af", color: "#fff", border: "none", borderRadius: 7,
+                        padding: "7px 13px", cursor: "not-allowed", fontSize: 12, fontWeight: 700, opacity: 0.7 }}>
+                      🚫 Pago Pendiente
+                    </button>
+                    <span style={{ fontSize: 10, color: "#dc2626", fontWeight: 600, textAlign:"center" }}>
+                      Sin factura pagada
+                    </span>
+                  </div>
+                );
+              })()}
               {orden.cliente_telefono && (
                 <a
                   href={`https://wa.me/${(() => { const d = (orden.cliente_telefono||"").replace(/\D/g,""); return d.startsWith("1") ? d : "1"+d; })()}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre}, le informamos que su ${orden.vehiculo_marca||""} ${orden.vehiculo_modelo||""} (placa ${orden.vehiculo_placa||""}) ya está listo para retirar en Sólido Auto Servicio.${monto > 0 ? ` Total a pagar: ${fmtDinero(monto)}.` : ""} ¡Le esperamos! 🔧`)}`}
