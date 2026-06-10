@@ -868,7 +868,14 @@ export default function OrdenDetallePage() {
       });
       const json = await res.json();
       if (json.error) throw new Error(json.error);
-      setMsg({ tipo:"ok", texto: json.mensaje || "Acción ejecutada correctamente." });
+      let texto = json.mensaje || "Acción ejecutada correctamente.";
+      if (Array.isArray(json.planes_mantenimiento) && json.planes_mantenimiento.length > 0) {
+        const lista = json.planes_mantenimiento
+          .map((p: any) => `${p.descripcion} (próx: ${new Date(p.proximo_fecha + "T12:00:00").toLocaleDateString("es-DO")})`)
+          .join(", ");
+        texto += ` · 🔧 Mantenimiento programado: ${lista}`;
+      }
+      setMsg({ tipo:"ok", texto });
       setModalAccion(null);
       setMotivoModal("");
       await cargar();

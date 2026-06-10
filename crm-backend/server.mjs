@@ -4357,31 +4357,45 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
 
 // Intervalos por defecto según tipo de servicio
 const INTERVALOS_MANT = {
-  CAMBIO_ACEITE:   { dias: 90,  km: 5000  },
+  CAMBIO_ACEITE:   { dias: 90,  km: 5000  },   // 3 meses — estándar RD
   FILTROS:         { dias: 180, km: 10000 },
-  FRENOS:          { dias: 365, km: 20000 },
-  CORREAS:         { dias: 730, km: 40000 },
+  FRENOS:          { dias: 240, km: 15000 },   // 8 meses
+  CORREAS:         { dias: 730, km: 40000 },   // 24 meses (correa de tiempo)
   BUJIAS:          { dias: 365, km: 20000 },
   ALINEACION:      { dias: 180, km: null  },
   TRANSMISION:     { dias: 365, km: 40000 },
   AC:              { dias: 365, km: null  },
   SUSPENSION:      { dias: 365, km: 20000 },
+  GOMAS:           { dias: 365, km: 40000 },   // rotación/revisión anual
+  BATERIA:         { dias: 540, km: null  },   // ~18 meses (calor RD acorta vida útil)
+  REFRIGERANTE:    { dias: 365, km: 20000 },
   DIAGNOSTICO:     { dias: 180, km: null  },
   OTRO:            { dias: 180, km: null  },
+};
+
+const TIPO_MANT_LABEL = {
+  CAMBIO_ACEITE: "Cambio de aceite", FILTROS: "Filtros", FRENOS: "Frenos",
+  CORREAS: "Correa de tiempo", BUJIAS: "Bujías", ALINEACION: "Alineación y balanceo",
+  TRANSMISION: "Transmisión", AC: "Aire acondicionado", SUSPENSION: "Suspensión",
+  GOMAS: "Gomas / Neumáticos", BATERIA: "Batería", REFRIGERANTE: "Refrigerante / Radiador",
+  DIAGNOSTICO: "Revisión general", OTRO: "Otro",
 };
 
 // Normaliza tipo_servicio del diagnóstico al tipo de mantenimiento
 function normalizarTipoMantenimiento(tipoServicio) {
   const t = (tipoServicio || "").toUpperCase();
+  if (t.includes("TRANSMIS") || t.includes("CAJA"))  return "TRANSMISION"; // antes que ACEITE (aceite de transmisión)
   if (t.includes("ACEITE"))       return "CAMBIO_ACEITE";
   if (t.includes("FILTRO"))       return "FILTROS";
-  if (t.includes("FRENO"))        return "FRENOS";
-  if (t.includes("CORREA"))       return "CORREAS";
-  if (t.includes("BUJIA") || t.includes("BUJÍAS")) return "BUJIAS";
-  if (t.includes("ALINEAC"))      return "ALINEACION";
-  if (t.includes("TRANSMIS"))     return "TRANSMISION";
-  if (t.includes("AIRE") || t.includes("A/C") || t.includes("AC")) return "AC";
-  if (t.includes("SUSPENSION") || t.includes("SUSPENSIÓN")) return "SUSPENSION";
+  if (t.includes("FRENO") || t.includes("PASTILLA") || t.includes("BANDA")) return "FRENOS";
+  if (t.includes("CORREA") || t.includes("TIMING"))  return "CORREAS";
+  if (t.includes("BUJIA") || t.includes("BUJÍA"))    return "BUJIAS";
+  if (t.includes("ALINEAC") || t.includes("BALANCE")) return "ALINEACION";
+  if (t.includes("GOMA") || t.includes("LLANTA") || t.includes("NEUMAT") || t.includes("NEUMÁT")) return "GOMAS";
+  if (t.includes("BATERIA") || t.includes("BATERÍA")) return "BATERIA";
+  if (t.includes("REFRIGER") || t.includes("COOLANT") || t.includes("RADIADOR") || t.includes("ANTICONGELANTE")) return "REFRIGERANTE";
+  if (t.includes("AIRE") || /\bA\/?C\b/.test(t))     return "AC";
+  if (t.includes("SUSPENSION") || t.includes("SUSPENSIÓN") || t.includes("AMORTIGUA") || t.includes("TREN DELANTERO")) return "SUSPENSION";
   if (t.includes("DIAGN"))        return "DIAGNOSTICO";
   return "OTRO";
 }
@@ -4633,6 +4647,118 @@ async function crearMantenimientoDesdeDiagnostico(diagId) {
     }
   } catch (err) {
     console.error("❌ crearMantenimientoDesdeDiagnostico:", err.message);
+  }
+}
+
+// ── Crea/actualiza TODOS los planes de mantenimiento al entregar una orden ──
+// Detecta cada servicio realizado desde: items de factura (tipo "servicio"),
+// trabajos_realizados_items y tipo_servicio del diagnóstico. Un plan por tipo.
+async function crearPlanesDesdeOrden(ordenId) {
+  try {
+    const { data: orden } = await supabase
+      .from("ordenes_trabajo")
+      .select("id, vehiculo_id, cliente_id")
+      .eq("id", ordenId).single();
+    if (!orden?.vehiculo_id) return [];
+
+    // 1. Recolectar descripciones de servicios realizados
+    const textos = [];
+
+    const { data: diag } = await supabase
+      .from("diagnosticos")
+      .select("id, tipo_servicio, trabajos_realizados_items")
+      .eq("orden_id", ordenId)
+      .order("created_at", { ascending: false }).limit(1).maybeSingle();
+
+    if (diag?.tipo_servicio) textos.push(diag.tipo_servicio);
+    let trabajos = diag?.trabajos_realizados_items;
+    if (typeof trabajos === "string") { try { trabajos = JSON.parse(trabajos); } catch { trabajos = []; } }
+    if (Array.isArray(trabajos)) {
+      for (const t of trabajos) {
+        const txt = t?.nombre || t?.descripcion || t?.trabajo || (typeof t === "string" ? t : "");
+        if (txt) textos.push(txt);
+      }
+    }
+
+    const { data: factura } = await supabase
+      .from("facturas")
+      .select("id")
+      .eq("orden_id", ordenId)
+      .neq("estado", "ANULADA")
+      .order("id", { ascending: false }).limit(1).maybeSingle();
+    if (factura?.id) {
+      const { data: items } = await supabase
+        .from("factura_items")
+        .select("tipo, descripcion")
+        .eq("factura_id", factura.id)
+        .eq("tipo", "servicio");
+      for (const it of items || []) if (it.descripcion) textos.push(it.descripcion);
+    }
+
+    // 2. Normalizar a tipos únicos (ignorar genéricos si hay específicos)
+    const tipos = new Map(); // tipoKey -> descripción original
+    for (const txt of textos) {
+      const key = normalizarTipoMantenimiento(txt);
+      if (!tipos.has(key)) tipos.set(key, txt);
+    }
+    tipos.delete("DIAGNOSTICO"); // un diagnóstico no genera plan recurrente
+    if (tipos.size > 1) tipos.delete("OTRO"); // si hay específicos, descartar genérico
+    if (tipos.size === 0) return [];
+
+    // 3. Crear o actualizar un plan por tipo detectado
+    const hoy = new Date();
+    const resultados = [];
+    for (const [tipoKey, descOriginal] of tipos) {
+      const intervalo = INTERVALOS_MANT[tipoKey] || INTERVALOS_MANT.OTRO;
+      const proximaFecha = new Date(hoy);
+      proximaFecha.setDate(proximaFecha.getDate() + intervalo.dias);
+
+      const payload = {
+        vehiculo_id:           orden.vehiculo_id,
+        cliente_id:            orden.cliente_id || null,
+        tipo_servicio:         tipoKey,
+        descripcion:           TIPO_MANT_LABEL[tipoKey] || descOriginal,
+        intervalo_dias:        intervalo.dias,
+        intervalo_km:          intervalo.km || null,
+        ultimo_servicio_fecha: hoy.toISOString().slice(0, 10),
+        proximo_fecha:         proximaFecha.toISOString().slice(0, 10),
+        estado:                "ACTIVO",
+        notificado:            false,
+        diagnostico_origen_id: diag?.id || null,
+        updated_at:            new Date().toISOString(),
+      };
+
+      const { data: existente } = await supabase
+        .from("mantenimiento_preventivo")
+        .select("id")
+        .eq("vehiculo_id", orden.vehiculo_id)
+        .eq("tipo_servicio", tipoKey)
+        .neq("estado", "CANCELADO")
+        .maybeSingle();
+
+      if (existente) {
+        await supabase.from("mantenimiento_preventivo").update(payload).eq("id", existente.id);
+        resultados.push({ tipo: tipoKey, descripcion: payload.descripcion, proximo_fecha: payload.proximo_fecha, accion: "actualizado" });
+      } else {
+        await supabase.from("mantenimiento_preventivo").insert([payload]);
+        resultados.push({ tipo: tipoKey, descripcion: payload.descripcion, proximo_fecha: payload.proximo_fecha, accion: "creado" });
+      }
+    }
+    // 4. Limpieza: si se crearon planes específicos, cancelar el plan genérico "OTRO"
+    //    que el flujo de facturación pudo haber creado para este mismo vehículo
+    if (resultados.some(r => r.tipo !== "OTRO")) {
+      await supabase.from("mantenimiento_preventivo")
+        .update({ estado: "CANCELADO", updated_at: new Date().toISOString() })
+        .eq("vehiculo_id", orden.vehiculo_id)
+        .eq("tipo_servicio", "OTRO")
+        .neq("estado", "CANCELADO")
+        .then(r => r).catch(() => {});
+    }
+    console.log(`🔧 Orden #${ordenId} entregada — ${resultados.length} plan(es) de mantenimiento: ${resultados.map(r => r.tipo).join(", ")}`);
+    return resultados;
+  } catch (err) {
+    console.error("❌ crearPlanesDesdeOrden:", err.message);
+    return [];
   }
 }
 
@@ -6038,11 +6164,16 @@ app.post("/ordenes/:id/entregar", async (req, res) => {
       .from("diagnosticos").select("id").eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
     if (diag?.id) {
       crearHistorialDesdeDiagnostico(diag.id).catch(console.error);
-      crearMantenimientoDesdeDiagnostico(diag.id).catch(console.error);
     }
+    // 🔧 Crear/actualizar planes de mantenimiento según los servicios realizados
+    const planes = await crearPlanesDesdeOrden(Number(id));
     // Aprender compatibilidades de repuestos usados en esta orden
     registrarCompatibilidadesDeOrden(Number(id)).catch(console.error);
-    res.json({ ok: true, mensaje: "Vehículo ENTREGADO — orden cerrada" });
+    res.json({
+      ok: true,
+      mensaje: "Vehículo ENTREGADO — orden cerrada",
+      planes_mantenimiento: planes,
+    });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
