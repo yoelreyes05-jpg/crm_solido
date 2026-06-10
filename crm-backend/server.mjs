@@ -130,9 +130,18 @@ app.get("/clientes/:id/historial", async (req, res) => {
   const { data: cliente } = await supabase.from("clientes").select("*").eq("id", id).single();
   const { data: vehiculos } = await supabase.from("vehiculos").select("*").eq("cliente_id", id);
   const { data: ordenes } = await supabase.from("ordenes_trabajo").select("*").eq("cliente_id", id).order("created_at", { ascending: false });
-  const { data: ventas } = await supabase.from("ventas").select("*").eq("customer_name", cliente?.nombre).order("created_at", { ascending: false });
+  const { data: facturas } = await supabase.from("facturas").select("*").eq("cliente_id", id).order("created_at", { ascending: false });
   const { data: diagnosticos } = await supabase.from("diagnosticos").select("*").eq("cliente_id", id).order("created_at", { ascending: false });
-  res.json({ cliente, vehiculos: vehiculos || [], ordenes: ordenes || [], ventas: ventas || [], diagnosticos: diagnosticos || [] });
+
+  // Enriquecer el total de cada orden con el de su factura asociada (si ordenes_trabajo.total está vacío)
+  const facturasByOrden = {};
+  (facturas || []).forEach(f => { if (f.orden_id) facturasByOrden[f.orden_id] = f; });
+  const ordenesConTotal = (ordenes || []).map(o => ({
+    ...o,
+    total: Number(o.total) || Number(facturasByOrden[o.id]?.total) || 0,
+  }));
+
+  res.json({ cliente, vehiculos: vehiculos || [], ordenes: ordenesConTotal, ventas: facturas || [], diagnosticos: diagnosticos || [] });
 });
 
 // GET /clientes/:id/vehiculos — vehículos de un cliente (usado en Recepción paso 2)
@@ -5389,6 +5398,11 @@ app.post("/cotizaciones/:id/convertir", async (req, res) => {
 
     // Marcar cotización como convertida
     await supabase.from("cotizaciones").update({ estado: "CONVERTIDA", factura_id: factura[0].id }).eq("id", id);
+
+    // Sincronizar total en la orden de trabajo asociada
+    if (orden_id_factura && cot.total) {
+      await supabase.from("ordenes_trabajo").update({ total: cot.total }).eq("id", orden_id_factura);
+    }
 
     res.json({ factura: factura[0], factura_items: itemsF });
   } catch (err) { res.status(500).json({ error: err.message }); }

@@ -114,7 +114,7 @@ export default function HistorialCliente() {
                   <td style={td}><b>FAC-{String(v.id).padStart(5, "0")}</b></td>
                   <td style={{ ...td, fontSize: 12 }}>{v.ncf}</td>
                   <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(v.total).toFixed(2)}</td>
-                  <td style={td}>{v.method}</td>
+                  <td style={td}>{v.metodo_pago || "—"}</td>
                   <td style={td}>{v.created_at ? new Date(v.created_at).toLocaleDateString("es-DO") : "—"}</td>
                 </tr>
               ))}
