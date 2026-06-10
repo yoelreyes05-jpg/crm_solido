@@ -132,6 +132,7 @@ export default function ContabilidadPage() {
     { key: "costos",  label: "📊 Costos y Utilidades",   roles: ["gerente"] },
     { key: "cobrar",  label: "💳 Cuentas x Cobrar",      roles: ["gerente", "secretaria"] },
     { key: "pagar",   label: "📤 Cuentas x Pagar",       roles: ["gerente", "secretaria"] },
+    { key: "nomina",  label: "👥 Nómina",                roles: ["gerente"] },
   ];
 
   const tabsVisibles = tabs.filter(t => !usuario || t.roles.includes(usuario.rol));
@@ -169,6 +170,7 @@ export default function ContabilidadPage() {
         {tab === "costos" && <CostosUtilidades />}
         {tab === "cobrar" && <CuentasCobrar usuario={usuario} />}
         {tab === "pagar"  && <CuentasPagar  usuario={usuario} />}
+        {tab === "nomina" && <Nomina usuario={usuario} />}
       </div>
     </div>
   );
@@ -1581,6 +1583,504 @@ function FormField({ label, children }: { label: string; children: React.ReactNo
     <div>
       <label style={s.label}>{label}</label>
       {children}
+    </div>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// NÓMINA — República Dominicana (TSS + ISR + comisiones de técnicos)
+// ═══════════════════════════════════════════════════════════════════════════
+type Empleado = {
+  id: number; usuario_id: number | null; nombre: string; cedula: string | null;
+  telefono: string | null; puesto: string | null; tipo: "tecnico" | "administrativo";
+  fecha_ingreso: string | null; salario_mensual: number; frecuencia_pago: "QUINCENAL" | "MENSUAL";
+  comision_pct: number; metodo_pago: string | null; banco: string | null; cuenta_banco: string | null;
+  tss_aplica: boolean; isr_aplica: boolean; activo: boolean; notas: string | null;
+};
+
+type NominaRun = {
+  id: number; tipo: string; periodo_inicio: string; periodo_fin: string; estado: string;
+  total_bruto: number; total_deducciones: number; total_neto: number; total_aporte_empleador: number;
+  creado_por: string | null; pagada_at: string | null; detalle?: NominaDet[];
+};
+
+type NominaDet = {
+  id: number; empleado_id: number; empleado_nombre: string; puesto: string | null;
+  salario_base: number; comisiones: number; comisiones_detalle: any[]; horas_extra: number;
+  otros_ingresos: number; otros_ingresos_desc: string | null; total_bruto: number;
+  afp_empleado: number; sfs_empleado: number; isr: number; otros_descuentos: number;
+  otros_descuentos_desc: string | null; total_deducciones: number; neto: number;
+  afp_empleador: number; sfs_empleador: number; srl_empleador: number; infotep: number;
+  metodo_pago: string | null;
+};
+
+const TIPO_NOMINA_LABEL: Record<string, string> = {
+  QUINCENA_1: "1ra Quincena", QUINCENA_2: "2da Quincena", MENSUAL: "Mensual", REGALIA: "Regalía Pascual",
+};
+
+function imprimirVolante(n: NominaRun, d: NominaDet) {
+  const _e = getEmpresaSync();
+  const row = (label: string, val: string, color = "#111", bold = false) =>
+    `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px solid #f0f0f0;">
+       <span style="color:#555;">${label}</span><span style="font-weight:${bold ? 800 : 500};color:${color};">${val}</span></div>`;
+  const html = `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Volante de Pago</title>
+  <style>*{margin:0;padding:0;box-sizing:border-box;}body{font-family:Arial,sans-serif;font-size:13px;padding:30px;max-width:600px;margin:auto;}
+  h1{font-size:18px;font-weight:900;}.sec{font-weight:700;font-size:12px;text-transform:uppercase;color:#6366f1;letter-spacing:.5px;margin:16px 0 6px;border-bottom:2px solid #e0e7ff;padding-bottom:4px;}
+  .sig{display:inline-block;border-top:1px solid #333;width:200px;text-align:center;font-size:11px;color:#555;padding-top:4px;margin-top:36px;}
+  @media print{button{display:none!important;}}</style></head><body>
+  <div style="text-align:center;margin-bottom:14px;">
+    <h1>${_e.nombre}</h1>
+    <div style="font-size:13px;font-weight:600;color:#555;">VOLANTE DE PAGO — ${TIPO_NOMINA_LABEL[n.tipo] || n.tipo}</div>
+    <div style="font-size:12px;color:#888;">Período: ${fmtDate(n.periodo_inicio)} al ${fmtDate(n.periodo_fin)}</div>
+  </div>
+  ${row("Empleado", d.empleado_nombre, "#111", true)}
+  ${d.puesto ? row("Puesto", d.puesto) : ""}
+  ${row("Método de pago", d.metodo_pago || "—")}
+  <div class="sec">Ingresos</div>
+  ${row("Salario base", fmt(d.salario_base))}
+  ${Number(d.comisiones) > 0 ? row(`Comisiones (${(d.comisiones_detalle || []).length} factura${(d.comisiones_detalle || []).length === 1 ? "" : "s"})`, fmt(d.comisiones)) : ""}
+  ${Number(d.horas_extra) > 0 ? row("Horas extra", fmt(d.horas_extra)) : ""}
+  ${Number(d.otros_ingresos) > 0 ? row(d.otros_ingresos_desc || "Otros ingresos", fmt(d.otros_ingresos)) : ""}
+  ${row("TOTAL BRUTO", fmt(d.total_bruto), "#111", true)}
+  <div class="sec">Deducciones</div>
+  ${row("AFP (2.87%)", fmt(d.afp_empleado), "#ef4444")}
+  ${row("SFS (3.04%)", fmt(d.sfs_empleado), "#ef4444")}
+  ${row("ISR", fmt(d.isr), "#ef4444")}
+  ${Number(d.otros_descuentos) > 0 ? row(d.otros_descuentos_desc || "Otros descuentos", fmt(d.otros_descuentos), "#ef4444") : ""}
+  ${row("Total deducciones", fmt(d.total_deducciones), "#ef4444", true)}
+  <div style="display:flex;justify-content:space-between;padding:10px 0;border-top:3px solid #111;margin-top:8px;">
+    <span style="font-weight:900;font-size:16px;">NETO A PAGAR</span>
+    <span style="font-weight:900;font-size:18px;color:#10b981;">${fmt(d.neto)}</span>
+  </div>
+  <div style="display:flex;justify-content:space-around;">
+    <div style="text-align:center;"><div class="sig"></div><div>Empleado</div></div>
+    <div style="text-align:center;"><div class="sig"></div><div>Empresa</div></div>
+  </div>
+  <div style="text-align:center;margin-top:24px;font-size:11px;color:#888;border-top:1px dashed #ccc;padding-top:12px;">
+    ${_e.nombre} · ${_e.telefono} · Impreso: ${fmtDatetime(new Date().toISOString())}
+  </div>
+  <script>setTimeout(()=>window.print(),500);<\/script></body></html>`;
+  const w = window.open("", "_blank", "width=700,height=600");
+  if (w) { w.document.write(html); w.document.close(); }
+}
+
+const EMPLEADO_VACIO = {
+  nombre: "", cedula: "", telefono: "", puesto: "", tipo: "administrativo", usuario_id: "",
+  fecha_ingreso: "", salario_mensual: "", frecuencia_pago: "QUINCENAL", comision_pct: "",
+  metodo_pago: "TRANSFERENCIA", banco: "", cuenta_banco: "", tss_aplica: true, isr_aplica: true,
+};
+
+function Nomina({ usuario }: { usuario: Usuario }) {
+  const [vista, setVista] = useState<"nominas" | "empleados">("nominas");
+  const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [nominas, setNominas] = useState<NominaRun[]>([]);
+  const [detalle, setDetalle] = useState<NominaRun | null>(null);
+  const [cargando, setCargando] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  // Form empleado
+  const [formVisible, setFormVisible] = useState(false);
+  const [editId, setEditId] = useState<number | null>(null);
+  const [form, setForm] = useState<any>(EMPLEADO_VACIO);
+
+  // Generar nómina
+  const hoy = new Date();
+  const y = hoy.getFullYear(), m = hoy.getMonth();
+  const pad = (n: number) => String(n).padStart(2, "0");
+  const finMes = new Date(y, m + 1, 0).getDate();
+  const [genTipo, setGenTipo] = useState("QUINCENA_1");
+  const [genInicio, setGenInicio] = useState(`${y}-${pad(m + 1)}-01`);
+  const [genFin, setGenFin] = useState(`${y}-${pad(m + 1)}-15`);
+
+  const cambiarTipo = (t: string) => {
+    setGenTipo(t);
+    if (t === "QUINCENA_1") { setGenInicio(`${y}-${pad(m + 1)}-01`); setGenFin(`${y}-${pad(m + 1)}-15`); }
+    else if (t === "QUINCENA_2") { setGenInicio(`${y}-${pad(m + 1)}-16`); setGenFin(`${y}-${pad(m + 1)}-${pad(finMes)}`); }
+    else if (t === "MENSUAL") { setGenInicio(`${y}-${pad(m + 1)}-01`); setGenFin(`${y}-${pad(m + 1)}-${pad(finMes)}`); }
+    else { setGenInicio(`${y}-01-01`); setGenFin(`${y}-12-31`); }
+  };
+
+  const cargar = useCallback(async () => {
+    try {
+      const [rE, rN, rU] = await Promise.all([
+        fetch(`${API}/api/nomina/empleados`), fetch(`${API}/api/nomina`), fetch(`${API}/usuarios`),
+      ]);
+      setEmpleados(await rE.json());
+      setNominas(await rN.json());
+      const us = await rU.json();
+      setUsuarios(Array.isArray(us) ? us : us.usuarios || []);
+    } catch { setMsg("Error cargando datos"); }
+  }, []);
+
+  useEffect(() => { cargar(); }, [cargar]);
+
+  const abrirDetalle = async (id: number) => {
+    const r = await fetch(`${API}/api/nomina/${id}`);
+    const d = await r.json();
+    if (d.error) { setMsg(d.error); return; }
+    setDetalle(d);
+  };
+
+  // ── Empleados CRUD ──
+  const guardarEmpleado = async () => {
+    if (!form.nombre || !Number(form.salario_mensual)) { setMsg("Nombre y salario son obligatorios"); return; }
+    setCargando(true);
+    const body = {
+      ...form,
+      usuario_id: form.usuario_id ? Number(form.usuario_id) : null,
+      salario_mensual: Number(form.salario_mensual),
+      comision_pct: Number(form.comision_pct) || 0,
+      fecha_ingreso: form.fecha_ingreso || null,
+    };
+    const r = await fetch(`${API}/api/nomina/empleados${editId ? `/${editId}` : ""}`, {
+      method: editId ? "PATCH" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    const d = await r.json();
+    setCargando(false);
+    if (d.error) { setMsg(d.error); return; }
+    setMsg(editId ? "✅ Empleado actualizado" : "✅ Empleado registrado");
+    setFormVisible(false); setEditId(null); setForm(EMPLEADO_VACIO);
+    cargar();
+  };
+
+  const editarEmpleado = (e: Empleado) => {
+    setForm({
+      nombre: e.nombre, cedula: e.cedula || "", telefono: e.telefono || "", puesto: e.puesto || "",
+      tipo: e.tipo, usuario_id: e.usuario_id ? String(e.usuario_id) : "", fecha_ingreso: e.fecha_ingreso || "",
+      salario_mensual: String(e.salario_mensual), frecuencia_pago: e.frecuencia_pago,
+      comision_pct: String(e.comision_pct || ""), metodo_pago: e.metodo_pago || "TRANSFERENCIA",
+      banco: e.banco || "", cuenta_banco: e.cuenta_banco || "", tss_aplica: e.tss_aplica, isr_aplica: e.isr_aplica,
+    });
+    setEditId(e.id); setFormVisible(true);
+  };
+
+  const toggleActivo = async (e: Empleado) => {
+    await fetch(`${API}/api/nomina/empleados/${e.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ activo: !e.activo }),
+    });
+    cargar();
+  };
+
+  // ── Nóminas ──
+  const generarNomina = async () => {
+    setCargando(true); setMsg("");
+    const r = await fetch(`${API}/api/nomina/generar`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tipo: genTipo, periodo_inicio: genInicio, periodo_fin: genFin, creado_por: usuario?.nombre }),
+    });
+    const d = await r.json();
+    setCargando(false);
+    if (d.error) { setMsg(`⚠️ ${d.error}`); return; }
+    setMsg("✅ Nómina generada en borrador — revísala y márcala como pagada");
+    await cargar();
+    abrirDetalle(d.nomina_id);
+  };
+
+  const ajustarFila = async (fila: NominaDet) => {
+    const he = prompt("Horas extra (monto RD$):", String(fila.horas_extra || 0));
+    if (he === null) return;
+    const oi = prompt("Otros ingresos (RD$):", String(fila.otros_ingresos || 0));
+    if (oi === null) return;
+    const od = prompt("Otros descuentos — avances, préstamos (RD$):", String(fila.otros_descuentos || 0));
+    if (od === null) return;
+    const r = await fetch(`${API}/api/nomina/detalle/${fila.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ horas_extra: Number(he) || 0, otros_ingresos: Number(oi) || 0, otros_descuentos: Number(od) || 0 }),
+    });
+    const d = await r.json();
+    if (d.error) { setMsg(`⚠️ ${d.error}`); return; }
+    abrirDetalle(detalle!.id); cargar();
+  };
+
+  const pagarNomina = async () => {
+    if (!detalle) return;
+    if (!confirm(`¿Marcar como PAGADA la nómina por ${fmt(detalle.total_neto)}?`)) return;
+    const r = await fetch(`${API}/api/nomina/${detalle.id}/pagar`, { method: "POST" });
+    const d = await r.json();
+    if (d.error) { setMsg(`⚠️ ${d.error}`); return; }
+    setMsg("✅ Nómina marcada como pagada");
+    abrirDetalle(detalle.id); cargar();
+  };
+
+  const eliminarBorrador = async () => {
+    if (!detalle || !confirm("¿Eliminar este borrador de nómina?")) return;
+    await fetch(`${API}/api/nomina/${detalle.id}`, { method: "DELETE" });
+    setDetalle(null); cargar();
+  };
+
+  const badgeEstado = (estado: string) => {
+    const c = estado === "PAGADA" ? ["#dcfce7", "#16a34a"] : estado === "BORRADOR" ? ["#fef9c3", "#854d0e"] : ["#fee2e2", "#dc2626"];
+    return <span style={{ background: c[0], color: c[1], padding: "2px 10px", borderRadius: 99, fontSize: 11, fontWeight: 700 }}>{estado}</span>;
+  };
+
+  const tecnicos = usuarios.filter((u: any) => u.rol === "tecnico");
+
+  // ════ VISTA DETALLE ════
+  if (detalle) {
+    const esBorrador = detalle.estado === "BORRADOR";
+    return (
+      <div>
+        <button onClick={() => { setDetalle(null); cargar(); }} style={{ ...s.tabInactive, marginBottom: 16 }}>← Volver</button>
+        {msg && <div style={s.infoBanner}>{msg}</div>}
+        <div style={s.card}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10 }}>
+            <div>
+              <div style={s.cardTitle}>
+                Nómina #{detalle.id} — {TIPO_NOMINA_LABEL[detalle.tipo] || detalle.tipo} {badgeEstado(detalle.estado)}
+              </div>
+              <div style={{ fontSize: 13, color: "#888" }}>
+                Período: {fmtDate(detalle.periodo_inicio)} al {fmtDate(detalle.periodo_fin)}
+                {detalle.pagada_at ? ` · Pagada: ${fmtDatetime(detalle.pagada_at)}` : ""}
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              {esBorrador && <button onClick={pagarNomina} style={{ ...s.btnPrimary, background: "#10b981" }}>✅ Marcar pagada</button>}
+              {esBorrador && <button onClick={eliminarBorrador} style={{ ...s.btnPrimary, background: "#ef4444" }}>🗑 Eliminar</button>}
+            </div>
+          </div>
+        </div>
+
+        <div style={s.kpiRow}>
+          <KpiCard label="Total bruto" value={fmt(detalle.total_bruto)} icon="💰" color="#111827" />
+          <KpiCard label="Deducciones (TSS + ISR)" value={fmt(detalle.total_deducciones)} icon="📉" color="#ef4444" />
+          <KpiCard label="Neto a pagar" value={fmt(detalle.total_neto)} icon="💵" color="#10b981" big />
+          <KpiCard label="Aporte patronal (costo extra)" value={fmt(detalle.total_aporte_empleador)} icon="🏢" color="#6366f1" />
+        </div>
+
+        <div style={s.card}>
+          <div style={{ overflowX: "auto" }}>
+            <table style={s.table}>
+              <thead><tr>
+                <th style={s.th}>Empleado</th><th style={s.th}>Salario</th><th style={s.th}>Comisión</th>
+                <th style={s.th}>Extras</th><th style={s.th}>Bruto</th><th style={s.th}>AFP</th>
+                <th style={s.th}>SFS</th><th style={s.th}>ISR</th><th style={s.th}>Otros desc.</th>
+                <th style={s.th}>Neto</th><th style={s.th}></th>
+              </tr></thead>
+              <tbody>
+                {(detalle.detalle || []).map(d => (
+                  <tr key={d.id}>
+                    <td style={s.td}>
+                      <strong>{d.empleado_nombre}</strong>
+                      <div style={{ fontSize: 11, color: "#888" }}>{d.puesto || ""}</div>
+                    </td>
+                    <td style={s.td}>{fmt(d.salario_base)}</td>
+                    <td style={s.td}>
+                      {Number(d.comisiones) > 0 ? (
+                        <span title={(d.comisiones_detalle || []).map((c: any) => `${c.ncf || "Factura " + c.factura_id}: ${fmt(c.comision)}`).join("\n")}>
+                          {fmt(d.comisiones)} <span style={{ fontSize: 11, color: "#888" }}>({(d.comisiones_detalle || []).length}f)</span>
+                        </span>
+                      ) : "—"}
+                    </td>
+                    <td style={s.td}>{Number(d.horas_extra) + Number(d.otros_ingresos) > 0 ? fmt(Number(d.horas_extra) + Number(d.otros_ingresos)) : "—"}</td>
+                    <td style={{ ...s.td, fontWeight: 700 }}>{fmt(d.total_bruto)}</td>
+                    <td style={{ ...s.td, color: "#ef4444" }}>{fmt(d.afp_empleado)}</td>
+                    <td style={{ ...s.td, color: "#ef4444" }}>{fmt(d.sfs_empleado)}</td>
+                    <td style={{ ...s.td, color: "#ef4444" }}>{fmt(d.isr)}</td>
+                    <td style={{ ...s.td, color: "#ef4444" }}>{Number(d.otros_descuentos) > 0 ? fmt(d.otros_descuentos) : "—"}</td>
+                    <td style={{ ...s.td, fontWeight: 800, color: "#10b981" }}>{fmt(d.neto)}</td>
+                    <td style={{ ...s.td, whiteSpace: "nowrap" }}>
+                      {esBorrador && <button onClick={() => ajustarFila(d)} style={{ ...s.tabInactive, padding: "5px 10px", fontSize: 12, marginRight: 6 }}>✏️ Ajustar</button>}
+                      <button onClick={() => imprimirVolante(detalle, d)} style={{ ...s.tabInactive, padding: "5px 10px", fontSize: 12 }}>🖨 Volante</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ ...s.infoBanner, marginTop: 14 }}>
+            🏢 Aporte patronal del período (no se descuenta al empleado): AFP 7.10% + SFS 7.09% + Riesgos Laborales 1.20% + INFOTEP 1% = <strong>{fmt(detalle.total_aporte_empleador)}</strong>.
+            Costo total de esta nómina para el taller: <strong>{fmt(Number(detalle.total_bruto) + Number(detalle.total_aporte_empleador))}</strong>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ════ VISTA PRINCIPAL ════
+  return (
+    <div>
+      <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+        <button onClick={() => setVista("nominas")} style={vista === "nominas" ? s.tabActive : s.tabInactive}>📋 Nóminas</button>
+        <button onClick={() => setVista("empleados")} style={vista === "empleados" ? s.tabActive : s.tabInactive}>👤 Empleados ({empleados.filter(e => e.activo).length})</button>
+      </div>
+      {msg && <div style={s.infoBanner}>{msg}</div>}
+
+      {vista === "nominas" && (
+        <>
+          <div style={s.card}>
+            <div style={s.cardTitle}>⚙️ Generar nómina</div>
+            <div style={{ display: "flex", gap: 14, flexWrap: "wrap", alignItems: "flex-end" }}>
+              <FormField label="Tipo de nómina">
+                <select value={genTipo} onChange={e => cambiarTipo(e.target.value)} style={s.input}>
+                  <option value="QUINCENA_1">1ra Quincena (1–15)</option>
+                  <option value="QUINCENA_2">2da Quincena (16–fin)</option>
+                  <option value="MENSUAL">Mensual</option>
+                  <option value="REGALIA">Regalía Pascual (salario 13)</option>
+                </select>
+              </FormField>
+              <FormField label="Desde">
+                <input type="date" value={genInicio} onChange={e => setGenInicio(e.target.value)} style={s.input} />
+              </FormField>
+              <FormField label="Hasta">
+                <input type="date" value={genFin} onChange={e => setGenFin(e.target.value)} style={s.input} />
+              </FormField>
+              <button onClick={generarNomina} disabled={cargando} style={{ ...s.btnPrimary, marginBottom: 14 }}>
+                {cargando ? "Generando..." : "⚙️ Generar borrador"}
+              </button>
+            </div>
+            <div style={{ fontSize: 12, color: "#888" }}>
+              Las comisiones de técnicos (% sobre mano de obra facturada del período) se calculan automáticamente.
+              Deducciones de ley: AFP 2.87% · SFS 3.04% · ISR escala DGII. La regalía está exenta de TSS e ISR.
+            </div>
+          </div>
+
+          <div style={s.card}>
+            <div style={s.cardTitle}>📋 Historial de nóminas</div>
+            {nominas.length === 0 ? <div style={s.empty}>Aún no hay nóminas generadas</div> : (
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>#</th><th style={s.th}>Tipo</th><th style={s.th}>Período</th>
+                  <th style={s.th}>Bruto</th><th style={s.th}>Neto</th><th style={s.th}>Estado</th><th style={s.th}></th>
+                </tr></thead>
+                <tbody>
+                  {nominas.map(n => (
+                    <tr key={n.id} style={{ cursor: "pointer" }} onClick={() => abrirDetalle(n.id)}>
+                      <td style={s.td}>{n.id}</td>
+                      <td style={s.td}>{TIPO_NOMINA_LABEL[n.tipo] || n.tipo}</td>
+                      <td style={s.td}>{fmtDate(n.periodo_inicio)} — {fmtDate(n.periodo_fin)}</td>
+                      <td style={s.td}>{fmt(n.total_bruto)}</td>
+                      <td style={{ ...s.td, fontWeight: 700, color: "#10b981" }}>{fmt(n.total_neto)}</td>
+                      <td style={s.td}>{badgeEstado(n.estado)}</td>
+                      <td style={s.td}><button style={{ ...s.tabInactive, padding: "5px 12px", fontSize: 12 }}>Ver →</button></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
+
+      {vista === "empleados" && (
+        <>
+          <div style={s.card}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <div style={s.cardTitle}>👤 Empleados</div>
+              <button onClick={() => { setFormVisible(!formVisible); setEditId(null); setForm(EMPLEADO_VACIO); }} style={s.btnPrimary}>
+                {formVisible ? "✕ Cancelar" : "+ Nuevo empleado"}
+              </button>
+            </div>
+
+            {formVisible && (
+              <div style={{ ...s.resumenBox, marginBottom: 18 }}>
+                <div style={s.formGrid}>
+                  <FormField label="Nombre completo *">
+                    <input value={form.nombre} onChange={e => setForm({ ...form, nombre: e.target.value })} style={s.input} />
+                  </FormField>
+                  <FormField label="Cédula">
+                    <input value={form.cedula} onChange={e => setForm({ ...form, cedula: e.target.value })} style={s.input} placeholder="000-0000000-0" />
+                  </FormField>
+                  <FormField label="Teléfono">
+                    <input value={form.telefono} onChange={e => setForm({ ...form, telefono: e.target.value })} style={s.input} />
+                  </FormField>
+                  <FormField label="Puesto">
+                    <input value={form.puesto} onChange={e => setForm({ ...form, puesto: e.target.value })} style={s.input} placeholder="Técnico mecánico, Secretaria..." />
+                  </FormField>
+                  <FormField label="Tipo de empleado">
+                    <select value={form.tipo} onChange={e => setForm({ ...form, tipo: e.target.value })} style={s.input}>
+                      <option value="administrativo">Administrativo (solo sueldo fijo)</option>
+                      <option value="tecnico">Técnico (sueldo fijo + comisiones)</option>
+                    </select>
+                  </FormField>
+                  {form.tipo === "tecnico" && (
+                    <FormField label="Usuario del sistema (para vincular sus órdenes)">
+                      <select value={form.usuario_id} onChange={e => setForm({ ...form, usuario_id: e.target.value })} style={s.input}>
+                        <option value="">— Sin vincular —</option>
+                        {tecnicos.map((u: any) => <option key={u.id} value={u.id}>{u.nombre}</option>)}
+                      </select>
+                    </FormField>
+                  )}
+                  {form.tipo === "tecnico" && (
+                    <FormField label="Comisión % sobre mano de obra">
+                      <input type="number" value={form.comision_pct} onChange={e => setForm({ ...form, comision_pct: e.target.value })} style={s.input} placeholder="Ej: 30" />
+                    </FormField>
+                  )}
+                  <FormField label="Fecha de ingreso">
+                    <input type="date" value={form.fecha_ingreso} onChange={e => setForm({ ...form, fecha_ingreso: e.target.value })} style={s.input} />
+                  </FormField>
+                  <FormField label="Salario mensual (RD$) *">
+                    <input type="number" value={form.salario_mensual} onChange={e => setForm({ ...form, salario_mensual: e.target.value })} style={s.input} />
+                  </FormField>
+                  <FormField label="Frecuencia de pago">
+                    <select value={form.frecuencia_pago} onChange={e => setForm({ ...form, frecuencia_pago: e.target.value })} style={s.input}>
+                      <option value="QUINCENAL">Quincenal (15 y 30)</option>
+                      <option value="MENSUAL">Mensual</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Método de pago">
+                    <select value={form.metodo_pago} onChange={e => setForm({ ...form, metodo_pago: e.target.value })} style={s.input}>
+                      <option value="TRANSFERENCIA">Transferencia</option>
+                      <option value="EFECTIVO">Efectivo</option>
+                      <option value="CHEQUE">Cheque</option>
+                    </select>
+                  </FormField>
+                  <FormField label="Banco">
+                    <input value={form.banco} onChange={e => setForm({ ...form, banco: e.target.value })} style={s.input} />
+                  </FormField>
+                  <FormField label="No. de cuenta">
+                    <input value={form.cuenta_banco} onChange={e => setForm({ ...form, cuenta_banco: e.target.value })} style={s.input} />
+                  </FormField>
+                </div>
+                <div style={{ display: "flex", gap: 18, marginBottom: 14 }}>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>
+                    <input type="checkbox" checked={form.tss_aplica} onChange={e => setForm({ ...form, tss_aplica: e.target.checked })} /> Cotiza TSS (AFP + SFS)
+                  </label>
+                  <label style={{ fontSize: 13, fontWeight: 600, color: "#555" }}>
+                    <input type="checkbox" checked={form.isr_aplica} onChange={e => setForm({ ...form, isr_aplica: e.target.checked })} /> Retener ISR
+                  </label>
+                </div>
+                <button onClick={guardarEmpleado} disabled={cargando} style={s.btnPrimary}>
+                  {cargando ? "Guardando..." : editId ? "💾 Actualizar empleado" : "💾 Registrar empleado"}
+                </button>
+              </div>
+            )}
+
+            {empleados.length === 0 ? <div style={s.empty}>No hay empleados registrados — agrega el primero</div> : (
+              <table style={s.table}>
+                <thead><tr>
+                  <th style={s.th}>Empleado</th><th style={s.th}>Tipo</th><th style={s.th}>Salario mensual</th>
+                  <th style={s.th}>Comisión</th><th style={s.th}>Frecuencia</th><th style={s.th}>TSS/ISR</th>
+                  <th style={s.th}>Estado</th><th style={s.th}></th>
+                </tr></thead>
+                <tbody>
+                  {empleados.map(e => (
+                    <tr key={e.id} style={{ opacity: e.activo ? 1 : 0.45 }}>
+                      <td style={s.td}>
+                        <strong>{e.nombre}</strong>
+                        <div style={{ fontSize: 11, color: "#888" }}>{e.puesto || ""} {e.cedula ? `· ${e.cedula}` : ""}</div>
+                      </td>
+                      <td style={s.td}>{e.tipo === "tecnico" ? "🔧 Técnico" : "🗂 Administrativo"}</td>
+                      <td style={{ ...s.td, fontWeight: 700 }}>{fmt(e.salario_mensual)}</td>
+                      <td style={s.td}>{e.tipo === "tecnico" && Number(e.comision_pct) > 0 ? `${e.comision_pct}% M.O.` : "—"}</td>
+                      <td style={s.td}>{e.frecuencia_pago === "QUINCENAL" ? "Quincenal" : "Mensual"}</td>
+                      <td style={s.td}>{e.tss_aplica ? "TSS ✓" : "TSS ✕"} {e.isr_aplica ? "· ISR ✓" : "· ISR ✕"}</td>
+                      <td style={s.td}>{e.activo ? <span style={{ color: "#16a34a", fontWeight: 700 }}>Activo</span> : <span style={{ color: "#dc2626", fontWeight: 700 }}>Inactivo</span>}</td>
+                      <td style={{ ...s.td, whiteSpace: "nowrap" }}>
+                        <button onClick={() => editarEmpleado(e)} style={{ ...s.tabInactive, padding: "5px 10px", fontSize: 12, marginRight: 6 }}>✏️</button>
+                        <button onClick={() => toggleActivo(e)} style={{ ...s.tabInactive, padding: "5px 10px", fontSize: 12 }}>{e.activo ? "Desactivar" : "Activar"}</button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }

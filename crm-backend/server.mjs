@@ -7420,6 +7420,340 @@ Reglas: NO inventes datos. Usa SOLO la información provista. Si los datos NHTSA
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 👥 NÓMINA — República Dominicana (Código de Trabajo + Ley 87-01 Seguridad Social)
+// Tasas 2026 · Empleado: AFP 2.87% + SFS 3.04% + ISR escala DGII
+//            · Empleador: AFP 7.10% + SFS 7.09% + SRL 1.20% + INFOTEP 1.00%
+// Topes cotizables mensuales (feb 2026): SFS 232,230 · AFP 464,460 · SRL 92,892
+// Las comisiones son salario ordinario (cotizan TSS y pagan ISR).
+// La Regalía Pascual está exenta de TSS e ISR.
+// ══════════════════════════════════════════════════════════════════════════════
+const NOMINA_CFG = {
+  AFP_EMPLEADO: 0.0287,
+  SFS_EMPLEADO: 0.0304,
+  AFP_EMPLEADOR: 0.0710,
+  SFS_EMPLEADOR: 0.0709,
+  SRL_EMPLEADOR: 0.0120,
+  INFOTEP: 0.0100,
+  TOPE_SFS_MENSUAL: 232230,
+  TOPE_AFP_MENSUAL: 464460,
+  TOPE_SRL_MENSUAL: 92892,
+  // Escala ISR anual DGII 2026 (vigente desde 2018)
+  ISR_ESCALA: [
+    { hasta: 416220.00, fijo: 0,        tasa: 0,    exceso: 0 },
+    { hasta: 624329.00, fijo: 0,        tasa: 0.15, exceso: 416220.00 },
+    { hasta: 867123.00, fijo: 31216.00, tasa: 0.20, exceso: 624329.00 },
+    { hasta: Infinity,  fijo: 79776.00, tasa: 0.25, exceso: 867123.00 },
+  ],
+};
+
+const r2 = (n) => Math.round((Number(n) || 0) * 100) / 100;
+
+function calcIsrAnual(baseAnual) {
+  if (!baseAnual || baseAnual <= 0) return 0;
+  const tramo = NOMINA_CFG.ISR_ESCALA.find(t => baseAnual <= t.hasta);
+  return r2(tramo.fijo + (baseAnual - tramo.exceso) * tramo.tasa);
+}
+
+// Calcula una fila de nómina (deducciones empleado + aportes empleador)
+function calcularFilaNomina({ empleado, tipoNomina, salario_base, comisiones = 0, horas_extra = 0, otros_ingresos = 0, otros_descuentos = 0 }) {
+  const bruto = r2(Number(salario_base) + Number(comisiones) + Number(horas_extra) + Number(otros_ingresos));
+  const esRegalia = tipoNomina === "REGALIA";
+  const factor = tipoNomina === "MENSUAL" || esRegalia ? 1 : 0.5;     // proporción del mes
+  const periodosAno = tipoNomina === "MENSUAL" ? 12 : 24;
+
+  let afp_empleado = 0, sfs_empleado = 0, isr = 0;
+  let afp_empleador = 0, sfs_empleador = 0, srl_empleador = 0, infotep = 0;
+
+  if (!esRegalia) {
+    if (empleado.tss_aplica) {
+      const baseSfs = Math.min(bruto, NOMINA_CFG.TOPE_SFS_MENSUAL * factor);
+      const baseAfp = Math.min(bruto, NOMINA_CFG.TOPE_AFP_MENSUAL * factor);
+      const baseSrl = Math.min(bruto, NOMINA_CFG.TOPE_SRL_MENSUAL * factor);
+      afp_empleado  = r2(baseAfp * NOMINA_CFG.AFP_EMPLEADO);
+      sfs_empleado  = r2(baseSfs * NOMINA_CFG.SFS_EMPLEADO);
+      afp_empleador = r2(baseAfp * NOMINA_CFG.AFP_EMPLEADOR);
+      sfs_empleador = r2(baseSfs * NOMINA_CFG.SFS_EMPLEADOR);
+      srl_empleador = r2(baseSrl * NOMINA_CFG.SRL_EMPLEADOR);
+      infotep       = r2(bruto * NOMINA_CFG.INFOTEP);
+    }
+    if (empleado.isr_aplica) {
+      // Método estándar: anualizar la base (bruto − TSS empleado) y aplicar escala
+      const baseAnual = (bruto - afp_empleado - sfs_empleado) * periodosAno;
+      isr = r2(calcIsrAnual(baseAnual) / periodosAno);
+    }
+  }
+
+  const total_deducciones = r2(afp_empleado + sfs_empleado + isr + Number(otros_descuentos));
+  return {
+    salario_base: r2(salario_base),
+    comisiones: r2(comisiones),
+    horas_extra: r2(horas_extra),
+    otros_ingresos: r2(otros_ingresos),
+    total_bruto: bruto,
+    afp_empleado, sfs_empleado, isr,
+    otros_descuentos: r2(otros_descuentos),
+    total_deducciones,
+    neto: r2(bruto - total_deducciones),
+    afp_empleador, sfs_empleador, srl_empleador, infotep,
+  };
+}
+
+// Comisiones por técnico: % sobre mano de obra (items tipo "servicio") de
+// facturas del período cuya orden está asignada al técnico (usuario_id).
+async function calcularComisionesTecnicos(desde, hasta) {
+  const { data: facturas } = await supabase
+    .from("facturas")
+    .select("id, ncf, orden_id, total, created_at")
+    .not("orden_id", "is", null)
+    .neq("estado", "ANULADA")
+    .gte("created_at", `${desde}T00:00:00`)
+    .lte("created_at", `${hasta}T23:59:59`);
+  if (!facturas?.length) return {};
+
+  const ordenIds = [...new Set(facturas.map(f => f.orden_id))];
+  const { data: ordenes } = await supabase
+    .from("ordenes_trabajo")
+    .select("id, tecnico_asignado_id")
+    .in("id", ordenIds);
+  const ordenTecnico = Object.fromEntries((ordenes || []).map(o => [o.id, o.tecnico_asignado_id]));
+
+  const factIds = facturas.map(f => f.id);
+  const { data: items } = await supabase
+    .from("factura_items")
+    .select("factura_id, tipo, subtotal")
+    .in("factura_id", factIds)
+    .eq("tipo", "servicio");
+
+  const manoObraPorFactura = {};
+  for (const it of items || []) {
+    manoObraPorFactura[it.factura_id] = r2((manoObraPorFactura[it.factura_id] || 0) + Number(it.subtotal || 0));
+  }
+
+  // { usuario_id_tecnico: [{factura_id, ncf, orden_id, mano_obra}] }
+  const porTecnico = {};
+  for (const f of facturas) {
+    const tecnicoId = ordenTecnico[f.orden_id];
+    const manoObra = manoObraPorFactura[f.id] || 0;
+    if (!tecnicoId || manoObra <= 0) continue;
+    (porTecnico[tecnicoId] = porTecnico[tecnicoId] || []).push({
+      factura_id: f.id, ncf: f.ncf, orden_id: f.orden_id, mano_obra: manoObra, fecha: f.created_at,
+    });
+  }
+  return porTecnico;
+}
+
+// ─── EMPLEADOS ────────────────────────────────────────────────────────────────
+app.get("/api/nomina/empleados", async (req, res) => {
+  let q = supabase.from("empleados").select("*").order("nombre");
+  if (req.query.activos === "1") q = q.eq("activo", true);
+  const { data, error } = await q;
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/api/nomina/empleados", async (req, res) => {
+  const b = req.body || {};
+  if (!b.nombre || !Number(b.salario_mensual)) return res.status(400).json({ error: "Nombre y salario mensual son obligatorios" });
+  const { data, error } = await supabase.from("empleados").insert([{
+    usuario_id: b.usuario_id || null,
+    nombre: b.nombre,
+    cedula: b.cedula || null,
+    telefono: b.telefono || null,
+    puesto: b.puesto || null,
+    tipo: b.tipo === "tecnico" ? "tecnico" : "administrativo",
+    fecha_ingreso: b.fecha_ingreso || null,
+    salario_mensual: Number(b.salario_mensual),
+    frecuencia_pago: b.frecuencia_pago === "MENSUAL" ? "MENSUAL" : "QUINCENAL",
+    comision_pct: Number(b.comision_pct) || 0,
+    metodo_pago: b.metodo_pago || "TRANSFERENCIA",
+    banco: b.banco || null,
+    cuenta_banco: b.cuenta_banco || null,
+    tss_aplica: b.tss_aplica !== false,
+    isr_aplica: b.isr_aplica !== false,
+    notas: b.notas || null,
+  }]).select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.patch("/api/nomina/empleados/:id", async (req, res) => {
+  const permitidos = ["usuario_id","nombre","cedula","telefono","puesto","tipo","fecha_ingreso","salario_mensual",
+    "frecuencia_pago","comision_pct","metodo_pago","banco","cuenta_banco","tss_aplica","isr_aplica","activo","notas"];
+  const cambios = {};
+  for (const k of permitidos) if (req.body[k] !== undefined) cambios[k] = req.body[k];
+  const { data, error } = await supabase.from("empleados").update(cambios).eq("id", req.params.id).select();
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// Vista previa de comisiones por período
+app.get("/api/nomina/comisiones", async (req, res) => {
+  const { desde, hasta } = req.query;
+  if (!desde || !hasta) return res.status(400).json({ error: "desde y hasta son requeridos" });
+  try {
+    const porTecnico = await calcularComisionesTecnicos(desde, hasta);
+    const { data: empleados } = await supabase.from("empleados").select("*").eq("activo", true).eq("tipo", "tecnico");
+    const resultado = (empleados || []).map(e => {
+      const facturas = porTecnico[e.usuario_id] || [];
+      const mano_obra_total = r2(facturas.reduce((s, f) => s + f.mano_obra, 0));
+      return {
+        empleado_id: e.id, nombre: e.nombre, comision_pct: e.comision_pct,
+        mano_obra_total, comision: r2(mano_obra_total * e.comision_pct / 100), facturas,
+      };
+    });
+    res.json(resultado);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── GENERAR NÓMINA (borrador) ───────────────────────────────────────────────
+app.post("/api/nomina/generar", async (req, res) => {
+  const { tipo, periodo_inicio, periodo_fin, creado_por } = req.body || {};
+  if (!["QUINCENA_1","QUINCENA_2","MENSUAL","REGALIA"].includes(tipo))
+    return res.status(400).json({ error: "Tipo inválido" });
+  if (!periodo_inicio || !periodo_fin) return res.status(400).json({ error: "Período requerido" });
+  try {
+    // Evitar duplicados del mismo período/tipo
+    const { data: existente } = await supabase.from("nominas").select("id")
+      .eq("tipo", tipo).eq("periodo_inicio", periodo_inicio).neq("estado", "ANULADA").maybeSingle();
+    if (existente) return res.status(400).json({ error: `Ya existe la nómina #${existente.id} para ese período` });
+
+    let q = supabase.from("empleados").select("*").eq("activo", true);
+    if (tipo === "MENSUAL") q = q.eq("frecuencia_pago", "MENSUAL");
+    if (tipo.startsWith("QUINCENA")) q = q.eq("frecuencia_pago", "QUINCENAL");
+    const { data: empleados } = await q;
+    if (!empleados?.length) return res.status(400).json({ error: "No hay empleados activos con esa frecuencia de pago" });
+
+    const comisionesPorTecnico = tipo === "REGALIA" ? {} : await calcularComisionesTecnicos(periodo_inicio, periodo_fin);
+
+    const { data: nomRows, error: errNom } = await supabase.from("nominas").insert([{
+      tipo, periodo_inicio, periodo_fin, estado: "BORRADOR", creado_por: creado_por || null,
+    }]).select();
+    if (errNom) return res.status(500).json({ error: errNom.message });
+    const nomina = nomRows[0];
+
+    let tBruto = 0, tDeduc = 0, tNeto = 0, tPatronal = 0;
+    const detalles = [];
+    const hoy = new Date();
+
+    for (const e of empleados) {
+      let salario_base, comisiones = 0, comisiones_detalle = [];
+      if (tipo === "REGALIA") {
+        // Regalía = salario mensual × meses trabajados en el año / 12
+        const ingreso = e.fecha_ingreso ? new Date(e.fecha_ingreso) : null;
+        let meses = 12;
+        if (ingreso && ingreso.getFullYear() === hoy.getFullYear()) meses = Math.max(0, 12 - ingreso.getMonth());
+        salario_base = r2(Number(e.salario_mensual) * meses / 12);
+      } else {
+        salario_base = tipo === "MENSUAL" ? Number(e.salario_mensual) : r2(Number(e.salario_mensual) / 2);
+        if (e.tipo === "tecnico" && Number(e.comision_pct) > 0) {
+          const facturas = comisionesPorTecnico[e.usuario_id] || [];
+          comisiones_detalle = facturas.map(f => ({ ...f, pct: e.comision_pct, comision: r2(f.mano_obra * e.comision_pct / 100) }));
+          comisiones = r2(comisiones_detalle.reduce((s, f) => s + f.comision, 0));
+        }
+      }
+
+      const c = calcularFilaNomina({ empleado: e, tipoNomina: tipo, salario_base, comisiones });
+      tBruto += c.total_bruto; tDeduc += c.total_deducciones; tNeto += c.neto;
+      tPatronal += c.afp_empleador + c.sfs_empleador + c.srl_empleador + c.infotep;
+
+      detalles.push({
+        nomina_id: nomina.id, empleado_id: e.id, empleado_nombre: e.nombre, puesto: e.puesto,
+        ...c, comisiones_detalle, metodo_pago: e.metodo_pago,
+      });
+    }
+
+    const { error: errDet } = await supabase.from("nomina_detalle").insert(detalles);
+    if (errDet) {
+      await supabase.from("nominas").delete().eq("id", nomina.id);
+      return res.status(500).json({ error: errDet.message });
+    }
+    await supabase.from("nominas").update({
+      total_bruto: r2(tBruto), total_deducciones: r2(tDeduc), total_neto: r2(tNeto), total_aporte_empleador: r2(tPatronal),
+    }).eq("id", nomina.id);
+
+    res.json({ ok: true, nomina_id: nomina.id });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── CONSULTA / AJUSTES / PAGO ───────────────────────────────────────────────
+app.get("/api/nomina", async (req, res) => {
+  const { data, error } = await supabase.from("nominas").select("*").order("id", { ascending: false }).limit(60);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.get("/api/nomina/config", (req, res) => res.json(NOMINA_CFG));
+
+app.get("/api/nomina/:id", async (req, res) => {
+  const { data: nomina, error } = await supabase.from("nominas").select("*").eq("id", req.params.id).single();
+  if (error || !nomina) return res.status(404).json({ error: "Nómina no encontrada" });
+  const { data: detalle } = await supabase.from("nomina_detalle").select("*").eq("nomina_id", nomina.id).order("empleado_nombre");
+  res.json({ ...nomina, detalle: detalle || [] });
+});
+
+// Ajustar una fila (horas extra, otros ingresos/descuentos, comisión manual) → recalcula
+app.patch("/api/nomina/detalle/:id", async (req, res) => {
+  try {
+    const { data: fila } = await supabase.from("nomina_detalle").select("*").eq("id", req.params.id).single();
+    if (!fila) return res.status(404).json({ error: "Detalle no encontrado" });
+    const { data: nomina } = await supabase.from("nominas").select("*").eq("id", fila.nomina_id).single();
+    if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Solo se pueden ajustar nóminas en borrador" });
+    const { data: empleado } = await supabase.from("empleados").select("*").eq("id", fila.empleado_id).single();
+
+    const b = req.body || {};
+    const c = calcularFilaNomina({
+      empleado, tipoNomina: nomina.tipo,
+      salario_base: b.salario_base !== undefined ? b.salario_base : fila.salario_base,
+      comisiones: b.comisiones !== undefined ? b.comisiones : fila.comisiones,
+      horas_extra: b.horas_extra !== undefined ? b.horas_extra : fila.horas_extra,
+      otros_ingresos: b.otros_ingresos !== undefined ? b.otros_ingresos : fila.otros_ingresos,
+      otros_descuentos: b.otros_descuentos !== undefined ? b.otros_descuentos : fila.otros_descuentos,
+    });
+
+    await supabase.from("nomina_detalle").update({
+      ...c,
+      otros_ingresos_desc: b.otros_ingresos_desc !== undefined ? b.otros_ingresos_desc : fila.otros_ingresos_desc,
+      otros_descuentos_desc: b.otros_descuentos_desc !== undefined ? b.otros_descuentos_desc : fila.otros_descuentos_desc,
+    }).eq("id", fila.id);
+
+    // Recalcular totales de la nómina
+    const { data: filas } = await supabase.from("nomina_detalle").select("total_bruto,total_deducciones,neto,afp_empleador,sfs_empleador,srl_empleador,infotep").eq("nomina_id", nomina.id);
+    const tot = (k) => r2((filas || []).reduce((s, f) => s + Number(f[k] || 0), 0));
+    await supabase.from("nominas").update({
+      total_bruto: tot("total_bruto"), total_deducciones: tot("total_deducciones"), total_neto: tot("neto"),
+      total_aporte_empleador: r2(tot("afp_empleador") + tot("sfs_empleador") + tot("srl_empleador") + tot("infotep")),
+    }).eq("id", nomina.id);
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/nomina/:id/pagar", async (req, res) => {
+  const { data: nomina } = await supabase.from("nominas").select("*").eq("id", req.params.id).single();
+  if (!nomina) return res.status(404).json({ error: "Nómina no encontrada" });
+  if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Esta nómina no está en borrador" });
+  const { error } = await supabase.from("nominas").update({ estado: "PAGADA", pagada_at: new Date() }).eq("id", nomina.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+app.post("/api/nomina/:id/anular", async (req, res) => {
+  const { error } = await supabase.from("nominas").update({ estado: "ANULADA" }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+app.delete("/api/nomina/:id", async (req, res) => {
+  const { data: nomina } = await supabase.from("nominas").select("estado").eq("id", req.params.id).single();
+  if (!nomina) return res.status(404).json({ error: "Nómina no encontrada" });
+  if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Solo se pueden eliminar borradores" });
+  await supabase.from("nomina_detalle").delete().eq("nomina_id", req.params.id);
+  const { error } = await supabase.from("nominas").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
 // ══════════════════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 4000;
