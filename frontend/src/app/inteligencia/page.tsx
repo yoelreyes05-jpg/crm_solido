@@ -208,7 +208,9 @@ function TabFallas({ d, loading }: { d: any[]; loading: boolean }) {
     <div>
       <div style={{ background: "#eff6ff", borderRadius: 10, padding: "12px 16px",
         fontSize: 13, color: "#1e40af", marginBottom: 16 }}>
-        💡 Basado en los diagnósticos registrados en el sistema. Útil para anticipar repuestos y preparar el taller.
+        💡 Basado en las <b>fallas identificadas</b> que escriben los técnicos en cada diagnóstico.
+        Cuando existe una categoría de servicio (tipo_servicio) se usa como etiqueta; si no, se extraen las frases directamente del texto libre.
+        Útil para anticipar qué problemas son más frecuentes por marca y modelo.
       </div>
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 16 }}>
         {d.map((m: any) => (

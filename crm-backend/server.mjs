@@ -4776,12 +4776,41 @@ async function crearPlanesDesdeOrden(ordenId) {
 // =====================================================
 
 // GET /api/predictivo/fallas-por-modelo
+// Lee fallas_identificadas (texto libre del técnico) como fuente primaria.
+// Cuando tipo_servicio está presente lo usa como etiqueta de categoría.
+// Cuando solo existe fallas_identificadas, extrae frases cortas del texto.
 app.get("/api/predictivo/fallas-por-modelo", async (req, res) => {
+  // Palabras vacías a filtrar del texto libre
+  const STOPWORDS = new Set([
+    "de","la","el","en","y","a","los","las","un","una","con","por","se",
+    "que","del","al","es","no","lo","le","su","para","como","mas","más",
+    "pero","este","esta","hay","fue","ser","los","las","tiene","fue",
+    "presenta","presenta","presenta","falla","fallo","daño","daños",
+    "mal","malo","mala","sin","bien","muy","poco","mucho","todo","toda",
+  ]);
+
+  // Normaliza texto libre → array de frases (max 5 por diagnóstico)
+  const extraerFrases = (texto) => {
+    if (!texto || !texto.trim()) return [];
+    return texto
+      .toLowerCase()
+      .split(/[,;\n\r|./\\]+/)
+      .map(f => f.trim().replace(/[^a-záéíóúüñ0-9 ]/gi, " ").replace(/\s+/g, " ").trim())
+      .filter(f => {
+        if (f.length < 4 || f.length > 90) return false;
+        const palabras = f.split(" ").filter(p => p.length > 2 && !STOPWORDS.has(p));
+        return palabras.length >= 1;
+      })
+      .slice(0, 5);
+  };
+
   try {
-    const { data: diags } = await supabase
+    // Traer todos los diagnósticos que tengan tipo_servicio O fallas_identificadas
+    const { data: diags, error: diagErr } = await supabase
       .from("diagnosticos")
       .select("tipo_servicio, fallas_identificadas, vehiculo_id")
-      .not("tipo_servicio", "is", null);
+      .or("tipo_servicio.not.is.null,fallas_identificadas.not.is.null");
+    if (diagErr) throw diagErr;
 
     const { data: vehiculos } = await supabase
       .from("vehiculos")
@@ -4794,21 +4823,37 @@ app.get("/api/predictivo/fallas-por-modelo", async (req, res) => {
     (diags || []).forEach(d => {
       const v = vehiculoMap[d.vehiculo_id];
       if (!v) return;
-      const clave = `${v.marca} ${v.modelo}`;
-      if (!conteo[clave]) conteo[clave] = { modelo: clave, marca: v.marca, servicios: {}, total: 0 };
-      const srv = d.tipo_servicio || "OTRO";
-      conteo[clave].servicios[srv] = (conteo[clave].servicios[srv] || 0) + 1;
-      conteo[clave].total++;
+      const clave = `${v.marca} ${v.modelo}`.trim();
+      if (!clave || clave === "undefined undefined") return;
+      if (!conteo[clave]) conteo[clave] = { modelo: clave, marca: v.marca, fallas: {}, total: 0 };
+
+      if (d.tipo_servicio) {
+        // Categoría limpia del campo estructurado
+        const key = d.tipo_servicio.trim();
+        conteo[clave].fallas[key] = (conteo[clave].fallas[key] || 0) + 1;
+        conteo[clave].total++;
+      } else {
+        // Extraer frases del texto libre del técnico
+        const frases = extraerFrases(d.fallas_identificadas);
+        if (frases.length === 0) return;
+        frases.forEach(frase => {
+          conteo[clave].fallas[frase] = (conteo[clave].fallas[frase] || 0) + 1;
+        });
+        conteo[clave].total++;
+      }
     });
 
     const resultado = Object.values(conteo)
+      .filter(m => m.total > 0)
       .sort((a, b) => b.total - a.total)
       .slice(0, 15)
       .map(m => ({
-        ...m,
-        top_servicios: Object.entries(m.servicios)
+        modelo: m.modelo,
+        marca: m.marca,
+        total: m.total,
+        top_servicios: Object.entries(m.fallas)
           .sort((a, b) => b[1] - a[1])
-          .slice(0, 4)
+          .slice(0, 5)
           .map(([servicio, count]) => ({ servicio, count })),
       }));
 
