@@ -1,98 +1,49 @@
 import { NextResponse } from "next/server";
 
-const PERMISOS = {
-  // Gerente: acceso total
-  gerente: [
-    "/dashboard", "/clientes", "/vehiculos",
-    "/recepcion", "/ordenes", "/taller", "/aprobacion",
-    "/inspeccion", "/diagnosticos",
-    "/inventario", "/suplidores", "/ventas", "/facturacion", "/cafeteria",
-    "/usuarios", "/configuracion", "/mantenimiento", "/inteligencia", "/contabilidad",
-    "/historial-vehiculo",
-  ],
-  // Secretaria: flujo completo de recepción y gestión
-  secretaria: [
-    "/dashboard", "/clientes", "/vehiculos",
-    "/recepcion", "/ordenes", "/aprobacion",
-    "/inspeccion", "/diagnosticos",
-    "/facturacion", "/mantenimiento", "/contabilidad",
-    "/historial-vehiculo", "/inteligencia",
-  ],
-  // Técnico: solo trabaja en el taller
-  tecnico: [
-    "/ordenes", "/taller", "/inspeccion", "/mantenimiento", "/diagnosticos",
-  ],
-  // Almacén: solo inventario
-  almacen: ["/inventario", "/suplidores", "/ventas"],
-  // Cafetería: solo su módulo
-  cafeteria: ["/cafeteria"],
-};
+// Rutas que no requieren sesión activa
+const RUTAS_PUBLICAS = [
+  "/login",
+  "/",
+  "/cliente",
+  "/estado",
+  "/pantalla",
+  "/catalogo",
+  "/repuestos",
+  "/menu",
+  "/manifest.json",
+  "/sw.js",
+];
 
 export function middleware(request) {
   const { pathname } = request.nextUrl;
 
+  // Excluir archivos estáticos y rutas públicas
   const esPublica =
-    pathname === "/login" ||
-    pathname === "/" ||
-    pathname.startsWith("/cliente") ||
-    pathname.startsWith("/estado") ||
-    pathname.startsWith("/pantalla") ||
-    pathname.startsWith("/catalogo") ||
-    pathname.startsWith("/repuestos") ||
-    pathname.startsWith("/menu") ||
-    pathname === "/manifest.json" ||
-    pathname === "/sw.js" ||
-    pathname.startsWith("/icons") ||
+    RUTAS_PUBLICAS.some(r => pathname === r || pathname.startsWith(r + "/")) ||
     pathname.startsWith("/_next") ||
     pathname.startsWith("/api") ||
+    pathname.startsWith("/icons") ||
     pathname.endsWith(".png") ||
     pathname.endsWith(".jpg") ||
     pathname.endsWith(".ico") ||
     pathname.endsWith(".svg") ||
+    pathname.endsWith(".webp") ||
     pathname.includes("favicon");
 
   if (esPublica) return NextResponse.next();
 
+  // Verificar que el usuario tenga sesión activa
   const usuarioCookie = request.cookies.get("usuario")?.value;
   if (!usuarioCookie) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
-  try {
-    const usuario = JSON.parse(decodeURIComponent(usuarioCookie));
-    // Normalizar rol a minúsculas por si acaso viene diferente de la DB
-    const rol = (usuario.rol || "").toLowerCase();
-
-    // Si el rol no está en la tabla de permisos, dejar pasar (acceso básico)
-    if (!PERMISOS[rol]) return NextResponse.next();
-
-    // Gerente tiene acceso total
-    if (rol === "gerente") return NextResponse.next();
-
-    const permitidas = PERMISOS[rol] || [];
-    const tieneAcceso = permitidas.some(ruta =>
-      pathname === ruta || pathname.startsWith(ruta + "/")
-    );
-
-    if (!tieneAcceso) {
-      const destinos = {
-        secretaria: "/dashboard",
-        tecnico:    "/ordenes",
-        almacen:    "/inventario",
-        cafeteria:  "/cafeteria",
-      };
-      return NextResponse.redirect(new URL(destinos[rol] || "/dashboard", request.url));
-    }
-  } catch {
-    // Si la cookie está mal formada, dejar pasar en vez de redirigir al login
-    return NextResponse.next();
-  }
-
+  // Sesión válida — el control de acceso por módulo lo maneja el frontend
+  // dinámicamente según la config guardada en /permisos por el gerente.
   return NextResponse.next();
 }
 
 export const config = {
-  // NUEVO: excluir archivos estáticos, imágenes y archivos PWA del matcher
   matcher: [
     "/((?!_next/static|_next/image|favicon.ico|.*\\.png|.*\\.jpg|.*\\.svg|.*\\.ico|sw\\.js|workbox-.*\\.js|manifest\\.json).*)",
   ],

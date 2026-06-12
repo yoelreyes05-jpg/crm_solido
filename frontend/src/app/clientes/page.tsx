@@ -3,9 +3,11 @@ import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_URL as API } from "@/config";
+import { usePermisos } from "@/lib/usePermisos";
 
 export default function Clientes() {
   const router = useRouter();
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisos("clientes");
   const [clientes, setClientes] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [nuevo, setNuevo] = useState({ nombre: "", telefono: "", email: "" });
@@ -82,8 +84,8 @@ export default function Clientes() {
     <div style={container}>
       <h1 style={title}>👤 Clientes</h1>
       <div style={grid}>
-        {/* FORMULARIO NUEVO */}
-        <div style={card}>
+        {/* FORMULARIO NUEVO — solo si puede crear */}
+        {puedeCrear && <div style={card}>
           <h2 style={cardTitle}>➕ Nuevo Cliente</h2>
           <label style={label}>Nombre *</label>
           <input placeholder="Nombre completo" value={nuevo.nombre}
@@ -95,7 +97,7 @@ export default function Clientes() {
           <input placeholder="correo@ejemplo.com" value={nuevo.email}
             onChange={e => setNuevo({ ...nuevo, email: e.target.value })} style={input} />
           <button onClick={crearCliente} style={btnPrimary}>Guardar Cliente</button>
-        </div>
+        </div>}
 
         {/* LISTA */}
         <div style={card}>
@@ -134,18 +136,22 @@ export default function Clientes() {
                     <td style={td}>{c.email || "—"}</td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-                        <button onClick={() => abrirEditar(c)}
-                          style={btnAccion("#f59e0b")} title="Editar cliente">
-                          ✏️ Editar
-                        </button>
+                        {puedeEditar && (
+                          <button onClick={() => abrirEditar(c)}
+                            style={btnAccion("#f59e0b")} title="Editar cliente">
+                            ✏️ Editar
+                          </button>
+                        )}
                         <button onClick={() => router.push(`/clientes/${c.id}/historial`)}
                           style={btnAccion("#3b82f6")} title="Ver historial">
                           📋 Historial
                         </button>
-                        <button onClick={() => eliminarCliente(c.id, c.nombre)}
-                          style={btnAccion("#dc2626")} title="Eliminar">
-                          🗑️
-                        </button>
+                        {puedeEliminar && (
+                          <button onClick={() => eliminarCliente(c.id, c.nombre)}
+                            style={btnAccion("#dc2626")} title="Eliminar">
+                            🗑️
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -156,8 +162,8 @@ export default function Clientes() {
         </div>
       </div>
 
-      {/* MODAL EDITAR CLIENTE */}
-      {editando && (
+      {/* MODAL EDITAR CLIENTE — solo si puede editar */}
+      {editando && puedeEditar && (
         <div style={overlay} onClick={() => setEditando(null)}>
           <div style={modal} onClick={e => e.stopPropagation()}>
             <h2 style={{ marginTop: 0, marginBottom: 20, fontSize: 20, fontWeight: 700 }}>

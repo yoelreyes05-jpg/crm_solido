@@ -2,8 +2,10 @@
 import { useEffect, useState } from "react";
 import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
+import { usePermisos } from "@/lib/usePermisos";
 
 export default function Vehiculos() {
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisos("vehiculos");
   const [clientes, setClientes] = useState([]);
   const [vehiculos, setVehiculos] = useState([]);
   const [catalogo, setCatalogo] = useState({});
@@ -145,8 +147,8 @@ export default function Vehiculos() {
       <h1 style={title}>🚗 Vehículos</h1>
 
       <div style={grid}>
-        {/* FORMULARIO */}
-        <div style={card}>
+        {/* FORMULARIO — solo si puede crear */}
+        {puedeCrear && <div style={card}>
           <h2 style={cardTitle}>➕ Registrar Vehículo</h2>
 
           {/* ── VIN Decoder ── */}
@@ -279,7 +281,7 @@ export default function Vehiculos() {
           <button onClick={crearVehiculo} disabled={loading} style={btnPrimary}>
             {loading ? "Guardando..." : "💾 Guardar Vehículo"}
           </button>
-        </div>
+        </div>}
 
         {/* LISTA */}
         <div style={card}>
@@ -316,14 +318,18 @@ export default function Vehiculos() {
                     <td style={{ ...td, fontSize: 12 }}>{v.combustible || "—"}</td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6 }}>
-                        <button onClick={() => abrirEdicion(v)}
-                          style={{ padding: "6px 12px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                          ✏️ Editar
-                        </button>
-                        <button onClick={() => eliminarVehiculo(v.id, `${v.marca} ${v.modelo} (${v.placa})`)}
-                          style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
-                          🗑️ Borrar
-                        </button>
+                        {puedeEditar && (
+                          <button onClick={() => abrirEdicion(v)}
+                            style={{ padding: "6px 12px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                            ✏️ Editar
+                          </button>
+                        )}
+                        {puedeEliminar && (
+                          <button onClick={() => eliminarVehiculo(v.id, `${v.marca} ${v.modelo} (${v.placa})`)}
+                            style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fecaca", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
+                            🗑️ Borrar
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -335,7 +341,7 @@ export default function Vehiculos() {
       </div>
 
       {/* ── MODAL EDITAR VEHÍCULO ── */}
-      {editVehiculo && (
+      {editVehiculo && puedeEditar && (
         <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
           <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 480, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,.3)" }}>
             <h3 style={{ fontSize: 18, fontWeight: 700, marginBottom: 18 }}>✏️ Editar: {editVehiculo.marca} {editVehiculo.modelo} — {editVehiculo.placa}</h3>

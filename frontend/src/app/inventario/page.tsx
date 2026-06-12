@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
+import { usePermisos } from "@/lib/usePermisos";
 
 const CATEGORIAS = [
   "General","Filtros","Frenos","Suspensión","Motor","Eléctrico",
@@ -28,6 +29,7 @@ const CAT_COLOR: Record<string, string> = {
 };
 
 export default function InventarioPage() {
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisos("inventario");
   const [parts, setParts]       = useState<any[]>([]);
   const [suppliers, setSuppliers] = useState<any[]>([]);
   const [loading, setLoading]   = useState(true);
@@ -205,7 +207,7 @@ export default function InventarioPage() {
       {/* Header */}
       <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:24 }}>
         <h1 style={title}>📦 Inventario de Repuestos</h1>
-        <button onClick={openCreate} style={btnPrimary}>➕ Nuevo Repuesto</button>
+        {puedeCrear && <button onClick={openCreate} style={btnPrimary}>➕ Nuevo Repuesto</button>}
       </div>
 
       {/* KPIs */}
@@ -301,19 +303,23 @@ export default function InventarioPage() {
                   <td style={{ ...td, color:"#666" }}>{sup?.name || "—"}</td>
                   <td style={td}>
                     <div style={{ display:"flex", gap:6 }}>
-                      <button onClick={() => openEdit(p)}
-                        style={{ padding:"6px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
-                        ✏️
-                      </button>
+                      {puedeEditar && (
+                        <button onClick={() => openEdit(p)}
+                          style={{ padding:"6px 12px", background:"#3b82f6", color:"#fff", border:"none", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
+                          ✏️
+                        </button>
+                      )}
                       <button onClick={() => abrirCompatibilidad(p)}
                         title="Ver compatibilidad de vehículos"
                         style={{ padding:"6px 12px", background:"#f0fdf4", color:"#16a34a", border:"1px solid #bbf7d0", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
                         🔗
                       </button>
-                      <button onClick={() => setDeleteId(p.id)}
-                        style={{ padding:"6px 12px", background:"#fee2e2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
-                        🗑️
-                      </button>
+                      {puedeEliminar && (
+                        <button onClick={() => setDeleteId(p.id)}
+                          style={{ padding:"6px 12px", background:"#fee2e2", color:"#dc2626", border:"1px solid #fecaca", borderRadius:8, cursor:"pointer", fontWeight:700, fontSize:12 }}>
+                          🗑️
+                        </button>
+                      )}
                     </div>
                   </td>
                 </tr>
@@ -326,8 +332,8 @@ export default function InventarioPage() {
         </div>
       </div>
 
-      {/* MODAL CREAR/EDITAR */}
-      {modalOpen && (
+      {/* MODAL CREAR/EDITAR — protegido por permiso */}
+      {modalOpen && (puedeCrear || puedeEditar) && (
         <div style={overlay}>
           <div style={modal}>
             <h2 style={{ marginBottom:20, fontSize:20, fontWeight:700 }}>
@@ -553,7 +559,7 @@ export default function InventarioPage() {
       )}
 
       {/* CONFIRM ELIMINAR */}
-      {deleteId !== null && (
+      {deleteId !== null && puedeEliminar && (
         <div style={overlay}>
           <div style={{ ...modal, maxWidth:380, textAlign:"center" as const }}>
             <div style={{ fontSize:48, marginBottom:12 }}>⚠️</div>

@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, useRef } from "react";
 import { API_URL as API } from "@/config";
+import { usePermisos } from "@/lib/usePermisos";
 
 type Suplidor = {
   id: number;
@@ -42,6 +43,7 @@ const TIPO_COLOR: Record<string, string> = {
 const vacioForm = { name: "", rnc: "", direccion: "", telefono: "", correo: "", tipo_servicio: "" };
 
 export default function SuplidoresPage() {
+  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisos("suplidores");
   const [suppliers, setSuppliers] = useState<Suplidor[]>([]);
   const [loading, setLoading]     = useState(true);
   const [form, setForm]           = useState({ ...vacioForm });
@@ -185,8 +187,8 @@ export default function SuplidoresPage() {
       <h1 style={s.title}>📦 Suplidores</h1>
 
       <div style={s.grid}>
-        {/* ── FORMULARIO ── */}
-        <div style={s.card}>
+        {/* ── FORMULARIO — visible si puede crear o editar ── */}
+        {(puedeCrear || puedeEditar) && <div style={s.card}>
           <h2 style={s.cardTitle}>
             {editando ? `✏️ Editando: ${editando.name}` : "➕ Nuevo Suplidor"}
           </h2>
@@ -294,7 +296,7 @@ export default function SuplidoresPage() {
               </button>
             )}
           </div>
-        </div>
+        </div>}
 
         {/* ── LISTA ── */}
         <div style={s.card}>
@@ -368,14 +370,18 @@ export default function SuplidoresPage() {
                       <td style={{ ...s.td, fontSize: 12 }}>{sup.correo || "—"}</td>
                       <td style={s.td}>
                         <div style={{ display: "flex", gap: 6 }}>
-                          <button onClick={() => iniciarEdicion(sup)}
-                            style={{ padding: "6px 12px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
-                            ✏️ Editar
-                          </button>
-                          <button onClick={() => eliminar(sup)}
-                            style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
-                            🗑️ Borrar
-                          </button>
+                          {puedeEditar && (
+                            <button onClick={() => iniciarEdicion(sup)}
+                              style={{ padding: "6px 12px", background: "#dbeafe", color: "#1d4ed8", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
+                              ✏️ Editar
+                            </button>
+                          )}
+                          {puedeEliminar && (
+                            <button onClick={() => eliminar(sup)}
+                              style={{ padding: "6px 12px", background: "#fee2e2", color: "#dc2626", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
+                              🗑️ Borrar
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
