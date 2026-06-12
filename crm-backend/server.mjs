@@ -6481,6 +6481,43 @@ const cfgVal = (row) => {
   return String(v ?? "");
 };
 
+// ── GET /permisos → devuelve la config de permisos por rol ──────────────────
+app.get("/permisos", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("config_sistema")
+      .select("valor")
+      .eq("clave", "permisos_roles")
+      .maybeSingle();
+    if (!data) return res.json({});          // sin fila → usa defaults del frontend
+    const raw = data.valor?.v ?? data.valor;
+    const config = typeof raw === "string" ? JSON.parse(raw) : raw;
+    res.json(config || {});
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── POST /permisos → guarda la config de permisos por rol ───────────────────
+app.post("/permisos", async (req, res) => {
+  try {
+    const config = req.body;
+    if (!config || typeof config !== "object") {
+      return res.status(400).json({ error: "Se esperaba un objeto de permisos" });
+    }
+    const { error } = await supabase
+      .from("config_sistema")
+      .upsert(
+        { clave: "permisos_roles", valor: { v: JSON.stringify(config) }, updated_at: new Date().toISOString() },
+        { onConflict: "clave" }
+      );
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // GET /config → devuelve todos los pares clave/valor
 app.get("/config", async (req, res) => {
   try {
