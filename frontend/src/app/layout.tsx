@@ -5,14 +5,25 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
 import AsistenteIA from "@/components/AsistenteIA";
+import { PERMISOS_DEFAULT, type PermisosConfig } from "@/lib/permisos";
 
-const PERMISOS = {
-  gerente:    ["dashboard","clientes","vehiculos","ordenes","inventario","contabilidad","suplidores","ventas","facturacion","cafeteria","usuarios","configuracion","historial-vehiculo","pantalla","inteligencia","mantenimiento","taller","aprobacion","permisos"],
-  secretaria: ["dashboard","clientes","vehiculos","contabilidad","ordenes","facturacion","historial-vehiculo","inteligencia","mantenimiento","aprobacion","taller"],
-  tecnico:    ["taller","ordenes","dashboard","historial-vehiculo","mantenimiento"],
-  almacen:    ["inventario","suplidores","ventas"],
-  cafeteria:  ["cafeteria"],
+// Mapeo de claves del sidebar → clave en el sistema de permisos (cuando difieren)
+const KEY_MAP: Record<string, string> = {
+  "historial-vehiculo": "historial",
 };
+
+// Items con acceso fijo por rol — no configurables desde /permisos
+const ACCESO_FIJO: Record<string, string[]> = {
+  "dashboard": ["gerente", "secretaria", "tecnico", "almacen"],
+  "pantalla":  ["gerente", "cafeteria"],
+};
+
+function puedeVer(key: string, rol: string, cfg: PermisosConfig): boolean {
+  if (rol === "gerente") return true;
+  if (key in ACCESO_FIJO) return ACCESO_FIJO[key].includes(rol);
+  const permKey = KEY_MAP[key] ?? key;
+  return (cfg[rol] ?? {})[permKey]?.ver === true;
+}
 
 // ── Estructura de módulos colapsables ────────────────────────────────────────
 interface MenuItem { href: string; icon: string; label: string; key: string; iconBg: string; iconShadow: string; }
@@ -94,7 +105,8 @@ export default function RootLayout({ children }) {
   const [listo, setListo] = useState(false);
 
   // Estado colapsado por módulo — persistido en localStorage
-  const [modulosAbiertos, setModulosAbiertos] = useState<Record<string, boolean>>({});
+  const [modulosAbiertos,  setModulosAbiertos]  = useState<Record<string, boolean>>({});
+  const [permisosConfig,   setPermisosConfig]   = useState<PermisosConfig | null>(null);
 
   const esPublica = RUTAS_PUBLICAS.some(r => pathname === r || pathname.startsWith(r + "/") || pathname.startsWith(r + "?"));
 
@@ -118,6 +130,22 @@ export default function RootLayout({ children }) {
       }
     } catch {}
   }, [pathname]);
+
+  // Cargar permisos guardados del backend (solo para roles no-gerente)
+  useEffect(() => {
+    if (!usuario) return;
+    const rol = (usuario.rol || "").toLowerCase();
+    if (rol === "gerente") return; // gerente siempre ve todo
+    fetch(`${API}/permisos`)
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data && typeof data === "object" && Object.keys(data).length > 0) {
+          setPermisosConfig(data as PermisosConfig);
+        }
+        // Si no hay config guardada, permisosConfig queda null → usa PERMISOS_DEFAULT
+      })
+      .catch(() => {});
+  }, [usuario]);
 
   const toggleModulo = (id: string) => {
     setModulosAbiertos(prev => {
@@ -185,14 +213,14 @@ if (esPublica) return (
  </html>
   );
 
-  const permitidos = PERMISOS[usuario.rol] || [];
   const iniciales = usuario.nombre
     ? usuario.nombre.split(" ").map((n: string) => n[0]).join("").substring(0, 2).toUpperCase()
     : "U";
 
-  // Filtrar módulos y sus items según permisos del rol
+  // Filtrar módulos con permisos dinámicos (backend) o fallback a defaults
+  const cfg = permisosConfig ?? PERMISOS_DEFAULT;
   const modulosFiltrados = MODULOS
-    .map(m => ({ ...m, items: m.items.filter(i => permitidos.includes(i.key)) }))
+    .map(m => ({ ...m, items: m.items.filter(i => puedeVer(i.key, usuario.rol, cfg)) }))
     .filter(m => m.items.length > 0);
 
   // Ítem activo actual (para topbar)
