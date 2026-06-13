@@ -300,6 +300,7 @@ export default function FacturaPage() {
   const [modalCliente, setModalCliente] = useState("");
   const [cotizaciones, setCotizaciones] = useState<any[]>([]);
   const [busCot, setBusCot]             = useState("");
+  const [busCanceladas, setBusCanceladas] = useState("");
   const [convirtiendo, setConvirtiendo] = useState<number | null>(null);
 
   // ── Carga inicial ────────────────────────────────────────────────────────
@@ -689,18 +690,24 @@ export default function FacturaPage() {
   };
 
   const cancelarFactura = async (fac: any) => {
-    if (!confirm(`¿Cancelar FAC-${String(fac.id).padStart(5,"0")}?`)) return;
-    await fetch(`${API}/facturas/${fac.id}`, {
+    const msg = `¿Cancelar FAC-${String(fac.id).padStart(5,"0")} (${fac.ncf})?\n\nEsto revertirá:\n• El movimiento de caja asociado\n• El stock de los repuestos vendidos\n• La cuenta por cobrar (si aplica)\n\nEl NCF queda anulado — no se puede reutilizar.`;
+    if (!confirm(msg)) return;
+    const res = await fetch(`${API}/facturas/${fac.id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ estado: "CANCELADA" })
     });
+    const data = await res.json();
+    if (data.error) return alert("Error: " + data.error);
     fetchData();
   };
 
-  const eliminarFactura = async (id: number) => {
-    if (!confirm(`¿Eliminar permanentemente FAC-${String(id).padStart(5,"0")}?`)) return;
-    await fetch(`${API}/facturas/${id}`, { method: "DELETE" });
+  const eliminarFactura = async (id: number, estado: string) => {
+    if (estado !== "CANCELADA") return alert("Solo se pueden eliminar facturas ya CANCELADAS.\nCancela primero la factura.");
+    if (!confirm(`¿Eliminar permanentemente el registro de FAC-${String(id).padStart(5,"0")}?\nEsta acción no se puede deshacer.`)) return;
+    const res = await fetch(`${API}/facturas/${id}`, { method: "DELETE" });
+    const data = await res.json();
+    if (data.error) return alert("Error: " + data.error);
     fetchData();
   };
 
@@ -716,9 +723,20 @@ export default function FacturaPage() {
   };
 
   const facturasFiltradas = facturas.filter(f =>
-    !busHistorial ||
-    f.cliente_nombre?.toLowerCase().includes(busHistorial.toLowerCase()) ||
-    f.ncf?.toLowerCase().includes(busHistorial.toLowerCase())
+    f.estado !== "CANCELADA" && (
+      !busHistorial ||
+      f.cliente_nombre?.toLowerCase().includes(busHistorial.toLowerCase()) ||
+      f.ncf?.toLowerCase().includes(busHistorial.toLowerCase())
+    )
+  );
+
+  const facturasCanceladas = facturas.filter(f =>
+    f.estado === "CANCELADA" && (
+      !busCanceladas ||
+      f.cliente_nombre?.toLowerCase().includes(busCanceladas.toLowerCase()) ||
+      f.ncf?.toLowerCase().includes(busCanceladas.toLowerCase()) ||
+      f.notas?.toLowerCase().includes(busCanceladas.toLowerCase())
+    )
   );
 
   // ═════════════════════════════════════════════════════════════════════════
@@ -729,8 +747,9 @@ export default function FacturaPage() {
       <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
         {[
           { key: "nueva",       label: "➕ Nueva Factura / Cotización" },
-          { key: "historial",   label: `📋 Facturas (${facturas.length})` },
+          { key: "historial",   label: `📋 Facturas (${facturas.filter((f:any) => f.estado !== "CANCELADA").length})` },
           { key: "cotizaciones",label: `📄 Cotizaciones (${cotizaciones.length})` },
+          { key: "canceladas",  label: `🚫 Canceladas (${facturas.filter((f:any) => f.estado === "CANCELADA").length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ ...tabBtn,
@@ -1367,7 +1386,9 @@ export default function FacturaPage() {
                           {!cancelada && (
                             <button onClick={() => cancelarFactura(f)} style={btnAcc("#f59e0b")}>⛔</button>
                           )}
-                          <button onClick={() => eliminarFactura(f.id)} style={btnAcc("#dc2626")}>🗑️</button>
+                          {cancelada && (
+                            <button onClick={() => eliminarFactura(f.id, f.estado)} style={btnAcc("#dc2626")} title="Eliminar registro (solo facturas canceladas)">🗑️</button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -1481,6 +1502,100 @@ export default function FacturaPage() {
                 })}
                 {cotizaciones.length === 0 && (
                   <tr><td colSpan={8} style={{ textAlign: "center", color: "#888", padding: 32 }}>Sin cotizaciones registradas</td></tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ FACTURAS CANCELADAS ══════════════ */}
+      {tab === "canceladas" && (
+        <div style={card}>
+          {/* Cabecera */}
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16, flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h2 style={cardTitle}>🚫 Facturas Canceladas — Registro de Auditoría</h2>
+              <p style={{ color: "#6b7280", fontSize: 13, marginTop: 4 }}>
+                Estas facturas fueron anuladas. Su NCF sigue reservado en DGII. Solo el gerente puede eliminar el registro.
+              </p>
+            </div>
+            <input
+              placeholder="Buscar por cliente, NCF o notas..."
+              value={busCanceladas}
+              onChange={e => setBusCanceladas(e.target.value)}
+              style={{ ...input, width: 300, marginBottom: 0 }}
+            />
+          </div>
+
+          {/* KPIs rápidos */}
+          <div style={{ display: "flex", gap: 16, marginBottom: 20, flexWrap: "wrap" }}>
+            <div style={{ background: "#fee2e2", borderRadius: 10, padding: "12px 20px", minWidth: 140 }}>
+              <div style={{ fontSize: 11, color: "#dc2626", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Total canceladas</div>
+              <div style={{ fontSize: 28, fontWeight: 900, color: "#dc2626" }}>{facturasCanceladas.length}</div>
+            </div>
+            <div style={{ background: "#fef3c7", borderRadius: 10, padding: "12px 20px", minWidth: 160 }}>
+              <div style={{ fontSize: 11, color: "#d97706", fontWeight: 700, textTransform: "uppercase", letterSpacing: 1 }}>Monto anulado</div>
+              <div style={{ fontSize: 24, fontWeight: 900, color: "#d97706" }}>
+                RD$ {facturas.filter((f:any) => f.estado === "CANCELADA").reduce((s:number, f:any) => s + Number(f.total||0), 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })}
+              </div>
+            </div>
+          </div>
+
+          {/* Tabla */}
+          <div style={{ overflowX: "auto" }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {["Factura","NCF","Tipo NCF","Cliente","RNC","Vehículo","Método","Total","Fecha Emisión","Notas","Acciones"].map(h => (
+                    <th key={h} style={th}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {facturasCanceladas.map((f: any) => (
+                  <tr key={f.id} style={{ background: "#fff5f5", borderBottom: "1px solid #fecaca" }}>
+                    <td style={td}>
+                      <b style={{ color: "#dc2626" }}>FAC-{String(f.id).padStart(5,"0")}</b>
+                    </td>
+                    <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{f.ncf || "—"}</td>
+                    <td style={td}>{f.ncf_tipo || "—"}</td>
+                    <td style={td}>{f.cliente_nombre || "Consumidor Final"}</td>
+                    <td style={{ ...td, fontSize: 12, color: "#9ca3af" }}>{f.cliente_rnc || "—"}</td>
+                    <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{f.vehiculo_info || "—"}</td>
+                    <td style={td}>{f.metodo_pago || "—"}</td>
+                    <td style={{ ...td, fontWeight: 700, color: "#dc2626", textDecoration: "line-through" }}>
+                      RD$ {Number(f.total || 0).toFixed(2)}
+                    </td>
+                    <td style={{ ...td, fontSize: 11 }}>
+                      {f.created_at
+                        ? new Date(f.created_at).toLocaleString("es-DO", {
+                            day: "numeric", month: "numeric", year: "2-digit",
+                            hour: "2-digit", minute: "2-digit",
+                            timeZone: "America/Santo_Domingo"
+                          })
+                        : "—"}
+                    </td>
+                    <td style={{ ...td, fontSize: 12, color: "#6b7280", maxWidth: 200 }}>{f.notas || "—"}</td>
+                    <td style={td}>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => reimprimirFactura(f)} style={btnAcc("#374151")} title="Reimprimir">🖨️</button>
+                        <button
+                          onClick={() => eliminarFactura(f.id, f.estado)}
+                          style={btnAcc("#dc2626")}
+                          title="Eliminar registro permanentemente"
+                        >🗑️</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {facturasCanceladas.length === 0 && (
+                  <tr>
+                    <td colSpan={11} style={{ textAlign: "center", color: "#9ca3af", padding: 40 }}>
+                      ✅ No hay facturas canceladas
+                      {busCanceladas ? " que coincidan con la búsqueda" : ""}
+                    </td>
+                  </tr>
                 )}
               </tbody>
             </table>

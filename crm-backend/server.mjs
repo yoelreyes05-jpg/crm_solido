@@ -1143,6 +1143,27 @@ app.get("/ventas/:id/items", async (req, res) => {
 
 app.patch("/ventas/:id", async (req, res) => {
   const { id } = req.params;
+
+  // Si se está cancelando, restaurar inventario
+  if (req.body.estado === "CANCELADA") {
+    const { data: venta } = await supabase.from("ventas").select("*").eq("id", id).single();
+    if (!venta) return res.json({ error: "Venta no encontrada" });
+    if (venta.estado === "CANCELADA") return res.json({ error: "La venta ya está cancelada" });
+
+    // Restaurar stock de cada ítem
+    const { data: items } = await supabase.from("venta_items").select("*").eq("venta_id", id);
+    if (items && items.length > 0) {
+      for (const item of items) {
+        const { data: prod } = await supabase.from("inventario").select("stock").eq("id", item.part_id).single();
+        if (prod) {
+          await supabase.from("inventario")
+            .update({ stock: prod.stock + item.quantity })
+            .eq("id", item.part_id);
+        }
+      }
+    }
+  }
+
   const { data, error } = await supabase.from("ventas").update(req.body).eq("id", id).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
@@ -1150,6 +1171,14 @@ app.patch("/ventas/:id", async (req, res) => {
 
 app.delete("/ventas/:id", async (req, res) => {
   const { id } = req.params;
+
+  // Solo se pueden eliminar ventas ya CANCELADAS
+  const { data: venta } = await supabase.from("ventas").select("estado").eq("id", id).single();
+  if (!venta) return res.json({ error: "Venta no encontrada" });
+  if (venta.estado !== "CANCELADA") {
+    return res.json({ error: "Solo se pueden eliminar ventas ya CANCELADAS. Cancela primero." });
+  }
+
   await supabase.from("venta_items").delete().eq("venta_id", id);
   const { error } = await supabase.from("ventas").delete().eq("id", id);
   if (error) return res.json({ error: error.message });
@@ -2261,6 +2290,7 @@ app.post("/auth/login", async (req, res) => {
 // =====================================================
 // 🧾 NCF
 // =====================================================
+// ⚠️ SOLO LECTURA — no incrementa. El incremento real ocurre en POST /facturas.
 app.get("/ncf/siguiente", async (req, res) => {
   const { tipo } = req.query;
   const { data } = await supabase
@@ -2269,9 +2299,8 @@ app.get("/ncf/siguiente", async (req, res) => {
     .eq("tipo", tipo || "B02")
     .single();
   if (!data) return res.json({ ncf: (tipo || "B02") + "00000001" });
-  const nuevo = data.secuencia_actual + 1;
-  await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo || "B02");
-  res.json({ ncf: data.prefijo + String(nuevo).padStart(8, "0") });
+  const siguiente = (data.secuencia_actual || 0) + 1;
+  res.json({ ncf: data.prefijo + String(siguiente).padStart(8, "0") });
 });
 
 // =====================================================
@@ -2454,15 +2483,90 @@ app.get("/facturas/:id/items", async (req, res) => {
 
 app.patch("/facturas/:id", async (req, res) => {
   const { id } = req.params;
-  const { data, error } = await supabase.from("facturas").update(req.body).eq("id", id).select();
-  if (error) return res.json({ error: error.message });
-  res.json(data[0]);
+  const facId = parseInt(id, 10);
+
+  try {
+    // ── Cancelación: requiere reversiones contables e inventario ──────────
+    if (req.body.estado === "CANCELADA") {
+      // 1. Leer la factura actual para saber si ya está cancelada y el método
+      const { data: fac } = await supabase.from("facturas").select("*").eq("id", facId).single();
+      if (!fac) return res.json({ error: "Factura no encontrada" });
+      if (fac.estado === "CANCELADA") return res.json({ error: "La factura ya está cancelada" });
+
+      // 2. Marcar como CANCELADA
+      const { data: updated, error: errUpd } = await supabase
+        .from("facturas").update({ estado: "CANCELADA" }).eq("id", facId).select();
+      if (errUpd) return res.json({ error: errUpd.message });
+
+      // 3. Revertir movimiento de caja (solo si no era CRÉDITO — los créditos no tocan caja)
+      const metodo = (fac.metodo_pago || "EFECTIVO").toUpperCase();
+      if (metodo !== "CREDITO") {
+        await supabase.from("caja_movimientos").insert([{
+          tipo:        "EGRESO",
+          concepto:    `Cancelación Factura ${fac.ncf} — ${fac.cliente_nombre || "Consumidor Final"}`,
+          monto:       Number(fac.total),
+          metodo_pago: metodo,
+          factura_id:  facId,
+          created_at:  new Date()
+        }]);
+      }
+
+      // 4. Cancelar cuenta por cobrar si existía (método CRÉDITO)
+      if (metodo === "CREDITO") {
+        await supabase.from("cuentas_cobrar")
+          .update({ estado: "CANCELADA" })
+          .eq("factura_id", facId);
+      }
+
+      // 5. Restaurar stock de repuestos
+      const { data: items } = await supabase
+        .from("factura_items").select("*").eq("factura_id", facId);
+      for (const item of (items || [])) {
+        if (item.tipo === "repuesto" && item.inventario_id) {
+          const { data: prod } = await supabase
+            .from("inventario").select("stock").eq("id", item.inventario_id).single();
+          if (prod) {
+            await supabase.from("inventario")
+              .update({ stock: prod.stock + Number(item.cantidad) })
+              .eq("id", item.inventario_id);
+            await supabase.from("inventario_movimientos").insert([{
+              part_id:     item.inventario_id,
+              tipo:        "ENTRADA",
+              cantidad:    Number(item.cantidad),
+              descripcion: `Cancelación Factura ${fac.ncf}`,
+              created_at:  new Date()
+            }]);
+          }
+        }
+      }
+
+      return res.json(updated[0]);
+    }
+
+    // ── Actualización normal (método pago, cliente, notas, etc.) ─────────
+    const { data, error } = await supabase.from("facturas").update(req.body).eq("id", facId).select();
+    if (error) return res.json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) {
+    console.error("Error en PATCH /facturas:", err);
+    res.json({ error: err.message || "Error interno" });
+  }
 });
 
+// Solo el gerente debería llamar este endpoint y solo para facturas CANCELADAS.
+// Facturas activas deben cancelarse primero con PATCH.
 app.delete("/facturas/:id", async (req, res) => {
   const { id } = req.params;
-  await supabase.from("factura_items").delete().eq("factura_id", id);
-  const { error } = await supabase.from("facturas").delete().eq("id", id);
+  const facId = parseInt(id, 10);
+
+  const { data: fac } = await supabase.from("facturas").select("estado").eq("id", facId).single();
+  if (!fac) return res.json({ error: "Factura no encontrada" });
+  if (fac.estado !== "CANCELADA") {
+    return res.json({ error: "Solo se pueden eliminar facturas ya CANCELADAS. Cancela primero." });
+  }
+
+  await supabase.from("factura_items").delete().eq("factura_id", facId);
+  const { error } = await supabase.from("facturas").delete().eq("id", facId);
   if (error) return res.json({ error: error.message });
   res.json({ ok: true });
 });
@@ -5374,18 +5478,19 @@ app.post("/cotizaciones/:id/convertir", async (req, res) => {
     // Crear factura con los datos de la cotización
     const { metodo_pago = "EFECTIVO", dias_credito } = req.body;
 
-    // Obtener siguiente NCF
+    // Obtener siguiente NCF (usa ncf_config igual que POST /facturas)
+    const tipo_ncf = cot.ncf_tipo || "B02";
     const { data: ncfRow } = await supabase
-      .from("ncf_secuencias")
+      .from("ncf_config")
       .select("*")
-      .eq("tipo", cot.ncf_tipo)
+      .eq("tipo", tipo_ncf)
       .single();
 
     let ncf = null;
     if (ncfRow) {
-      const siguienteNum = (ncfRow.actual || 0) + 1;
-      ncf = `${cot.ncf_tipo}${String(siguienteNum).padStart(8, "0")}`;
-      await supabase.from("ncf_secuencias").update({ actual: siguienteNum }).eq("tipo", cot.ncf_tipo);
+      const siguienteNum = (ncfRow.secuencia_actual || 0) + 1;
+      ncf = (ncfRow.prefijo || tipo_ncf) + String(siguienteNum).padStart(8, "0");
+      await supabase.from("ncf_config").update({ secuencia_actual: siguienteNum }).eq("tipo", tipo_ncf);
     }
 
     // Resolver orden_id desde el diagnóstico de la cotización
