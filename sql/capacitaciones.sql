@@ -41,9 +41,26 @@ DROP POLICY IF EXISTS "allow_all_alumnos"  ON capacitaciones_alumnos;
 CREATE POLICY "allow_all_cursos"  ON capacitaciones_cursos  FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "allow_all_alumnos" ON capacitaciones_alumnos FOR ALL USING (true) WITH CHECK (true);
 
+-- Tabla de pagos (historial de abonos por alumno)
+CREATE TABLE IF NOT EXISTS capacitaciones_pagos (
+  id         SERIAL PRIMARY KEY,
+  alumno_id  INTEGER REFERENCES capacitaciones_alumnos(id) ON DELETE CASCADE,
+  monto      NUMERIC(12,2) NOT NULL,
+  fecha      DATE DEFAULT CURRENT_DATE,
+  metodo     TEXT DEFAULT 'Efectivo',
+  referencia TEXT,
+  notas      TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+ALTER TABLE capacitaciones_pagos ENABLE ROW LEVEL SECURITY;
+DROP POLICY IF EXISTS "allow_all_pagos" ON capacitaciones_pagos;
+CREATE POLICY "allow_all_pagos" ON capacitaciones_pagos FOR ALL USING (true) WITH CHECK (true);
+
 -- Índices
-CREATE INDEX IF NOT EXISTS idx_cap_alumnos_curso ON capacitaciones_alumnos(curso_id);
+CREATE INDEX IF NOT EXISTS idx_cap_alumnos_curso  ON capacitaciones_alumnos(curso_id);
 CREATE INDEX IF NOT EXISTS idx_cap_alumnos_estado ON capacitaciones_alumnos(estado);
+CREATE INDEX IF NOT EXISTS idx_cap_pagos_alumno   ON capacitaciones_pagos(alumno_id);
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Datos de ejemplo (cursos precargados)

@@ -85,7 +85,8 @@ const MODULOS: Modulo[] = [
   {
     id: "capacitaciones", label: "Capacitaciones", icon: "🎓", color: "#7c3aed",
     items: [
-      { href: "/capacitaciones", icon: "🎓", label: "Capacitaciones", key: "capacitaciones", iconBg: "linear-gradient(145deg,#4c1d95,#7c3aed)", iconShadow: "0 4px 12px rgba(124,58,237,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/capacitaciones",             icon: "🎓", label: "Capacitaciones", key: "capacitaciones", iconBg: "linear-gradient(145deg,#4c1d95,#7c3aed)", iconShadow: "0 4px 12px rgba(124,58,237,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/capacitaciones/facturacion", icon: "🧾", label: "Facturación",    key: "capacitaciones", iconBg: "linear-gradient(145deg,#1e1b4b,#4338ca)", iconShadow: "0 4px 12px rgba(67,56,202,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
     ],
   },
   {
