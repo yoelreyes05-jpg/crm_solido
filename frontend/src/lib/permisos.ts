@@ -51,6 +51,7 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "usuarios",        label: "Usuarios",               descripcion: "Gestión de cuentas de usuario",                        grupo: "Admin"     },
   { key: "configuracion",   label: "Configuración",          descripcion: "Ajustes generales del sistema",                        grupo: "Admin"     },
   { key: "permisos",        label: "Permisos de Roles",      descripcion: "Gestión de acceso por rol",                            grupo: "Admin"     },
+  { key: "capacitaciones",  label: "Capacitaciones",         descripcion: "Cursos, alumnos, ingresos y tasas de deserción",       grupo: "Admin"     },
 ];
 
 // ── Shortcuts de conjuntos de permisos ───────────────────────────────────────
@@ -93,6 +94,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+    capacitaciones:  OPERACION,
   },
 
   tecnico: {
@@ -118,6 +120,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+    capacitaciones:  VER,
   },
 
   almacen: {
@@ -143,6 +146,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+    capacitaciones:  NADA,
   },
 
   cafeteria: {
