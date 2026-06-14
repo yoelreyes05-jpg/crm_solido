@@ -7,7 +7,7 @@ import Link from "next/link";
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 interface Curso {
   id: number; nombre: string; instructor: string; horas: number; precio: number;
-  modalidad: string; estado: string; descripcion: string; fecha_proxima: string; created_at: string;
+  modalidad: string; estado: string; descripcion: string; fecha_proxima: string; fecha_fin: string; created_at: string;
 }
 interface Alumno {
   id: number; curso_id: number; nombre: string; telefono: string; email: string;
@@ -22,13 +22,24 @@ const ESTADOS_ALUMNO = [
   { value: "completado", label: "Completado", color: "#15803d", bg: "#dcfce7" },
   { value: "desertado",  label: "Desertado",  color: "#b91c1c", bg: "#fee2e2" },
 ];
-const CURSO_BLANK = { nombre:"", instructor:"", horas:0, precio:0, modalidad:"Presencial", estado:"activo", descripcion:"", fecha_proxima:"" };
+const CURSO_BLANK = { nombre:"", instructor:"", horas:0, precio:0, modalidad:"Presencial", estado:"activo", descripcion:"", fecha_proxima:"", fecha_fin:"" };
 const ALUMNO_BLANK = { nombre:"", telefono:"", email:"", estado:"inscrito", fecha_inscripcion: new Date().toISOString().split("T")[0], monto_pagado:0, notas:"" };
 
 function fmt(n: number) { return "RD$ " + Number(n).toLocaleString("es-DO", { minimumFractionDigits: 0 }); }
 function pct(a: number, b: number) { return b === 0 ? 0 : Math.round(a / b * 100); }
 function hoy() { return new Date().toLocaleDateString("es-DO", { day:"2-digit", month:"long", year:"numeric" }); }
 function numCert(id: number) { return `CERT-${String(id).padStart(4,"0")}-${new Date().getFullYear()}`; }
+function calcFechaFin(fechaInicio: string, horas: number): string {
+  if (!fechaInicio || horas <= 0) return "";
+  const dias = Math.ceil(horas / 8);
+  const d = new Date(fechaInicio + "T12:00:00");
+  d.setDate(d.getDate() + dias - 1);
+  return d.toISOString().split("T")[0];
+}
+function fmtFecha(iso: string) {
+  if (!iso) return "";
+  return new Date(iso + "T00:00:00").toLocaleDateString("es-DO", { day:"2-digit", month:"short", year:"numeric" });
+}
 
 // ─── Página ───────────────────────────────────────────────────────────────────
 export default function CapacitacionesPage() {
@@ -59,6 +70,14 @@ export default function CapacitacionesPage() {
   // Certificado
   const [certData, setCertData] = useState<CertData | null>(null);
   const certRef = useRef<HTMLDivElement>(null);
+  const [diplomaEdit, setDiplomaEdit] = useState(false);
+  const [diplomaTxt, setDiplomaTxt] = useState({
+    titulo:    "Certificado de Participación",
+    subtitulo: "Se certifica que:",
+    cuerpo:    "Ha completado satisfactoriamente el curso de:",
+    ciudad:    "Santo Domingo, República Dominicana",
+    gerencia:  "Gerencia General",
+  });
 
   // ── Cargar datos ────────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
@@ -96,7 +115,8 @@ export default function CapacitacionesPage() {
   const abrirEditCurso = (c: Curso) => {
     setEditCurso(c);
     setFormCurso({ nombre:c.nombre, instructor:c.instructor, horas:c.horas, precio:c.precio,
-      modalidad:c.modalidad, estado:c.estado, descripcion:c.descripcion, fecha_proxima:c.fecha_proxima??""});
+      modalidad:c.modalidad, estado:c.estado, descripcion:c.descripcion, fecha_proxima:c.fecha_proxima??"",
+      fecha_fin:c.fecha_fin ?? calcFechaFin(c.fecha_proxima??"", c.horas) });
     setErrCurso(null); setModalCurso(true);
   };
 
@@ -295,7 +315,8 @@ export default function CapacitacionesPage() {
                     <div style={{ fontSize:15, fontWeight:700, color:"#111827" }}>{curso.nombre}</div>
                     <div style={{ fontSize:12, color:"#6b7280", marginTop:3 }}>
                       👤 {curso.instructor} · ⏱ {curso.horas}h
-                      {curso.fecha_proxima && ` · 📅 ${new Date(curso.fecha_proxima+"T00:00:00").toLocaleDateString("es-DO",{day:"2-digit",month:"short",year:"numeric"})}`}
+                      {curso.fecha_proxima && ` · 📅 Inicio: ${fmtFecha(curso.fecha_proxima)}`}
+                      {curso.fecha_fin && ` → Fin: ${fmtFecha(curso.fecha_fin)}`}
                     </div>
                   </div>
                   <div style={{ display:"flex", gap:5, flexShrink:0, flexWrap:"wrap", justifyContent:"flex-end" }}>
@@ -463,15 +484,26 @@ export default function CapacitacionesPage() {
               </div>
               <div>
                 <label style={S.label}>Duración (horas)</label>
-                <input style={S.input} type="number" min={0} value={formCurso.horas} onChange={e => setFormCurso({ ...formCurso, horas:Number(e.target.value) })} />
+                <input style={S.input} type="number" min={0} value={formCurso.horas} onChange={e => {
+                  const horas = Number(e.target.value);
+                  setFormCurso(f => ({ ...f, horas, fecha_fin: calcFechaFin(f.fecha_proxima, horas) }));
+                }} />
               </div>
               <div>
                 <label style={S.label}>Precio por alumno (RD$)</label>
                 <input style={S.input} type="number" min={0} value={formCurso.precio} onChange={e => setFormCurso({ ...formCurso, precio:Number(e.target.value) })} />
               </div>
               <div>
-                <label style={S.label}>Próxima fecha</label>
-                <input style={S.input} type="date" value={formCurso.fecha_proxima} onChange={e => setFormCurso({ ...formCurso, fecha_proxima:e.target.value })} />
+                <label style={S.label}>Fecha de inicio</label>
+                <input style={S.input} type="date" value={formCurso.fecha_proxima} onChange={e => {
+                  const fp = e.target.value;
+                  setFormCurso(f => ({ ...f, fecha_proxima: fp, fecha_fin: calcFechaFin(fp, f.horas) }));
+                }} />
+              </div>
+              <div>
+                <label style={S.label}>Fecha de fin <span style={{ color:"#9ca3af", fontWeight:400 }}>(auto-calculada)</span></label>
+                <input style={{ ...S.input, background:"#f9fafb", color: formCurso.fecha_fin ? "#15803d" : "#9ca3af" }} type="date" value={formCurso.fecha_fin}
+                  onChange={e => setFormCurso({ ...formCurso, fecha_fin: e.target.value })} />
               </div>
               <div>
                 <label style={S.label}>Modalidad</label>
@@ -575,14 +607,39 @@ export default function CapacitacionesPage() {
       {/* MODAL CERTIFICADO / DIPLOMA                                           */}
       {/* ══════════════════════════════════════════════════════════════════════ */}
       {certData && (
-        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:16 }}>
+        <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.75)", zIndex:300, display:"flex", alignItems:"center", justifyContent:"center", flexDirection:"column", gap:12, overflowY:"auto", padding:"20px 0" }}>
           {/* Botones de control */}
-          <div style={{ display:"flex", gap:10, zIndex:10 }}>
+          <div style={{ display:"flex", gap:10, zIndex:10, flexWrap:"wrap", justifyContent:"center" }}>
             <button style={{ ...S.btn, background:"linear-gradient(135deg,#b45309,#d97706)", color:"#fff", fontSize:14 }} onClick={imprimirCertificado}>
               🖨️ Imprimir / Descargar PDF
             </button>
-            <button style={{ ...S.btn, ...S.btnGray }} onClick={() => setCertData(null)}>✕ Cerrar</button>
+            <button style={{ ...S.btn, background: diplomaEdit ? "#1d4ed8" : "#f3f4f6", color: diplomaEdit ? "#fff" : "#374151", border:"1px solid #d1d5db" }}
+              onClick={() => setDiplomaEdit(!diplomaEdit)}>
+              ✏️ {diplomaEdit ? "Ocultar editor" : "Editar texto diploma"}
+            </button>
+            <button style={{ ...S.btn, ...S.btnGray }} onClick={() => { setCertData(null); setDiplomaEdit(false); }}>✕ Cerrar</button>
           </div>
+
+          {/* Panel editor de texto */}
+          {diplomaEdit && (
+            <div style={{ background:"#fff", borderRadius:12, padding:"16px 20px", width:"min(700px,95vw)", display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, boxShadow:"0 4px 20px rgba(0,0,0,0.3)" }}>
+              <div style={{ gridColumn:"1/-1", fontSize:13, fontWeight:700, color:"#374151", marginBottom:2 }}>✏️ Personalizar texto del diploma</div>
+              {([
+                { key:"titulo",    label:"Título principal" },
+                { key:"subtitulo", label:"Subtítulo (\"Se certifica que:\")"},
+                { key:"cuerpo",    label:"Cuerpo (antes del nombre del curso)"},
+                { key:"ciudad",    label:"Ciudad / Lugar"},
+                { key:"gerencia",  label:"Cargo firma derecha"},
+              ] as const).map(f => (
+                <div key={f.key}>
+                  <label style={{ fontSize:11, fontWeight:600, color:"#6b7280", display:"block", marginBottom:2 }}>{f.label}</label>
+                  <input style={{ width:"100%", padding:"6px 10px", borderRadius:6, border:"1px solid #d1d5db", fontSize:13, boxSizing:"border-box" as const }}
+                    value={diplomaTxt[f.key]}
+                    onChange={e => setDiplomaTxt(t => ({ ...t, [f.key]: e.target.value }))} />
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Certificado (A4 landscape) */}
           <div ref={certRef} style={{ width:1050, height:742, overflow:"hidden", borderRadius:4, boxShadow:"0 25px 60px rgba(0,0,0,0.5)" }}>
@@ -627,10 +684,10 @@ export default function CapacitacionesPage() {
 
                 {/* Título */}
                 <div style={{ fontSize:30, fontWeight:700, color:"#1d4ed8", letterSpacing:4, textTransform:"uppercase", fontFamily:"Arial,sans-serif", marginBottom:6 }}>
-                  Certificado de Participación
+                  {diplomaTxt.titulo}
                 </div>
                 <div style={{ fontSize:13, color:"#6b7280", letterSpacing:2, fontFamily:"Arial,sans-serif", textTransform:"uppercase", marginBottom:20 }}>
-                  Se certifica que:
+                  {diplomaTxt.subtitulo}
                 </div>
 
                 {/* Nombre del alumno */}
@@ -643,7 +700,7 @@ export default function CapacitacionesPage() {
 
                 {/* Descripción */}
                 <div style={{ fontSize:14, color:"#374151", textAlign:"center", fontFamily:"Arial,sans-serif", lineHeight:1.7, marginBottom:20 }}>
-                  Ha completado satisfactoriamente el curso de:
+                  {diplomaTxt.cuerpo}
                   <br />
                   <strong style={{ fontSize:19, color:"#1d4ed8", display:"block", marginTop:4 }}>
                     {certData.curso.nombre}
@@ -657,7 +714,7 @@ export default function CapacitacionesPage() {
                 <div style={{ display:"flex", justifyContent:"space-around", width:"80%", marginTop:"auto", marginBottom:12 }}>
                   {[
                     { titulo:"Instructor", nombre:certData.curso.instructor || "Instructor" },
-                    { titulo:"Gerencia General", nombre:"Sólido Auto Servicio" },
+                    { titulo:diplomaTxt.gerencia, nombre:"Sólido Auto Servicio" },
                   ].map(f => (
                     <div key={f.titulo} style={{ textAlign:"center" }}>
                       <div style={{ width:160, borderBottom:"1.5px solid #374151", marginBottom:6 }} />
@@ -669,7 +726,7 @@ export default function CapacitacionesPage() {
 
                 {/* Pie */}
                 <div style={{ display:"flex", justifyContent:"space-between", width:"100%", fontSize:10, color:"#9ca3af", fontFamily:"Arial,sans-serif", marginTop:4 }}>
-                  <span>Santo Domingo, República Dominicana</span>
+                  <span>{diplomaTxt.ciudad}</span>
                   <span style={{ fontSize:11, color:"#b45309", fontWeight:700 }}>{numCert(certData.alumno.id)}</span>
                   <span>Fecha: {hoy()}</span>
                 </div>

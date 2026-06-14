@@ -13,7 +13,8 @@ function generarHTML(
   factura: any,
   items: any[],
   clienteExtra: any = {},
-  esCotizacion = false
+  esCotizacion = false,
+  pagoMixto?: { efectivo: number; resto: number; metodoResto: string }
 ) {
   // Leer datos de empresa desde la caché dinámica (actualizada por Configuración)
   const EMPRESA = getEmpresaSync();
@@ -186,6 +187,12 @@ function generarHTML(
     <div class="t-row"><span>Subtotal:</span><span>RD$ ${subtotal.toFixed(2)}</span></div>
     <div class="t-row"><span>ITBIS (18%):</span><span>RD$ ${itbis.toFixed(2)}</span></div>
     <div class="t-row t-total"><span>TOTAL:</span><span>RD$ ${total.toFixed(2)}</span></div>
+    ${pagoMixto ? `
+    <div style="margin-top:10px;padding:10px 0;border-top:1px dashed #ccc;">
+      <div style="font-size:11px;text-transform:uppercase;color:#888;margin-bottom:6px;letter-spacing:1px;">Desglose de pago</div>
+      <div class="t-row" style="font-size:13px;"><span>💵 Efectivo:</span><span>RD$ ${pagoMixto.efectivo.toFixed(2)}</span></div>
+      <div class="t-row" style="font-size:13px;"><span>${pagoMixto.metodoResto === "TARJETA" ? "💳" : "🏦"} ${pagoMixto.metodoResto}:</span><span>RD$ ${pagoMixto.resto.toFixed(2)}</span></div>
+    </div>` : ""}
   </div>
 
   <button class="btn-imprimir" onclick="imprimirAhora()">🖨️ Imprimir / Guardar PDF</button>
@@ -264,6 +271,8 @@ export default function FacturaPage() {
   const [clienteSeleccionado, setClienteSel]  = useState<any>(null);
   const [vehiculoId, setVehiculoId]           = useState("");
   const [method, setMethod]                   = useState("EFECTIVO");
+  const [montoEfectivoMixto, setMontoEfectivoMixto] = useState("");
+  const [metodoResto, setMetodoResto]         = useState("TARJETA");
   const [diasCredito, setDiasCredito]         = useState(30);
   const [ncfTipo, setNcfTipo]                 = useState("B02");
   // ✅ NUEVO: RNC manual para cuando no hay cliente seleccionado pero se emite B01/B14/B15
@@ -615,6 +624,12 @@ export default function FacturaPage() {
     try {
       const veh = vehiculosFiltrados.find(v => v.id === Number(vehiculoId));
 
+      const efecMixto = method === "MIXTO" ? Number(montoEfectivoMixto || 0) : 0;
+      const restoMixto = method === "MIXTO" ? Math.max(0, total - efecMixto) : 0;
+      const metPagoFinal = method === "MIXTO"
+        ? `MIXTO (Efectivo RD$${efecMixto.toFixed(2)} + ${metodoResto} RD$${restoMixto.toFixed(2)})`
+        : method;
+
       const body = {
         items: snap.map(p => ({
           tipo:            p.tipo,
@@ -624,7 +639,7 @@ export default function FacturaPage() {
           itbis_aplica:    p.itbis_aplica,
           inventario_id:   p.inventario_id || null
         })),
-        metodo_pago:    method,
+        metodo_pago:    metPagoFinal,
         dias_credito:   method === "CREDITO" ? diasCredito : undefined,
         ncf_tipo:       ncfTipo,
         subtotal,
@@ -646,8 +661,11 @@ export default function FacturaPage() {
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
 
-      setUltimaFactura({ factura: data, items: snap });
-      abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false));
+      const pagoMixtoData = method === "MIXTO"
+        ? { efectivo: efecMixto, resto: restoMixto, metodoResto }
+        : undefined;
+      setUltimaFactura({ factura: data, items: snap, pagoMixto: pagoMixtoData });
+      abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false, pagoMixtoData));
 
       // ── Registrar compatibilidades aprendidas si teníamos VIN ──────────────
       if (vinPerfilMostrador?.marca) {
@@ -674,6 +692,7 @@ export default function FacturaPage() {
       setCarrito([]); setClienteId(""); setClienteSel(null);
       setVehiculoId(""); setMontoRecibido(""); setDiagCargado(null);
       setRncManual(""); setRazonSocial(""); setNcfTipo("B02");
+      setMethod("EFECTIVO"); setMontoEfectivoMixto(""); setMetodoResto("TARJETA");
       limpiarVINFac();
       fetchData();
     } catch (e: any) { alert("Error generando factura: " + e.message); }
@@ -922,7 +941,31 @@ export default function FacturaPage() {
                     <option value="TRANSFERENCIA">🏦 Transferencia</option>
                     <option value="CHEQUE">📄 Cheque</option>
                     <option value="CREDITO">🗓️ Crédito</option>
+                    <option value="MIXTO">🔀 Mixto (Efectivo + Tarjeta/Transf.)</option>
                   </select>
+                  {method === "MIXTO" && (
+                    <div style={{ marginTop: 8, background: "#f0f9ff", border: "1px solid #bae6fd", borderRadius: 8, padding: "10px 12px" }}>
+                      <label style={{ ...labelS, color: "#0369a1", marginBottom: 4, fontSize: 12 }}>💵 Monto en efectivo (RD$)</label>
+                      <input
+                        type="number" min={0} step="0.01"
+                        value={montoEfectivoMixto}
+                        onChange={e => setMontoEfectivoMixto(e.target.value)}
+                        placeholder="0.00"
+                        style={{ ...input, marginBottom: 8, borderColor: "#bae6fd" }}
+                      />
+                      <label style={{ ...labelS, color: "#0369a1", marginBottom: 4, fontSize: 12 }}>Resto con:</label>
+                      <select value={metodoResto} onChange={e => setMetodoResto(e.target.value)} style={{ ...input, marginBottom: 4 }}>
+                        <option value="TARJETA">💳 Tarjeta</option>
+                        <option value="TRANSFERENCIA">🏦 Transferencia</option>
+                        <option value="CHEQUE">📄 Cheque</option>
+                      </select>
+                      {montoEfectivoMixto && (
+                        <div style={{ fontSize: 12, color: "#0369a1", marginTop: 4 }}>
+                          💳 {metodoResto}: RD$ {Math.max(0, total - Number(montoEfectivoMixto)).toFixed(2)}
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {method === "CREDITO" && (
                     <div style={{ marginTop: 8, background: "#fef3c7", border: "1px solid #fde68a", borderRadius: 8, padding: "8px 12px" }}>
                       <label style={{ ...labelS, color: "#92400e", marginBottom: 4 }}>📅 Días de crédito</label>
@@ -1335,7 +1378,7 @@ export default function FacturaPage() {
             {ultimaFactura && (
               <button onClick={() =>
                 abrirImpresion(generarHTML(
-                  ultimaFactura.factura, ultimaFactura.items, {}, false
+                  ultimaFactura.factura, ultimaFactura.items, {}, false, ultimaFactura.pagoMixto
                 ))
               } style={btnReimprimir}>
                 🔁 Reimprimir FAC-{String(ultimaFactura.factura.id).padStart(5, "0")}

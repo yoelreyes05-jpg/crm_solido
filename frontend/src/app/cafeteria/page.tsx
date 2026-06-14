@@ -1,8 +1,9 @@
 "use client";
-import { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef, useCallback } from "react";
 
 import { API_URL as API } from "@/config";
 import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
+import { usePermisos } from "@/lib/usePermisos";
 
 // Datos fijos de la cafetería (nombre y logo propios).
 // Sin RNC — operación informal dentro del taller, no constituida como empresa.
@@ -282,6 +283,7 @@ export default function CafeteriaPage() {
         {[
           { k: "vender",    l: "🛒 Vender" },
           { k: "productos", l: "➕ Gestionar Productos" },
+          { k: "almacen",   l: "📦 Almacén" },
           { k: "cuadre",    l: "🏦 Cuadre" },
           { k: "receta",    l: "📋 Receta" },
           { k: "historial", l: "📄 Historial" },
@@ -427,6 +429,8 @@ export default function CafeteriaPage() {
       {tab === "receta" && <CafeteriaRecetas />}
 
       {tab === "historial" && <CafeteriaHistorial />}
+
+      {tab === "almacen" && <CafeteriaAlmacen productos={productos} onReload={obtener} />}
 
       {tab === "productos" && (
         <div style={{ maxWidth: 640 }}>
@@ -1723,6 +1727,284 @@ function CafeteriaRecetas() {
                 );
               })
             )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Componente: Almacén (control de inventario con bitácora)
+// ─────────────────────────────────────────────────────────────────────────────
+const ROLES_ALMACEN = ["gerente", "administrador", "secretaria", "admin"];
+
+function CafeteriaAlmacen({ productos, onReload }: { productos: any[]; onReload: () => void }) {
+  const { rol: rolUsuario, usuario } = usePermisos();
+  const puedeEditar = ROLES_ALMACEN.includes((rolUsuario ?? "").toLowerCase());
+
+  const [movimientos, setMovimientos] = React.useState<any[]>([]);
+  const [cargando, setCargando] = React.useState(false);
+  const [modalAbierto, setModalAbierto] = React.useState(false);
+  const [form, setForm] = React.useState({
+    producto_id: "",
+    tipo: "ENTRADA",
+    cantidad: "",
+    motivo: "",
+    referencia: "",
+  });
+  const [guardando, setGuardando] = React.useState(false);
+  const [msg, setMsg] = React.useState("");
+  const [filtroProducto, setFiltroProducto] = React.useState("");
+
+  const cargarMovimientos = React.useCallback(async () => {
+    setCargando(true);
+    try {
+      const r = await fetch(`${API}/cafeteria/almacen/movimientos`);
+      const d = await r.json();
+      setMovimientos(Array.isArray(d) ? d : []);
+    } catch {
+      setMovimientos([]);
+    } finally {
+      setCargando(false);
+    }
+  }, [API]);
+
+  React.useEffect(() => { cargarMovimientos(); }, [cargarMovimientos]);
+
+  const abrirModal = () => {
+    setForm({ producto_id: productos[0]?.id ?? "", tipo: "ENTRADA", cantidad: "", motivo: "", referencia: "" });
+    setMsg("");
+    setModalAbierto(true);
+  };
+
+  const guardarMovimiento = async () => {
+    if (!form.producto_id || !form.cantidad || Number(form.cantidad) <= 0) {
+      setMsg("Completa producto y cantidad.");
+      return;
+    }
+    setGuardando(true);
+    try {
+      const r = await fetch(`${API}/cafeteria/almacen/movimientos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          producto_id: Number(form.producto_id),
+          tipo: form.tipo,
+          cantidad: Number(form.cantidad),
+          motivo: form.motivo || null,
+          referencia: form.referencia || null,
+          usuario: (usuario as any)?.nombre ?? rolUsuario ?? "Sistema",
+        }),
+      });
+      if (!r.ok) throw new Error(await r.text());
+      setMsg("✅ Movimiento registrado.");
+      setModalAbierto(false);
+      cargarMovimientos();
+      onReload();
+    } catch (e: any) {
+      setMsg("❌ Error: " + e.message);
+    } finally {
+      setGuardando(false);
+    }
+  };
+
+  const movFiltrados = filtroProducto
+    ? movimientos.filter(m => String(m.producto_id) === filtroProducto)
+    : movimientos;
+
+  const stockPorProducto = productos.map(p => ({
+    ...p,
+    ultimoMov: movimientos.find(m => m.producto_id === p.id),
+  }));
+
+  return (
+    <div style={{ padding: 20 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
+        <h2 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>📦 Almacén</h2>
+        {puedeEditar ? (
+          <button
+            onClick={abrirModal}
+            style={{ padding: "10px 20px", background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700 }}
+          >
+            + Registrar Movimiento
+          </button>
+        ) : (
+          <span style={{ color: "#888", fontSize: 13 }}>👁 Solo lectura — tu rol no puede modificar inventario</span>
+        )}
+      </div>
+
+      {/* Tabla de stock actual */}
+      <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", marginBottom: 24, overflow: "hidden" }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid #f0f0f0", fontWeight: 700, fontSize: 15 }}>📊 Stock Actual</div>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 14 }}>
+          <thead>
+            <tr style={{ background: "#f8fafc" }}>
+              <th style={{ padding: "10px 14px", textAlign: "left", color: "#666", fontWeight: 600 }}>Producto</th>
+              <th style={{ padding: "10px 14px", textAlign: "center", color: "#666", fontWeight: 600 }}>Categoría</th>
+              <th style={{ padding: "10px 14px", textAlign: "right", color: "#666", fontWeight: 600 }}>Stock</th>
+              <th style={{ padding: "10px 14px", textAlign: "right", color: "#666", fontWeight: 600 }}>Precio</th>
+              <th style={{ padding: "10px 14px", textAlign: "center", color: "#666", fontWeight: 600 }}>Estado</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stockPorProducto.map(p => (
+              <tr key={p.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                <td style={{ padding: "10px 14px", fontWeight: 600 }}>{p.nombre}</td>
+                <td style={{ padding: "10px 14px", textAlign: "center", color: "#666" }}>{p.categoria ?? "—"}</td>
+                <td style={{ padding: "10px 14px", textAlign: "right", fontWeight: 700, color: (p.stock ?? 0) <= 0 ? "#ef4444" : (p.stock ?? 0) <= 5 ? "#f59e0b" : "#10b981" }}>
+                  {p.stock ?? 0}
+                </td>
+                <td style={{ padding: "10px 14px", textAlign: "right", color: "#444" }}>RD$ {Number(p.precio ?? 0).toLocaleString()}</td>
+                <td style={{ padding: "10px 14px", textAlign: "center" }}>
+                  {(p.stock ?? 0) <= 0
+                    ? <span style={{ background: "#fee2e2", color: "#ef4444", padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>Sin stock</span>
+                    : (p.stock ?? 0) <= 5
+                      ? <span style={{ background: "#fef3c7", color: "#d97706", padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>Bajo</span>
+                      : <span style={{ background: "#d1fae5", color: "#10b981", padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700 }}>OK</span>
+                  }
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {/* Bitácora de movimientos */}
+      <div style={{ background: "#fff", borderRadius: 12, boxShadow: "0 2px 12px rgba(0,0,0,0.07)", overflow: "hidden" }}>
+        <div style={{ padding: "14px 18px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <span style={{ fontWeight: 700, fontSize: 15 }}>📋 Bitácora de Movimientos</span>
+          <select
+            value={filtroProducto}
+            onChange={e => setFiltroProducto(e.target.value)}
+            style={{ padding: "6px 10px", borderRadius: 8, border: "1px solid #ddd", fontSize: 13 }}
+          >
+            <option value="">Todos los productos</option>
+            {productos.map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
+          </select>
+        </div>
+        {cargando ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#888" }}>Cargando...</div>
+        ) : movFiltrados.length === 0 ? (
+          <div style={{ padding: 20, textAlign: "center", color: "#aaa" }}>Sin movimientos registrados.</div>
+        ) : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+              <thead>
+                <tr style={{ background: "#f8fafc" }}>
+                  <th style={{ padding: "10px 12px", textAlign: "left", color: "#666", fontWeight: 600 }}>Fecha</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", color: "#666", fontWeight: 600 }}>Producto</th>
+                  <th style={{ padding: "10px 12px", textAlign: "center", color: "#666", fontWeight: 600 }}>Tipo</th>
+                  <th style={{ padding: "10px 12px", textAlign: "right", color: "#666", fontWeight: 600 }}>Cantidad</th>
+                  <th style={{ padding: "10px 12px", textAlign: "right", color: "#666", fontWeight: 600 }}>Antes</th>
+                  <th style={{ padding: "10px 12px", textAlign: "right", color: "#666", fontWeight: 600 }}>Después</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", color: "#666", fontWeight: 600 }}>Motivo</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", color: "#666", fontWeight: 600 }}>Referencia</th>
+                  <th style={{ padding: "10px 12px", textAlign: "left", color: "#666", fontWeight: 600 }}>Usuario</th>
+                </tr>
+              </thead>
+              <tbody>
+                {movFiltrados.slice(0, 100).map(m => {
+                  const prod = productos.find(p => p.id === m.producto_id);
+                  const fechaLocal = new Date(m.created_at).toLocaleString("es-DO", { timeZone: "America/Santo_Domingo", dateStyle: "short", timeStyle: "short" });
+                  return (
+                    <tr key={m.id} style={{ borderBottom: "1px solid #f5f5f5" }}>
+                      <td style={{ padding: "9px 12px", color: "#555" }}>{fechaLocal}</td>
+                      <td style={{ padding: "9px 12px", fontWeight: 600 }}>{prod?.nombre ?? `ID ${m.producto_id}`}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "center" }}>
+                        <span style={{
+                          padding: "2px 10px", borderRadius: 20, fontSize: 12, fontWeight: 700,
+                          background: m.tipo === "ENTRADA" ? "#d1fae5" : m.tipo === "SALIDA" ? "#fee2e2" : "#fef3c7",
+                          color: m.tipo === "ENTRADA" ? "#10b981" : m.tipo === "SALIDA" ? "#ef4444" : "#d97706",
+                        }}>{m.tipo}</span>
+                      </td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", fontWeight: 700 }}>{m.cantidad}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#888" }}>{m.stock_antes}</td>
+                      <td style={{ padding: "9px 12px", textAlign: "right", color: "#888" }}>{m.stock_despues}</td>
+                      <td style={{ padding: "9px 12px", color: "#666" }}>{m.motivo ?? "—"}</td>
+                      <td style={{ padding: "9px 12px", color: "#666" }}>{m.referencia ?? "—"}</td>
+                      <td style={{ padding: "9px 12px", color: "#666" }}>{m.usuario ?? "Sistema"}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {/* Modal registrar movimiento */}
+      {modalAbierto && (
+        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <div style={{ background: "#fff", borderRadius: 16, padding: 28, width: 420, maxWidth: "95vw", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" }}>
+            <h3 style={{ margin: "0 0 20px", fontSize: 18, fontWeight: 700 }}>Registrar Movimiento de Inventario</h3>
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" }}>Producto</label>
+            <select
+              value={form.producto_id}
+              onChange={e => setForm(f => ({ ...f, producto_id: e.target.value }))}
+              style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", marginBottom: 14, fontSize: 14 }}
+            >
+              {productos.map(p => <option key={p.id} value={p.id}>{p.nombre} (stock: {p.stock ?? 0})</option>)}
+            </select>
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" }}>Tipo de Movimiento</label>
+            <select
+              value={form.tipo}
+              onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}
+              style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", marginBottom: 14, fontSize: 14 }}
+            >
+              <option value="ENTRADA">📥 ENTRADA (aumenta stock)</option>
+              <option value="SALIDA">📤 SALIDA (reduce stock)</option>
+              <option value="AJUSTE">🔧 AJUSTE (corrección de inventario)</option>
+            </select>
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" }}>Cantidad</label>
+            <input
+              type="number"
+              min="0.01"
+              step="0.01"
+              value={form.cantidad}
+              onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))}
+              placeholder="Ej: 10"
+              style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", marginBottom: 14, fontSize: 14, boxSizing: "border-box" }}
+            />
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" }}>Motivo</label>
+            <input
+              type="text"
+              value={form.motivo}
+              onChange={e => setForm(f => ({ ...f, motivo: e.target.value }))}
+              placeholder="Ej: Compra de proveedor, Ajuste inventario..."
+              style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", marginBottom: 14, fontSize: 14, boxSizing: "border-box" }}
+            />
+
+            <label style={{ display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" }}>Referencia (opcional)</label>
+            <input
+              type="text"
+              value={form.referencia}
+              onChange={e => setForm(f => ({ ...f, referencia: e.target.value }))}
+              placeholder="Ej: Factura #001, OC-2024-01..."
+              style={{ display: "block", width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid #ddd", marginBottom: 18, fontSize: 14, boxSizing: "border-box" }}
+            />
+
+            {msg && <div style={{ padding: "10px 14px", background: msg.startsWith("✅") ? "#d1fae5" : "#fee2e2", borderRadius: 8, marginBottom: 14, fontSize: 13, fontWeight: 600 }}>{msg}</div>}
+
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={guardarMovimiento}
+                disabled={guardando}
+                style={{ flex: 1, padding: "12px", background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 15 }}
+              >
+                {guardando ? "Guardando..." : "✅ Confirmar"}
+              </button>
+              <button
+                onClick={() => setModalAbierto(false)}
+                style={{ flex: 1, padding: "12px", background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", fontWeight: 600 }}
+              >
+                Cancelar
+              </button>
+            </div>
           </div>
         </div>
       )}

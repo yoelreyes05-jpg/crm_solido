@@ -159,6 +159,94 @@ export default function CapacitacionesFacturacionPage() {
     setGuardando(false); setModalPago(false); await cargar();
   };
 
+  // ── Factura completa (solo cuando pago completo) ────────────────────────────
+  const imprimirFactura = (alumno: Alumno, curso: Curso) => {
+    const ps = pagosDe(alumno.id);
+    const totalPagado = ps.reduce((s, p) => s + Number(p.monto), 0);
+    const w = window.open("", "_blank", "width=700,height=700");
+    if (!w) return;
+    w.document.write(`<!DOCTYPE html><html><head><title>Factura Capacitación</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:40px;color:#111;max-width:680px;margin:0 auto;}
+      .header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:24px;border-bottom:3px solid #1d4ed8;padding-bottom:16px;}
+      .logo{font-size:22px;font-weight:900;color:#1d4ed8;letter-spacing:2px;}
+      .sub{font-size:11px;color:#6b7280;margin-top:2px;}
+      .titulo{font-size:18px;font-weight:700;color:#1d4ed8;margin-bottom:4px;}
+      .num{font-size:12px;color:#9ca3af;}
+      .seccion{margin-bottom:18px;}
+      .seccion h3{font-size:13px;text-transform:uppercase;color:#9ca3af;letter-spacing:1px;margin:0 0 8px;}
+      table{width:100%;border-collapse:collapse;margin-bottom:16px;}
+      th{padding:8px 10px;background:#f9fafb;font-size:12px;color:#6b7280;text-align:left;border-bottom:2px solid #e5e7eb;}
+      td{padding:8px 10px;font-size:13px;border-bottom:1px solid #f3f4f6;}
+      .total-row td{font-weight:700;font-size:15px;color:#111;background:#f0fdf4;border-top:2px solid #22c55e;}
+      .badge{display:inline-block;padding:3px 12px;border-radius:20px;font-size:12px;font-weight:700;background:#dcfce7;color:#15803d;}
+      .firma{margin-top:48px;display:flex;justify-content:space-between;}
+      .firma div{text-align:center;width:180px;}
+      .firma hr{margin-bottom:6px;border-color:#ccc;}
+      @media print{body{padding:20px;} button{display:none;}}
+    </style></head><body>
+    <div class="header">
+      <div>
+        <div class="logo">SÓLIDO AUTO SERVICIO</div>
+        <div class="sub">Servicio Automotriz &amp; Café · Santo Domingo, RD</div>
+      </div>
+      <div style="text-align:right">
+        <div class="titulo">FACTURA DE CAPACITACIÓN</div>
+        <div class="num">FAC-CAP-${String(alumno.id).padStart(6,"0")}</div>
+        <div class="num">Fecha: ${new Date().toLocaleDateString("es-DO")}</div>
+      </div>
+    </div>
+
+    <div class="seccion">
+      <h3>Datos del alumno</h3>
+      <table>
+        <tr><td style="color:#6b7280;width:35%">Nombre</td><td><strong>${alumno.nombre}</strong></td></tr>
+        ${alumno.telefono ? `<tr><td style="color:#6b7280">Teléfono</td><td>${alumno.telefono}</td></tr>` : ""}
+        ${alumno.email ? `<tr><td style="color:#6b7280">Email</td><td>${alumno.email}</td></tr>` : ""}
+        <tr><td style="color:#6b7280">Inscripción</td><td>${alumno.fecha_inscripcion}</td></tr>
+        <tr><td style="color:#6b7280">Estado</td><td><span class="badge">Completado ✓</span></td></tr>
+      </table>
+    </div>
+
+    <div class="seccion">
+      <h3>Detalle del curso</h3>
+      <table>
+        <tr><td style="color:#6b7280;width:35%">Curso</td><td><strong>${curso.nombre}</strong></td></tr>
+        <tr><td style="color:#6b7280">Instructor</td><td>${curso.instructor || "—"}</td></tr>
+        <tr><td style="color:#6b7280">Modalidad</td><td>${curso.modalidad}</td></tr>
+        <tr><td style="color:#6b7280">Duración</td><td>${curso.horas} horas</td></tr>
+      </table>
+    </div>
+
+    <div class="seccion">
+      <h3>Historial de pagos</h3>
+      <table>
+        <thead><tr><th>Fecha</th><th>Método</th><th>Referencia</th><th style="text-align:right">Monto</th></tr></thead>
+        <tbody>
+          ${ps.map(p => `<tr>
+            <td>${p.fecha}</td>
+            <td>${p.metodo}</td>
+            <td style="color:#6b7280">${p.referencia || "—"}</td>
+            <td style="text-align:right;color:#15803d;font-weight:600">RD$ ${Number(p.monto).toLocaleString("es-DO")}</td>
+          </tr>`).join("")}
+          <tr class="total-row">
+            <td colspan="3">TOTAL PAGADO</td>
+            <td style="text-align:right">RD$ ${totalPagado.toLocaleString("es-DO")}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="firma">
+      <div><hr>Sello / Firma empresa</div>
+      <div><hr>Firma del alumno</div>
+    </div>
+    <div style="margin-top:24px;font-size:10px;color:#9ca3af;text-align:center">Emitido: ${new Date().toLocaleString("es-DO")} · SÓLIDO AUTO SERVICIO</div>
+    <script>window.print();<\/script>
+    </body></html>`);
+    w.document.close();
+  };
+
   // ── Recibo ──────────────────────────────────────────────────────────────────
   const imprimirRecibo = (pago: Pago, alumno: Alumno, curso: Curso) => {
     const w = window.open("", "_blank", "width=600,height=500");
@@ -345,7 +433,7 @@ export default function CapacitacionesFacturacionPage() {
                       <span style={{ ...S.tag, background:bg, color }}>{label}</span>
                     </td>
                     <td style={{ padding:"9px 10px" }}>
-                      <div style={{ display:"flex", gap:5 }}>
+                      <div style={{ display:"flex", gap:5, flexWrap:"wrap" }}>
                         {a.estado !== "desertado" && pend > 0 && (
                           <button style={{ ...S.btn, ...S.btnBlue, padding:"4px 10px", fontSize:12 }}
                             onClick={() => abrirPago(a)}>
@@ -356,6 +444,14 @@ export default function CapacitacionesFacturacionPage() {
                           <button style={{ ...S.btn, ...S.btnGreen, padding:"4px 10px", fontSize:12 }}
                             onClick={() => imprimirRecibo(pagosDe(a.id)[0], a, curso)}>
                             🖨️ Recibo
+                          </button>
+                        )}
+                        {est === "completo" && curso && (
+                          <button
+                            style={{ ...S.btn, padding:"4px 10px", fontSize:12, background:"linear-gradient(135deg,#b45309,#d97706)", color:"#fff", border:"none" }}
+                            onClick={() => imprimirFactura(a, curso)}
+                            title="Imprimir factura completa (solo disponible cuando el pago está completo)">
+                            🧾 Factura
                           </button>
                         )}
                       </div>

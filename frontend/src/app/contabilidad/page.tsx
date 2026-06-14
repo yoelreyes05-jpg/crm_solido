@@ -281,15 +281,17 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
 }
 
 function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
-  const hoy = new Date().toISOString().slice(0, 10);
+  // Usar fecha en timezone de RD (UTC-4) para evitar el bug del día anterior
+  const hoyDR = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
   const [historial, setHistorial] = useState<Cuadre[]>([]);
   const [loading, setLoading]     = useState(false);
   const [saving, setSaving]       = useState(false);
   const [fetching, setFetching]   = useState(false);
+  const [guardadoMsg, setGuardadoMsg] = useState<string|null>(null);
 
   // Auto-cuadre preview
   const [preview, setPreview]     = useState<any>(null);
-  const [fechaSel, setFechaSel]   = useState(hoy);
+  const [fechaSel, setFechaSel]   = useState(hoyDR);
   const [efectContado, setEfectContado] = useState("");
   const [notas, setNotas]         = useState("");
   const [filtrFecha, setFiltrFecha] = useState("");
@@ -311,9 +313,20 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
     setFetching(true);
     setPreview(null);
     try {
-      const r = await fetch(`${API}/api/contabilidad/cuadre/auto?fecha=${fecha}`);
-      const d = await r.json();
-      setPreview(d);
+      const [rCuadre, rCobrar, rPagar] = await Promise.all([
+        fetch(`${API}/api/contabilidad/cuadre/auto?fecha=${fecha}`),
+        fetch(`${API}/api/contabilidad/cuentas-cobrar`),
+        fetch(`${API}/api/contabilidad/cuentas-pagar`),
+      ]);
+      const d = await rCuadre.json();
+      const cuentasCobrar = rCobrar.ok ? await rCobrar.json() : [];
+      const cuentasPagar  = rPagar.ok  ? await rPagar.json()  : [];
+      // Filtrar CxC y CxP con vencimiento hoy o pendientes del día
+      const cobrarHoy = (Array.isArray(cuentasCobrar) ? cuentasCobrar : cuentasCobrar.data || [])
+        .filter((c: any) => c.estado !== "pagado" && (c.fecha_vencimiento === fecha || c.fecha_emision === fecha));
+      const pagarHoy  = (Array.isArray(cuentasPagar)  ? cuentasPagar  : cuentasPagar.data  || [])
+        .filter((c: any) => c.estado !== "pagado" && (c.fecha_vencimiento === fecha || c.fecha_emision === fecha));
+      setPreview({ ...d, cuentasCobrarHoy: cobrarHoy, cuentasPagarHoy: pagarHoy });
     } catch { alert("Error al cargar datos del día"); }
     setFetching(false);
   };
@@ -350,6 +363,10 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
       const data = await res.json();
       if (data.error) return alert("Error: " + data.error);
 
+      setGuardadoMsg(data._updated
+        ? "✅ Cuadre actualizado correctamente con las nuevas ventas del día."
+        : "✅ Cuadre guardado correctamente.");
+      setTimeout(() => setGuardadoMsg(null), 5000);
       setPreview(null);
       setEfectContado("");
       setNotas("");
@@ -365,16 +382,23 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
 
   return (
     <div>
+      {guardadoMsg && (
+        <div style={{ background:"#f0fdf4", border:"1px solid #86efac", borderRadius:10, padding:"10px 16px", marginBottom:16, fontSize:13, color:"#166534", fontWeight:600 }}>
+          {guardadoMsg}
+        </div>
+      )}
+
       {/* KPIs del último cuadre */}
       {historial.length > 0 && (() => {
         const ult = historial[0];
-        const saldoUlt = Number(ult.ventas_efectivo) - Number(ult.gastos);
+        const ventasTotales = Number(ult.ventas_efectivo||0)+Number(ult.ventas_tarjeta||0)+Number(ult.ventas_transferencia||0)+Number(ult.ventas_cheque||0)+Number(ult.ventas_credito||0);
+        const totalNeto = ventasTotales - Number(ult.gastos||0);
         return (
           <div style={s.kpiRow}>
             <KpiCard label="Último cuadre" value={fmtDate(ult.fecha)} icon="📅" color="#6366f1" />
-            <KpiCard label="Ventas totales" value={fmt(Number(ult.ventas_efectivo||0)+Number(ult.ventas_tarjeta||0)+Number(ult.ventas_transferencia||0))} icon="💰" color="#10b981" />
+            <KpiCard label="Ventas totales" value={fmt(ventasTotales)} icon="💰" color="#10b981" />
             <KpiCard label="Facturas" value={String(ult.facturas_count || "—")} icon="🧾" color="#3b82f6" />
-            <KpiCard label="Diferencia" value={fmt(ult.diferencia)} icon="⚖️" color={Number(ult.diferencia) >= 0 ? "#10b981" : "#ef4444"} />
+            <KpiCard label="Total (ventas − gastos)" value={fmt(totalNeto)} icon="⚖️" color={totalNeto >= 0 ? "#10b981" : "#ef4444"} />
           </div>
         );
       })()}
@@ -400,58 +424,94 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
           <div style={{ marginTop: 20 }}>
             {/* Banner info */}
             <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: 10, padding: "10px 14px", marginBottom: 16, fontSize: 13, color: "#166534" }}>
-              ✅ <b>Datos calculados automáticamente</b> — {preview.facturas_count} factura{preview.facturas_count !== 1 ? "s" : ""} del taller · Caja chica egresos: {fmt(preview.gastos || 0)}
+              ✅ <b>Datos calculados automáticamente para {fechaSel}</b> — <b>{preview.facturas_count}</b> factura{preview.facturas_count !== 1 ? "s" : ""} del taller · Egresos caja chica: {fmt(preview.gastos || 0)}
             </div>
 
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}>
-              {/* Columna izquierda: ingresos */}
+              {/* Columna izquierda: ventas por método */}
               <div>
                 <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>📥 Ventas del taller</div>
                 {[
-                  ["💵 Efectivo", fmt(preview.ventas_efectivo || 0)],
-                  ...(Number(preview.ventas_tarjeta||0)>0 ? [["💳 Tarjeta", fmt(preview.ventas_tarjeta)]] : []),
-                  ...(Number(preview.ventas_transferencia||0)>0 ? [["🏦 Transferencia", fmt(preview.ventas_transferencia)]] : []),
-                  ...(Number(preview.ventas_cheque||0)>0 ? [["🔖 Cheque", fmt(preview.ventas_cheque)]] : []),
+                  ["💵 Efectivo",       fmt(preview.ventas_efectivo      || 0)],
+                  ["💳 Tarjeta",        fmt(preview.ventas_tarjeta       || 0)],
+                  ["🏦 Transferencia",  fmt(preview.ventas_transferencia || 0)],
+                  ...(Number(preview.ventas_cheque ||0)>0 ? [["🔖 Cheque",  fmt(preview.ventas_cheque)]]  : []),
                   ...(Number(preview.ventas_credito||0)>0 ? [["📋 Crédito", fmt(preview.ventas_credito)]] : []),
                 ].map(([lbl, val]) => (
                   <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
                     <span style={{ color: "#555" }}>{lbl}</span><span style={{ fontWeight: 600 }}>{val}</span>
                   </div>
                 ))}
+                <div style={{ display: "flex", justifyContent: "space-between", padding: "6px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
+                  <span style={{ color: "#ef4444" }}>− Gastos caja chica</span>
+                  <span style={{ fontWeight: 600, color: "#ef4444" }}>{fmt(preview.gastos || 0)}</span>
+                </div>
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "2px solid #6366f1", marginTop: 4, fontWeight: 800, fontSize: 14 }}>
-                  <span>TOTAL VENTAS</span><span>{fmt(preview.ventas_total || 0)}</span>
+                  <span>TOTAL DÍA (ventas − gastos)</span>
+                  <span style={{ color: (preview.ventas_total||0) - (preview.gastos||0) >= 0 ? "#065f46" : "#991b1b" }}>
+                    {fmt((preview.ventas_total || 0) - (preview.gastos || 0))}
+                  </span>
                 </div>
               </div>
 
-              {/* Columna derecha: cuadre */}
+              {/* Columna derecha: cuadre efectivo */}
               <div>
-                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>⚖️ Cuadre efectivo</div>
+                <div style={{ fontWeight: 700, fontSize: 13, color: "#374151", marginBottom: 8, textTransform: "uppercase", letterSpacing: ".5px" }}>⚖️ Cuadre de efectivo</div>
                 {[
-                  ["Ventas en efectivo hoy", fmt(preview.ventas_efectivo)],
-                  ["− Gastos caja chica", fmt(preview.gastos)],
+                  ["Efectivo inicial (caja anterior)", fmt(preview.efectivo_inicial || 0)],
+                  ["+ Ventas en efectivo hoy",         fmt(preview.ventas_efectivo)],
+                  ["− Gastos del día",                 fmt(preview.gastos)],
                 ].map(([lbl, val]) => (
                   <div key={lbl} style={{ display: "flex", justifyContent: "space-between", padding: "5px 0", borderBottom: "1px solid #f0f0f0", fontSize: 13 }}>
                     <span style={{ color: "#555" }}>{lbl}</span><span style={{ fontWeight: 600 }}>{val}</span>
                   </div>
                 ))}
                 <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: "2px solid #10b981", marginTop: 4, fontWeight: 800, fontSize: 15, color: "#065f46" }}>
-                  <span>SALDO ESPERADO</span><span>{fmt(saldoEsperado)}</span>
+                  <span>SALDO ESPERADO EN CAJA</span><span>{fmt(saldoEsperado)}</span>
                 </div>
 
-                {/* Conteo físico opcional */}
-                <div style={{ marginTop: 14 }}>
+                {/* Conteo físico */}
+                <div style={{ marginTop: 12 }}>
                   <label style={{ display: "block", fontSize: 12, fontWeight: 600, marginBottom: 5, color: "#444" }}>💰 Efectivo contado físicamente (opcional)</label>
                   <input type="number" value={efectContado} onChange={e => setEfectContado(e.target.value)}
                     placeholder="Deja vacío si no contaste" style={{ ...s.input, marginBottom: 0, fontSize: 14 }} />
                 </div>
                 {diferencia !== null && (
                   <div style={{ display: "flex", justifyContent: "space-between", padding: "8px 0", borderTop: `2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"}`, marginTop: 8, fontWeight: 800, fontSize: 15, color: diferencia >= 0 ? "#065f46" : "#991b1b" }}>
-                    <span>DIFERENCIA</span>
+                    <span>DIFERENCIA (contado − esperado)</span>
                     <span>{diferencia >= 0 ? "+" : ""}{fmt(diferencia)}</span>
                   </div>
                 )}
               </div>
             </div>
+
+            {/* CxC / CxP del día */}
+            {((preview.cuentasCobrarHoy?.length > 0) || (preview.cuentasPagarHoy?.length > 0)) && (
+              <div style={{ marginTop: 16, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14 }}>
+                {preview.cuentasCobrarHoy?.length > 0 && (
+                  <div style={{ background: "#f0fdf4", borderRadius: 10, padding: "12px 14px", border: "1px solid #bbf7d0" }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "#15803d", textTransform: "uppercase", marginBottom: 8 }}>💳 Cuentas x Cobrar vencen hoy</div>
+                    {preview.cuentasCobrarHoy.map((c: any, i: number) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", borderBottom: "1px solid #dcfce7" }}>
+                        <span style={{ color: "#166534" }}>{c.descripcion || c.cliente_nombre || "—"}</span>
+                        <span style={{ fontWeight: 700, color: "#15803d" }}>{fmt(c.monto_original - c.monto_pagado)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {preview.cuentasPagarHoy?.length > 0 && (
+                  <div style={{ background: "#fff7ed", borderRadius: 10, padding: "12px 14px", border: "1px solid #fed7aa" }}>
+                    <div style={{ fontWeight: 700, fontSize: 12, color: "#b45309", textTransform: "uppercase", marginBottom: 8 }}>📤 Cuentas x Pagar vencen hoy</div>
+                    {preview.cuentasPagarHoy.map((c: any, i: number) => (
+                      <div key={i} style={{ display: "flex", justifyContent: "space-between", fontSize: 12, padding: "3px 0", borderBottom: "1px solid #fde68a" }}>
+                        <span style={{ color: "#92400e" }}>{c.descripcion || c.suplidor_display || "—"}</span>
+                        <span style={{ fontWeight: 700, color: "#b45309" }}>{fmt(c.monto_original - c.monto_pagado)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
 
             {/* Notas */}
             <div style={{ marginTop: 14 }}>
@@ -499,28 +559,30 @@ function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
             <table style={s.table}>
               <thead>
                 <tr>
-                  {["Fecha", "Responsable", "Facturas", "Ventas Total", "Efectivo", "Tarjeta+Transf.", "Gastos", "Diferencia", ""].map(h => (
+                  {["Fecha", "Responsable", "Facturas", "Ventas Total", "Efectivo", "Tarjeta+Transf.", "Gastos", "Total Neto", ""].map(h => (
                     <th key={h} style={s.th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {historial.filter((c: Cuadre) => !filtrFecha || c.fecha === filtrFecha).map((c: Cuadre) => {
-                  const vTot = Number(c.ventas_efectivo||0)+Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
+                  const vTot   = Number(c.ventas_efectivo||0)+Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
                   const vOtros = Number(c.ventas_tarjeta||0)+Number(c.ventas_transferencia||0)+Number(c.ventas_cheque||0)+Number(c.ventas_credito||0);
+                  const totalNeto = vTot - Number(c.gastos||0);
                   return (
                     <tr key={c.id}>
-                      <td style={s.td}><b>{fmtDate(c.fecha)}</b>{c.tipo === "AUTO" && <span style={{ marginLeft: 4, fontSize: 10, background: "#dcfce7", color: "#16a34a", padding: "1px 6px", borderRadius: 99, fontWeight: 700 }}>AUTO</span>}</td>
+                      <td style={s.td}>
+                        <b>{fmtDate(c.fecha)}</b>
+                        {c.tipo === "AUTO" && <span style={{ marginLeft: 4, fontSize: 10, background: "#dcfce7", color: "#16a34a", padding: "1px 6px", borderRadius: 99, fontWeight: 700 }}>AUTO</span>}
+                      </td>
                       <td style={s.td}>{c.usuario}</td>
                       <td style={{ ...s.td, textAlign: "center" }}>{c.facturas_count ?? "—"}</td>
                       <td style={{ ...s.td, fontWeight: 700 }}>{fmt(vTot)}</td>
                       <td style={s.td}>{fmt(c.ventas_efectivo)}</td>
                       <td style={s.td}>{fmt(vOtros)}</td>
                       <td style={{ ...s.td, color: "#ef4444" }}>{fmt(c.gastos)}</td>
-                      <td style={{ ...s.td, fontWeight: 700, color: Number(c.diferencia) === 0 ? "#6b7280" : Number(c.diferencia) > 0 ? "#10b981" : "#ef4444" }}>
-                        {c.efectivo_contado !== null && c.efectivo_contado !== undefined
-                          ? (Number(c.diferencia) >= 0 ? "+" : "") + fmt(c.diferencia)
-                          : <span style={{ color: "#aaa", fontSize: 12 }}>sin conteo</span>}
+                      <td style={{ ...s.td, fontWeight: 700, color: totalNeto >= 0 ? "#10b981" : "#ef4444" }}>
+                        {fmt(totalNeto)}
                       </td>
                       <td style={s.td}>
                         <button onClick={() => imprimirCuadre(c)}

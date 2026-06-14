@@ -14,8 +14,12 @@ CREATE TABLE IF NOT EXISTS capacitaciones_cursos (
   estado      TEXT DEFAULT 'activo',
   descripcion TEXT,
   fecha_proxima DATE,
+  fecha_fin     DATE,
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- Migración: agregar fecha_fin si ya existe la tabla
+ALTER TABLE capacitaciones_cursos ADD COLUMN IF NOT EXISTS fecha_fin DATE;
 
 -- Tabla de alumnos / inscripciones (una fila por alumno por curso)
 CREATE TABLE IF NOT EXISTS capacitaciones_alumnos (

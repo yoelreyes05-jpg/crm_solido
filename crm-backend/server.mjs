@@ -1497,6 +1497,71 @@ app.delete("/cafeteria/ingredientes/:id", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ══════════════════════════════════════════════════════
+// 📦 CAFETERÍA — ALMACÉN (control de stock con bitácora)
+// ══════════════════════════════════════════════════════
+
+// GET /cafeteria/almacen/movimientos — historial de movimientos
+app.get("/cafeteria/almacen/movimientos", async (req, res) => {
+  try {
+    const limite = parseInt(req.query.limite || "200");
+    const { data, error } = await supabase
+      .from("cafeteria_almacen_movimientos")
+      .select("*, cafeteria_productos(nombre)")
+      .order("created_at", { ascending: false })
+      .limit(limite);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /cafeteria/almacen/movimientos — registrar entrada o salida de stock
+app.post("/cafeteria/almacen/movimientos", async (req, res) => {
+  try {
+    const { producto_id, tipo, cantidad, motivo, referencia, usuario } = req.body;
+    if (!producto_id || !tipo || !cantidad)
+      return res.status(400).json({ error: "producto_id, tipo y cantidad son requeridos" });
+    if (!["ENTRADA", "SALIDA", "AJUSTE"].includes(tipo))
+      return res.status(400).json({ error: "tipo debe ser ENTRADA, SALIDA o AJUSTE" });
+
+    // Leer stock actual
+    const { data: prod, error: ep } = await supabase
+      .from("cafeteria_productos").select("id, nombre, stock").eq("id", producto_id).single();
+    if (ep || !prod) return res.status(404).json({ error: "Producto no encontrado" });
+
+    const delta       = tipo === "SALIDA" ? -Number(cantidad) : Number(cantidad);
+    const stock_antes = Number(prod.stock || 0);
+    const stock_nuevo = stock_antes + delta;
+
+    if (stock_nuevo < 0)
+      return res.status(400).json({ error: `Stock insuficiente. Stock actual: ${stock_antes}` });
+
+    // Actualizar stock
+    const { error: eu } = await supabase
+      .from("cafeteria_productos").update({ stock: stock_nuevo }).eq("id", producto_id);
+    if (eu) return res.status(500).json({ error: eu.message });
+
+    // Registrar movimiento en bitácora
+    const { data: mov, error: em } = await supabase
+      .from("cafeteria_almacen_movimientos")
+      .insert([{
+        producto_id: Number(producto_id),
+        tipo,
+        cantidad:    Math.abs(Number(cantidad)),
+        stock_antes,
+        stock_despues: stock_nuevo,
+        motivo:      motivo || null,
+        referencia:  referencia || null,
+        usuario:     usuario || "Sistema",
+        created_at:  new Date().toISOString(),
+      }])
+      .select().single();
+    if (em) return res.status(500).json({ error: em.message });
+
+    res.json({ ok: true, movimiento: mov, stock_nuevo });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ── Recetas ───────────────────────────────────────────
 
 // GET /cafeteria/recetas  — trae recetas con sus ingredientes
@@ -2590,7 +2655,7 @@ app.get("/api/contabilidad/cuadre", async (req, res) => {
   }
 });
 
-// POST /contabilidad/cuadre — guardar un nuevo cuadre de caja
+// POST /contabilidad/cuadre — upsert (actualiza si ya existe para esa fecha, crea si no)
 app.post("/api/contabilidad/cuadre", async (req, res) => {
   try {
     const {
@@ -2603,43 +2668,61 @@ app.post("/api/contabilidad/cuadre", async (req, res) => {
 
     if (!fecha) return res.status(400).json({ error: "La fecha es requerida" });
 
-    const basePayload = {
+    const extendedPayload = {
       fecha,
       efectivo_inicial:     Number(efectivo_inicial     || 0),
       efectivo_final:       Number(efectivo_final       || 0),
       ventas_efectivo:      Number(ventas_efectivo      || 0),
       ventas_tarjeta:       Number(ventas_tarjeta       || 0),
       ventas_transferencia: Number(ventas_transferencia || 0),
+      ventas_cheque:        Number(ventas_cheque  || 0),
+      ventas_credito:       Number(ventas_credito || 0),
       gastos:               Number(gastos               || 0),
       diferencia:           Number(diferencia           || 0),
+      facturas_count:       Number(facturas_count || 0),
+      tipo:                 tipo || "AUTO",
+      efectivo_contado:     (efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "")
+                              ? Number(efectivo_contado) : null,
+      notas:                notas || null,
       usuario:              usuario || "Sistema",
       creado_en:            new Date().toISOString()
     };
 
-    // Campos extendidos (requieren migración v5)
-    const extendedPayload = {
-      ...basePayload,
-      ventas_cheque:    Number(ventas_cheque  || 0),
-      ventas_credito:   Number(ventas_credito || 0),
-      facturas_count:   Number(facturas_count || 0),
-      tipo:             tipo || "AUTO",
-      efectivo_contado: (efectivo_contado !== undefined && efectivo_contado !== null && efectivo_contado !== "")
-                          ? Number(efectivo_contado) : null,
-      notas:            notas || null,
-    };
+    // Verificar si ya existe un cuadre para esta fecha (upsert por fecha)
+    const { data: existente } = await supabase
+      .from("cuadre_caja").select("id").eq("fecha", fecha).maybeSingle();
 
-    // Intentar con campos extendidos; si falla (migración no corrida), usar base
-    let { data, error } = await supabase
-      .from("cuadre_caja").insert([extendedPayload]).select().single();
-
-    if (error) {
-      const fallback = await supabase
-        .from("cuadre_caja").insert([basePayload]).select().single();
-      if (fallback.error) return res.status(500).json({ error: fallback.error.message });
-      return res.json(fallback.data);
+    let data, error;
+    if (existente) {
+      // Actualizar el cuadre existente
+      ({ data, error } = await supabase
+        .from("cuadre_caja").update(extendedPayload).eq("id", existente.id).select().single());
+    } else {
+      // Intentar con campos extendidos; si falla (migración no corrida), usar base
+      ({ data, error } = await supabase
+        .from("cuadre_caja").insert([extendedPayload]).select().single());
+      if (error) {
+        const basePayload = {
+          fecha,
+          efectivo_inicial:     Number(efectivo_inicial     || 0),
+          efectivo_final:       Number(efectivo_final       || 0),
+          ventas_efectivo:      Number(ventas_efectivo      || 0),
+          ventas_tarjeta:       Number(ventas_tarjeta       || 0),
+          ventas_transferencia: Number(ventas_transferencia || 0),
+          gastos:               Number(gastos               || 0),
+          diferencia:           Number(diferencia           || 0),
+          usuario:              usuario || "Sistema",
+          creado_en:            new Date().toISOString()
+        };
+        const fallback = await supabase
+          .from("cuadre_caja").insert([basePayload]).select().single();
+        if (fallback.error) return res.status(500).json({ error: fallback.error.message });
+        return res.json({ ...fallback.data, _updated: false });
+      }
     }
 
-    res.json(data);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ...data, _updated: !!existente });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
@@ -4386,9 +4469,16 @@ app.post("/ai/consulta-cliente", async (req, res) => {
 // Calcula el cuadre del día automáticamente desde facturas + caja_chica
 app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
   try {
-    const fecha = req.query.fecha || new Date().toISOString().slice(0, 10);
-    const desde = `${fecha}T00:00:00`;
-    const hasta  = `${fecha}T23:59:59`;
+    // Usar fecha DR si no se especifica (UTC-4 = America/Santo_Domingo)
+    let fecha = req.query.fecha;
+    if (!fecha) {
+      const ahora = new Date();
+      const drStr = ahora.toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+      fecha = drStr; // formato YYYY-MM-DD
+    }
+    // Filtrar timestamps usando offset DR (-04:00) para que la ventana sea medianoche a 23:59 hora local
+    const desde = `${fecha}T00:00:00-04:00`;
+    const hasta  = `${fecha}T23:59:59-04:00`;
 
     // Facturas activas del día
     const { data: facturas } = await supabase
