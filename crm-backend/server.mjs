@@ -8109,4 +8109,62 @@ app.get("/api/nomina/config", (req, res) => res.json(NOMINA_CFG));
 app.get("/api/nomina/:id", async (req, res) => {
   const { data: nomina, error } = await supabase.from("nominas").select("*").eq("id", req.params.id).single();
   if (error || !nomina) return res.status(404).json({ error: "Nómina no encontrada" });
-  const { data: detalle } = await supabase.from("nomina_detalle").select("*").eq("nomina_id", nomina.id).order("emplea
+  const { data: detalle } = await supabase.from("nomina_detalle").select("*").eq("nomina_id", nomina.id).order("empleado_nombre");
+  res.json({ ...nomina, detalle: detalle ?? [] });
+});
+
+app.patch("/api/nomina/:id/pagar", async (req, res) => {
+  const { error } = await supabase.from("nominas").update({ estado: "pagada", fecha_pago: new Date().toISOString().split("T")[0] }).eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+app.delete("/api/nomina/:id", async (req, res) => {
+  const { error } = await supabase.from("nominas").delete().eq("id", req.params.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ─── CAFETERÍA ALMACÉN ────────────────────────────────────────────────────────
+
+app.get("/cafeteria/almacen/movimientos", async (req, res) => {
+  const { data, error } = await supabase
+    .from("cafeteria_almacen_movimientos")
+    .select("*, cafeteria_productos(nombre)")
+    .order("created_at", { ascending: false })
+    .limit(200);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data ?? []);
+});
+
+app.post("/cafeteria/almacen/movimientos", async (req, res) => {
+  const { producto_id, tipo, cantidad, motivo, referencia, usuario } = req.body;
+  if (!producto_id || !tipo || !cantidad) return res.status(400).json({ error: "Faltan campos requeridos" });
+
+  const { data: prod } = await supabase.from("cafeteria_productos").select("stock").eq("id", producto_id).single();
+  const stock_antes = Number(prod?.stock ?? 0);
+  let stock_despues;
+  if (tipo === "ENTRADA") stock_despues = stock_antes + Number(cantidad);
+  else if (tipo === "SALIDA") stock_despues = Math.max(0, stock_antes - Number(cantidad));
+  else stock_despues = Number(cantidad); // AJUSTE
+
+  await supabase.from("cafeteria_productos").update({ stock: stock_despues }).eq("id", producto_id);
+
+  const { data, error } = await supabase.from("cafeteria_almacen_movimientos").insert([{
+    producto_id, tipo, cantidad: Number(cantidad),
+    stock_antes, stock_despues,
+    motivo: motivo ?? null,
+    referencia: referencia ?? null,
+    usuario: usuario ?? "Sistema"
+  }]).select().single();
+
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+// ─── INICIO DEL SERVIDOR ──────────────────────────────────────────────────────
+
+const PORT = process.env.PORT || 3001;
+app.listen(PORT, () => {
+  console.log(`✅ CRM Backend corriendo en puerto ${PORT}`);
+});
