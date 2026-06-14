@@ -616,7 +616,7 @@ export default function FacturaPage() {
     if (NCF_REQUIERE_RNC.includes(ncfTipo) && !rncEfectivo) {
       return alert(`El tipo NCF ${ncfTipo} requiere RNC/Cédula del cliente. Por favor ingrésalo.`);
     }
-    if (Number(montoRecibido) > 0 && vuelto < 0)
+    if (method !== "MIXTO" && Number(montoRecibido) > 0 && vuelto < 0)
       return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
 
     setLoading(true);

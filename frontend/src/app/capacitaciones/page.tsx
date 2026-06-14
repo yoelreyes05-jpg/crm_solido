@@ -132,7 +132,10 @@ export default function CapacitacionesPage() {
     }
     setGuardando(false);
     if (error) {
-      setErrCurso("Error al guardar: " + error.message + (error.code === "42P01" ? "\n\n👉 Ejecuta primero el archivo sql/capacitaciones.sql en el panel de Supabase." : ""));
+      const esFechaFin = error.message?.includes("fecha_fin");
+      setErrCurso("Error al guardar: " + error.message +
+        (error.code === "42P01" ? "\n\n👉 Ejecuta primero el archivo sql/capacitaciones.sql en el panel de Supabase." : "") +
+        (esFechaFin ? "\n\n👉 Columna fecha_fin no existe aún. Ejecuta en Supabase SQL Editor:\n\nALTER TABLE capacitaciones_cursos ADD COLUMN IF NOT EXISTS fecha_fin DATE;" : ""));
       return;
     }
     setModalCurso(false); cargar();
@@ -408,8 +411,8 @@ export default function CapacitacionesPage() {
                 </div>
               ) : als.map(a => {
                 const est = ESTADOS_ALUMNO.find(e => e.value === a.estado)!;
-                const pagoCompleto = Number(a.monto_pagado) >= Number(cursoActivo.precio);
-                const puedeRecibir = a.estado === "completado" && pagoCompleto;
+                const pagoCompleto = Number(cursoActivo.precio) === 0 || Number(a.monto_pagado) >= Number(cursoActivo.precio);
+                const puedeRecibir = a.estado === "completado";
                 const pendiente    = Math.max(0, Number(cursoActivo.precio) - Number(a.monto_pagado));
 
                 return (
@@ -435,7 +438,7 @@ export default function CapacitacionesPage() {
                         <button
                           onClick={() => abrirCertificado(a, cursoActivo)}
                           disabled={!puedeRecibir}
-                          title={!puedeRecibir ? (a.estado!=="completado" ? "El alumno no ha completado el curso" : `Pago pendiente: ${fmt(pendiente)}`) : "Generar diploma"}
+                          title={!puedeRecibir ? "El alumno no ha completado el curso" : "Generar diploma"}
                           style={{
                             ...S.btn,
                             padding:"3px 9px", fontSize:11,

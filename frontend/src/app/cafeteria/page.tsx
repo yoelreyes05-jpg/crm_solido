@@ -105,6 +105,8 @@ function imprimirHTMLCafe(html: string) {
 export default function CafeteriaPage() {
   const _cfg = useEmpresa();
   const EMPRESA = { ...CAFE, telefono: _cfg.telefono, direccion: _cfg.direccion };
+  const { rol: rolCafe } = usePermisos();
+  const puedeModificarStock = ["gerente", "administrador", "admin"].includes((rolCafe ?? "").toLowerCase());
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
   const [metodoPago, setMetodoPago] = useState("EFECTIVO");
@@ -445,9 +447,13 @@ export default function CafeteriaPage() {
             <label style={label}>Categoría</label>
             <input placeholder="Bebidas, Comida, Snacks..." value={nuevoProducto.categoria}
               onChange={e => setNuevoProducto({ ...nuevoProducto, categoria: e.target.value })} style={input} />
-            <label style={label}>Stock inicial</label>
-            <input type="number" placeholder="0" value={nuevoProducto.stock}
-              onChange={e => setNuevoProducto({ ...nuevoProducto, stock: e.target.value })} style={input} />
+            {puedeModificarStock && (
+              <>
+                <label style={label}>Stock inicial <span style={{ fontSize: 11, color: "#888", fontWeight: 400 }}>(solo gerencia)</span></label>
+                <input type="number" placeholder="0" value={nuevoProducto.stock}
+                  onChange={e => setNuevoProducto({ ...nuevoProducto, stock: e.target.value })} style={input} />
+              </>
+            )}
             {/* Imagen */}
             <label style={label}>📸 Imagen (opcional)</label>
             <input ref={fileInputRef} type="file" accept="image/*"
@@ -544,11 +550,13 @@ export default function CafeteriaPage() {
                         <input type="number" value={editForm.precio || ""} onChange={e => setEditForm((f:any) => ({...f, precio:e.target.value}))}
                           style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
                       </div>
-                      <div>
-                        <label style={{ ...label, color:"#1d4ed8" }}>Stock</label>
-                        <input type="number" value={editForm.stock ?? ""} onChange={e => setEditForm((f:any) => ({...f, stock:Number(e.target.value)}))}
-                          style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
-                      </div>
+                      {puedeModificarStock && (
+                        <div>
+                          <label style={{ ...label, color:"#1d4ed8" }}>Stock <span style={{ fontSize: 10, color: "#888", fontWeight: 400 }}>(solo gerencia)</span></label>
+                          <input type="number" value={editForm.stock ?? ""} onChange={e => setEditForm((f:any) => ({...f, stock:Number(e.target.value)}))}
+                            style={{ ...input, marginBottom:0, border:"1px solid #93c5fd" }} />
+                        </div>
+                      )}
                     </div>
                     <div style={{ display:"flex", gap:8 }}>
                       <button onClick={guardarEdicion} disabled={guardandoEdit}
