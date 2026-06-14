@@ -1681,24 +1681,4 @@ export default function FacturaPage() {
 // ─── ESTILOS ───────────────────────────────────────────────────────────────
 const container: React.CSSProperties   = { padding: 20, background: "#f5f7fb", minHeight: "100vh" };
 const title: React.CSSProperties       = { fontSize: 24, fontWeight: "bold", marginBottom: 20 };
-const grid: React.CSSProperties        = { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20 };
-const card: React.CSSProperties        = { background: "#fff", padding: 20, borderRadius: 15, boxShadow: "0 4px 20px rgba(0,0,0,0.08)" };
-const cardTitle: React.CSSProperties   = { marginBottom: 14, fontSize: 18, fontWeight: 600 };
-const tabBtn: React.CSSProperties      = { padding: "10px 20px", borderRadius: 8, border: "1px solid #ddd", cursor: "pointer", fontWeight: 600 };
-const labelS: React.CSSProperties      = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
-const input: React.CSSProperties       = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
-const productoRow: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0" };
-const carritoRow: React.CSSProperties  = { display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 0", borderBottom: "1px solid #f0f0f0", gap: 8 };
-const totalesBox: React.CSSProperties  = { marginTop: 16, padding: 16, background: "#f8fafc", borderRadius: 10 };
-const totalesRow: React.CSSProperties  = { display: "flex", justifyContent: "space-between", marginBottom: 6, fontSize: 15 };
-const vueltoBx: React.CSSProperties    = { marginTop: 12, padding: 14, background: "#fefce8", borderRadius: 10, border: "1px solid #fde68a" };
-const btnAdd: React.CSSProperties      = { padding: "6px 14px", color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 13 };
-const btnQty: React.CSSProperties      = { padding: "2px 10px", background: "#f1f5f9", border: "1px solid #ddd", borderRadius: 6, cursor: "pointer", fontWeight: "bold" };
-const btnFacturar: React.CSSProperties = { padding: 14, color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 16, fontSize: 16, fontWeight: 700 };
-const btnReimprimir: React.CSSProperties = { padding: 10, background: "#f1f5f9", color: "#111", border: "1px solid #ddd", borderRadius: 8, cursor: "pointer", width: "100%", marginTop: 10, fontSize: 13 };
-const btnAcc = (bg: string): React.CSSProperties => ({ padding: "5px 9px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 14 });
-const tableStyle: React.CSSProperties  = { width: "100%", borderCollapse: "collapse" };
-const th: React.CSSProperties          = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13, whiteSpace: "nowrap" };
-const td: React.CSSProperties          = { padding: "10px 12px", borderBottom: "1px solid #eee", fontSize: 13 };
-const overlay: React.CSSProperties     = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 };
-const modal: React.CSSProperties       = { background: "#fff", padding: 28, borderRadius: 16, width: 440, boxShadow: "0 20px 60px rgba(0,0,0,0.2)" };
+const gr

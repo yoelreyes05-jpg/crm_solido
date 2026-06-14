@@ -183,6 +183,14 @@ export default function CapacitacionesPage() {
     cargar();
   };
 
+  const marcarCompletado = async (alumno: Alumno, curso: Curso) => {
+    await supabase.from("capacitaciones_alumnos").update({ estado: "completado" }).eq("id", alumno.id);
+    await cargar();
+    // Abrir diploma inmediatamente después de marcar completado
+    const alumnoActualizado = { ...alumno, estado: "completado" };
+    abrirCertificado(alumnoActualizado, curso);
+  };
+
   // ── Certificado ─────────────────────────────────────────────────────────────
   const abrirCertificado = (alumno: Alumno, curso: Curso) => {
     setCertData({ alumno, curso });
@@ -411,12 +419,26 @@ export default function CapacitacionesPage() {
                 </div>
               ) : als.map(a => {
                 const est = ESTADOS_ALUMNO.find(e => e.value === a.estado)!;
-                const pagoCompleto = Number(cursoActivo.precio) === 0 || Number(a.monto_pagado) >= Number(cursoActivo.precio);
-                const puedeRecibir = a.estado === "completado";
                 const pendiente    = Math.max(0, Number(cursoActivo.precio) - Number(a.monto_pagado));
+                const hoyStr       = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+                const cursoTermino = cursoActivo.fecha_fin ? cursoActivo.fecha_fin <= hoyStr : false;
+                const puedeRecibir = a.estado === "completado";
+                // Si el curso ya terminó y el alumno sigue inscrito, mostrar botón de completar+diploma
+                const inscritoTerminado = a.estado === "inscrito" && cursoTermino;
 
                 return (
                   <div key={a.id} style={{ background:"#f9fafb", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
+                    {/* Alerta cuando el curso ya terminó pero el alumno sigue inscrito */}
+                    {inscritoTerminado && (
+                      <div style={{ background:"#fef3c7", border:"1px solid #fde68a", borderRadius:6, padding:"6px 10px", marginBottom:8, fontSize:11, color:"#92400e", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <span>⏰ Curso finalizado — pendiente de completar</span>
+                        <button
+                          onClick={() => marcarCompletado(a, cursoActivo)}
+                          style={{ ...S.btn, background:"#15803d", color:"#fff", padding:"3px 9px", fontSize:11, border:"none" }}>
+                          ✅ Completar y diploma
+                        </button>
+                      </div>
+                    )}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontWeight:600, fontSize:13, color:"#111827" }}>{a.nombre}</div>
@@ -438,7 +460,7 @@ export default function CapacitacionesPage() {
                         <button
                           onClick={() => abrirCertificado(a, cursoActivo)}
                           disabled={!puedeRecibir}
-                          title={!puedeRecibir ? "El alumno no ha completado el curso" : "Generar diploma"}
+                          title={!puedeRecibir ? (inscritoTerminado ? "Haz clic en 'Completar y diploma' arriba" : "El alumno no ha completado el curso") : "Generar diploma"}
                           style={{
                             ...S.btn,
                             padding:"3px 9px", fontSize:11,
@@ -655,89 +677,4 @@ export default function CapacitacionesPage() {
             }}>
               {/* Fondo decorativo — triángulo azul superior */}
               <div style={{ position:"absolute", top:0, left:0, width:0, height:0, borderStyle:"solid", borderWidth:"140px 200px 0 0", borderColor:"#1d4ed8 transparent transparent transparent" }} />
-              {/* Fondo decorativo — triángulo dorado inferior */}
-              <div style={{ position:"absolute", bottom:0, right:0, width:0, height:0, borderStyle:"solid", borderWidth:"0 0 120px 180px", borderColor:"transparent transparent #b45309 transparent" }} />
-
-              {/* Marco doble exterior */}
-              <div style={{ position:"absolute", inset:16, border:"3px solid #1d4ed8", borderRadius:2, pointerEvents:"none" }} />
-              <div style={{ position:"absolute", inset:22, border:"1px solid #b45309", borderRadius:1, pointerEvents:"none" }} />
-
-              {/* Contenido principal */}
-              <div style={{ position:"relative", zIndex:2, display:"flex", flexDirection:"column", alignItems:"center", height:"100%", padding:"36px 60px" }}>
-
-                {/* Logo + empresa */}
-                <div style={{ display:"flex", alignItems:"center", gap:16, marginBottom:10 }}>
-                  <img src="/logo.png" alt="Logo" style={{ width:60, height:60, objectFit:"contain" }} onError={e => (e.currentTarget.style.display="none")} />
-                  <div style={{ textAlign:"center" }}>
-                    <div style={{ fontSize:22, fontWeight:900, color:"#1d4ed8", letterSpacing:3, fontFamily:"Arial,sans-serif", textTransform:"uppercase" }}>
-                      SÓLIDO AUTO SERVICIO
-                    </div>
-                    <div style={{ fontSize:11, color:"#6b7280", letterSpacing:2, fontFamily:"Arial,sans-serif", textTransform:"uppercase" }}>
-                      Servicio Automotriz &amp; Café
-                    </div>
-                  </div>
-                </div>
-
-                {/* Línea decorativa */}
-                <div style={{ display:"flex", alignItems:"center", gap:12, marginBottom:14, width:"80%" }}>
-                  <div style={{ flex:1, height:1, background:"linear-gradient(to right, transparent, #b45309)" }} />
-                  <span style={{ color:"#b45309", fontSize:20 }}>✦</span>
-                  <div style={{ flex:1, height:1, background:"linear-gradient(to left, transparent, #b45309)" }} />
-                </div>
-
-                {/* Título */}
-                <div style={{ fontSize:30, fontWeight:700, color:"#1d4ed8", letterSpacing:4, textTransform:"uppercase", fontFamily:"Arial,sans-serif", marginBottom:6 }}>
-                  {diplomaTxt.titulo}
-                </div>
-                <div style={{ fontSize:13, color:"#6b7280", letterSpacing:2, fontFamily:"Arial,sans-serif", textTransform:"uppercase", marginBottom:20 }}>
-                  {diplomaTxt.subtitulo}
-                </div>
-
-                {/* Nombre del alumno */}
-                <div style={{ fontSize:48, color:"#111827", marginBottom:6, fontStyle:"italic", letterSpacing:1, textAlign:"center", lineHeight:1.1 }}>
-                  {certData.alumno.nombre}
-                </div>
-
-                {/* Separador */}
-                <div style={{ width:320, height:2, background:"linear-gradient(to right, transparent, #1d4ed8, transparent)", marginBottom:16 }} />
-
-                {/* Descripción */}
-                <div style={{ fontSize:14, color:"#374151", textAlign:"center", fontFamily:"Arial,sans-serif", lineHeight:1.7, marginBottom:20 }}>
-                  {diplomaTxt.cuerpo}
-                  <br />
-                  <strong style={{ fontSize:19, color:"#1d4ed8", display:"block", marginTop:4 }}>
-                    {certData.curso.nombre}
-                  </strong>
-                  <span style={{ fontSize:12, color:"#6b7280" }}>
-                    Con una duración de <strong>{certData.curso.horas} horas</strong> · Modalidad: {certData.curso.modalidad}
-                  </span>
-                </div>
-
-                {/* Firmas */}
-                <div style={{ display:"flex", justifyContent:"space-around", width:"80%", marginTop:"auto", marginBottom:12 }}>
-                  {[
-                    { titulo:"Instructor", nombre:certData.curso.instructor || "Instructor" },
-                    { titulo:diplomaTxt.gerencia, nombre:"Sólido Auto Servicio" },
-                  ].map(f => (
-                    <div key={f.titulo} style={{ textAlign:"center" }}>
-                      <div style={{ width:160, borderBottom:"1.5px solid #374151", marginBottom:6 }} />
-                      <div style={{ fontSize:12, fontWeight:700, color:"#111827", fontFamily:"Arial,sans-serif" }}>{f.nombre}</div>
-                      <div style={{ fontSize:11, color:"#6b7280", fontFamily:"Arial,sans-serif" }}>{f.titulo}</div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Pie */}
-                <div style={{ display:"flex", justifyContent:"space-between", width:"100%", fontSize:10, color:"#9ca3af", fontFamily:"Arial,sans-serif", marginTop:4 }}>
-                  <span>{diplomaTxt.ciudad}</span>
-                  <span style={{ fontSize:11, color:"#b45309", fontWeight:700 }}>{numCert(certData.alumno.id)}</span>
-                  <span>Fecha: {hoy()}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+              
