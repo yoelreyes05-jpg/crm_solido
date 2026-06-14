@@ -8110,61 +8110,75 @@ app.get("/api/nomina/:id", async (req, res) => {
   const { data: nomina, error } = await supabase.from("nominas").select("*").eq("id", req.params.id).single();
   if (error || !nomina) return res.status(404).json({ error: "Nómina no encontrada" });
   const { data: detalle } = await supabase.from("nomina_detalle").select("*").eq("nomina_id", nomina.id).order("empleado_nombre");
-  res.json({ ...nomina, detalle: detalle ?? [] });
+  res.json({ ...nomina, detalle: detalle || [] });
 });
 
-app.patch("/api/nomina/:id/pagar", async (req, res) => {
-  const { error } = await supabase.from("nominas").update({ estado: "pagada", fecha_pago: new Date().toISOString().split("T")[0] }).eq("id", req.params.id);
+// Ajustar una fila (horas extra, otros ingresos/descuentos, comisión manual) → recalcula
+app.patch("/api/nomina/detalle/:id", async (req, res) => {
+  try {
+    const { data: fila } = await supabase.from("nomina_detalle").select("*").eq("id", req.params.id).single();
+    if (!fila) return res.status(404).json({ error: "Detalle no encontrado" });
+    const { data: nomina } = await supabase.from("nominas").select("*").eq("id", fila.nomina_id).single();
+    if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Solo se pueden ajustar nóminas en borrador" });
+    const { data: empleado } = await supabase.from("empleados").select("*").eq("id", fila.empleado_id).single();
+
+    const b = req.body || {};
+    const c = calcularFilaNomina({
+      empleado, tipoNomina: nomina.tipo,
+      salario_base: b.salario_base !== undefined ? b.salario_base : fila.salario_base,
+      comisiones: b.comisiones !== undefined ? b.comisiones : fila.comisiones,
+      horas_extra: b.horas_extra !== undefined ? b.horas_extra : fila.horas_extra,
+      otros_ingresos: b.otros_ingresos !== undefined ? b.otros_ingresos : fila.otros_ingresos,
+      otros_descuentos: b.otros_descuentos !== undefined ? b.otros_descuentos : fila.otros_descuentos,
+    });
+
+    await supabase.from("nomina_detalle").update({
+      ...c,
+      otros_ingresos_desc: b.otros_ingresos_desc !== undefined ? b.otros_ingresos_desc : fila.otros_ingresos_desc,
+      otros_descuentos_desc: b.otros_descuentos_desc !== undefined ? b.otros_descuentos_desc : fila.otros_descuentos_desc,
+    }).eq("id", fila.id);
+
+    // Recalcular totales de la nómina
+    const { data: filas } = await supabase.from("nomina_detalle").select("total_bruto,total_deducciones,neto,afp_empleador,sfs_empleador,srl_empleador,infotep").eq("nomina_id", nomina.id);
+    const tot = (k) => r2((filas || []).reduce((s, f) => s + Number(f[k] || 0), 0));
+    await supabase.from("nominas").update({
+      total_bruto: tot("total_bruto"), total_deducciones: tot("total_deducciones"), total_neto: tot("neto"),
+      total_aporte_empleador: r2(tot("afp_empleador") + tot("sfs_empleador") + tot("srl_empleador") + tot("infotep")),
+    }).eq("id", nomina.id);
+
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/api/nomina/:id/pagar", async (req, res) => {
+  const { data: nomina } = await supabase.from("nominas").select("*").eq("id", req.params.id).single();
+  if (!nomina) return res.status(404).json({ error: "Nómina no encontrada" });
+  if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Esta nómina no está en borrador" });
+  const { error } = await supabase.from("nominas").update({ estado: "PAGADA", pagada_at: new Date() }).eq("id", nomina.id);
+  if (error) return res.status(500).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+app.post("/api/nomina/:id/anular", async (req, res) => {
+  const { error } = await supabase.from("nominas").update({ estado: "ANULADA" }).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
 app.delete("/api/nomina/:id", async (req, res) => {
+  const { data: nomina } = await supabase.from("nominas").select("estado").eq("id", req.params.id).single();
+  if (!nomina) return res.status(404).json({ error: "Nómina no encontrada" });
+  if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Solo se pueden eliminar borradores" });
+  await supabase.from("nomina_detalle").delete().eq("nomina_id", req.params.id);
   const { error } = await supabase.from("nominas").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
   res.json({ ok: true });
 });
 
-// ─── CAFETERÍA ALMACÉN ────────────────────────────────────────────────────────
-
-app.get("/cafeteria/almacen/movimientos", async (req, res) => {
-  const { data, error } = await supabase
-    .from("cafeteria_almacen_movimientos")
-    .select("*, cafeteria_productos(nombre)")
-    .order("created_at", { ascending: false })
-    .limit(200);
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data ?? []);
-});
-
-app.post("/cafeteria/almacen/movimientos", async (req, res) => {
-  const { producto_id, tipo, cantidad, motivo, referencia, usuario } = req.body;
-  if (!producto_id || !tipo || !cantidad) return res.status(400).json({ error: "Faltan campos requeridos" });
-
-  const { data: prod } = await supabase.from("cafeteria_productos").select("stock").eq("id", producto_id).single();
-  const stock_antes = Number(prod?.stock ?? 0);
-  let stock_despues;
-  if (tipo === "ENTRADA") stock_despues = stock_antes + Number(cantidad);
-  else if (tipo === "SALIDA") stock_despues = Math.max(0, stock_antes - Number(cantidad));
-  else stock_despues = Number(cantidad); // AJUSTE
-
-  await supabase.from("cafeteria_productos").update({ stock: stock_despues }).eq("id", producto_id);
-
-  const { data, error } = await supabase.from("cafeteria_almacen_movimientos").insert([{
-    producto_id, tipo, cantidad: Number(cantidad),
-    stock_antes, stock_despues,
-    motivo: motivo ?? null,
-    referencia: referencia ?? null,
-    usuario: usuario ?? "Sistema"
-  }]).select().single();
-
-  if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
-});
-
-// ─── INICIO DEL SERVIDOR ──────────────────────────────────────────────────────
-
-const PORT = process.env.PORT || 3001;
+// ══════════════════════════════════════════════════════════════════════════════
+// 🚀 SERVIDOR
+// ══════════════════════════════════════════════════════════════════════════════
+const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`✅ CRM Backend corriendo en puerto ${PORT}`);
+  console.log(`\ud83d\udd25 SÓLIDO AUTO SERVICIO — Servidor activo en puerto \${PORT}`);
 });
