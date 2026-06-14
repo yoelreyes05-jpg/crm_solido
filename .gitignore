@@ -1,0 +1,42 @@
+# Dependencies
+node_modules/
+frontend/node_modules/
+crm-backend/node_modules/
+
+# Build outputs
+.next/
+frontend/.next/
+out/
+build/
+dist/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+crm-backend/.env
+frontend/.env
+frontend/.env.local
+
+# Logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# Temp Word/Excel lock files
+~$*.docx
+~$*.xlsx
+~$*.doc
