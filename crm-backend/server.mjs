@@ -2791,10 +2791,11 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
       }
     }
 
-    // Guardar el instante completo (UTC). El cuadre filtra por día RD en JS,
-    // y la UI lo muestra en hora de Santo Domingo. Así se conserva la hora real
-    // del registro y el movimiento cae en el día correcto.
-    const fecha = new Date().toISOString();
+    // Guardar la hora LOCAL de RD (naive "YYYY-MM-DD HH:mm:ss"), consistente con
+    // los registros existentes. Así se conserva la hora real y el movimiento cae
+    // en el día correcto del cuadre (que compara por la fecha local de RD).
+    // sv-SE produce el formato ISO "2026-06-15 17:56:23".
+    const fecha = new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" });
 
     const { data, error } = await supabase
       .from("caja_chica")
@@ -4533,8 +4534,9 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
 
     // Egresos de caja chica del día.
     // La tabla caja_chica solo tiene columnas: id, fecha, descripcion, monto, tipo, usuario
-    // (NO existe created_at). Por eso filtramos el día RD en JS, de forma robusta
-    // a cualquier formato guardado en `fecha` (instante ISO, timestamp naive UTC, o solo fecha).
+    // (NO existe created_at). La columna `fecha` guarda la hora LOCAL de RD (naive,
+    // sin zona), p.ej. "2026-06-15 00:39:34" = 12:39 a.m. en RD. Por eso, para un
+    // valor naive, el día-calendario RD son simplemente los primeros 10 caracteres.
     const { data: ccRows } = await supabase
       .from("caja_chica")
       .select("id, monto, tipo, fecha")
@@ -4546,9 +4548,12 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
     const fechaDiaRD = (val) => {
       if (!val) return null;
       const s = String(val).trim();
-      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;            // ya es solo fecha
-      const hasTz = /[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s);
-      const dt = new Date(hasTz ? s : `${s.replace(" ", "T")}Z`); // naive => interpretar como UTC
+      // Solo fecha o timestamp naive (hora local RD): tomar la parte de fecha tal cual.
+      if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s) && !/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s)) {
+        return s.slice(0, 10);
+      }
+      // Instante real con zona (Z u offset): convertir a la fecha de RD.
+      const dt = new Date(s);
       return isNaN(dt.getTime())
         ? null
         : dt.toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });

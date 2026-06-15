@@ -67,27 +67,34 @@ type ReporteCostos = {
 const fmt = (n: number | string) =>
   "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-// Convierte cualquier valor de fecha a un Date correcto, evitando el corrimiento de zona:
-//  - "YYYY-MM-DD" (solo fecha)            -> mediodía UTC, para que en RD (UTC-4) siga siendo el MISMO día
-//  - timestamp sin zona ("...T..." sin Z) -> se interpreta como UTC (así se guarda con now()/toISOString)
-//  - timestamp con zona (Z u offset)      -> se respeta tal cual
-const _parseFecha = (d: string): Date | null => {
+// Devuelve un Date cuyos componentes UTC representan la hora de RD, para poder
+// formatear con timeZone "UTC" de forma DETERMINISTA (sin depender de la zona del
+// navegador). Reglas, según cómo se guardan las fechas:
+//  - "YYYY-MM-DD" (solo fecha)             -> medianoche de ese día
+//  - timestamp sin zona ("YYYY-MM-DD HH:mm") -> YA es hora local de RD; se usa tal cual
+//  - timestamp con zona (Z u offset)        -> instante real; se convierte a RD (UTC-4, fijo)
+const _fechaRD = (d: string): Date | null => {
   if (!d) return null;
   const s = String(d).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
   const hasTz = /[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s);
-  const dt = new Date(hasTz ? s : `${s.replace(" ", "T")}Z`);
+  if (hasTz) {
+    const inst = new Date(s);
+    return isNaN(inst.getTime()) ? null : new Date(inst.getTime() - 4 * 3600 * 1000);
+  }
+  // Solo fecha o naive (hora local RD): tratar sus componentes como UTC.
+  const norm = /^\d{4}-\d{2}-\d{2}$/.test(s) ? `${s}T00:00:00Z` : `${s.replace(" ", "T")}Z`;
+  const dt = new Date(norm);
   return isNaN(dt.getTime()) ? null : dt;
 };
 
 const fmtDate = (d: string) => {
-  const dt = _parseFecha(d);
-  return dt ? dt.toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+  const dt = _fechaRD(d);
+  return dt ? dt.toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "UTC" }) : "—";
 };
 
 const fmtDatetime = (d: string) => {
-  const dt = _parseFecha(d);
-  return dt ? dt.toLocaleString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+  const dt = _fechaRD(d);
+  return dt ? dt.toLocaleString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "UTC" }) : "—";
 };
 
 // ── Imprimir recibo de pago ────────────────────────────────────────────────

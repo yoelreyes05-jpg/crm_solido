@@ -41,13 +41,15 @@ export async function POST(req: Request) {
 
     // La tabla caja_chica no tiene columna categoria; la categoria ya viene
     // incluida dentro de descripcion (ej: [Limpieza] compra detergente).
-    // Guardamos el instante completo si no se envia fecha, para conservar la hora.
+    // Guardamos la hora LOCAL de RD (naive "YYYY-MM-DD HH:mm:ss"), consistente con
+    // los registros existentes, para conservar la hora y caer en el dia correcto.
+    const fechaRD = new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" });
     const { error } = await supabase.from("caja_chica").insert([
       {
         tipo,
         monto,
         descripcion: descripcion || "",
-        fecha: fecha || new Date().toISOString(),
+        fecha: fecha || fechaRD,
         usuario: usuario || "Sistema",
       },
     ]);
