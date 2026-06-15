@@ -18,3 +18,16 @@ yarn-error.log*
 # OS
 .DS_Store
 Thumbs.db
+
+# Temp Word/Excel lock files
+~$*.docx
+~$*.xlsx
+~$*.doc
+~$*.xls
+
+# Windows shortcuts
+*.lnk
+
+# Prisma local DB
+prisma/dev.db
+prisma/*.db

@@ -67,11 +67,28 @@ type ReporteCostos = {
 const fmt = (n: number | string) =>
   "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const fmtDate = (d: string) =>
-  d ? new Date(d).toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+// Convierte cualquier valor de fecha a un Date correcto, evitando el corrimiento de zona:
+//  - "YYYY-MM-DD" (solo fecha)            -> mediodía UTC, para que en RD (UTC-4) siga siendo el MISMO día
+//  - timestamp sin zona ("...T..." sin Z) -> se interpreta como UTC (así se guarda con now()/toISOString)
+//  - timestamp con zona (Z u offset)      -> se respeta tal cual
+const _parseFecha = (d: string): Date | null => {
+  if (!d) return null;
+  const s = String(d).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return new Date(`${s}T12:00:00Z`);
+  const hasTz = /[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s);
+  const dt = new Date(hasTz ? s : `${s.replace(" ", "T")}Z`);
+  return isNaN(dt.getTime()) ? null : dt;
+};
 
-const fmtDatetime = (d: string) =>
-  d ? new Date(d).toLocaleString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+const fmtDate = (d: string) => {
+  const dt = _parseFecha(d);
+  return dt ? dt.toLocaleDateString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+};
+
+const fmtDatetime = (d: string) => {
+  const dt = _parseFecha(d);
+  return dt ? dt.toLocaleString("es-DO", { day: "numeric", month: "numeric", year: "2-digit", hour: "2-digit", minute: "2-digit", timeZone: "America/Santo_Domingo" }) : "—";
+};
 
 // ── Imprimir recibo de pago ────────────────────────────────────────────────
 function imprimirRecibo(cuenta: any, pagos: any[], tipo: "cobrar" | "pagar") {
@@ -669,7 +686,7 @@ function CajaChica({ usuario }: { usuario: Usuario }) {
     if (form.tipo === "EGRESO" && Number(form.monto) > fondo) return alert("Fondos insuficientes en caja chica");
     setSaving(true);
     try {
-      await fetch(`${API}/api/contabilidad/caja-chica`, {
+      const r = await fetch(`${API}/api/contabilidad/caja-chica`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -679,6 +696,12 @@ function CajaChica({ usuario }: { usuario: Usuario }) {
           usuario: usuario?.nombre || "Sistema",
         }),
       });
+      if (!r.ok) {
+        const e = await r.json().catch(() => ({}));
+        alert(e.error || "No se pudo registrar el movimiento");
+        setSaving(false);
+        return;
+      }
       setShowForm(false);
       setForm({ descripcion: "", monto: "", tipo: "EGRESO", categoria: "Otro" });
       cargar();

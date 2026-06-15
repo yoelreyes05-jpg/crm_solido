@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
-// GET — listar movimientos + fondo actual
+// GET - listar movimientos + fondo actual
 export async function GET() {
   try {
+    // Nota: la tabla caja_chica no tiene columna creado_en; ordenamos por fecha y luego id.
     const { data: movimientos, error: err1 } = await supabase
       .from("caja_chica")
       .select("*")
       .order("fecha", { ascending: false })
-      .order("creado_en", { ascending: false })
+      .order("id", { ascending: false })
       .limit(100);
 
     if (err1) throw err1;
@@ -33,19 +34,20 @@ export async function GET() {
   }
 }
 
-// POST — registrar movimiento
+// POST - registrar movimiento
 export async function POST(req: Request) {
   try {
-    const { tipo, monto, categoria, descripcion, fecha, usuario } =
-      await req.json();
+    const { tipo, monto, descripcion, fecha, usuario } = await req.json();
 
+    // La tabla caja_chica no tiene columna categoria; la categoria ya viene
+    // incluida dentro de descripcion (ej: [Limpieza] compra detergente).
+    // Guardamos el instante completo si no se envia fecha, para conservar la hora.
     const { error } = await supabase.from("caja_chica").insert([
       {
         tipo,
         monto,
-        categoria: categoria || "Otro",
         descripcion: descripcion || "",
-        fecha,
+        fecha: fecha || new Date().toISOString(),
         usuario: usuario || "Sistema",
       },
     ]);
@@ -59,7 +61,7 @@ export async function POST(req: Request) {
   }
 }
 
-// PATCH — actualizar fondo inicial
+// PATCH - actualizar fondo inicial
 export async function PATCH(req: Request) {
   try {
     const { fondo_inicial } = await req.json();

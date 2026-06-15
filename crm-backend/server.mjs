@@ -2791,8 +2791,10 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
       }
     }
 
-    // Guardar fecha como YYYY-MM-DD en zona horaria DR (no UTC) para que el cuadre del día coincida
-    const fechaDR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+    // Guardar el instante completo (UTC). El cuadre filtra por día RD en JS,
+    // y la UI lo muestra en hora de Santo Domingo. Así se conserva la hora real
+    // del registro y el movimiento cae en el día correcto.
+    const fecha = new Date().toISOString();
 
     const { data, error } = await supabase
       .from("caja_chica")
@@ -2801,7 +2803,7 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
         monto:   Number(monto),
         tipo,
         usuario: usuario || "Sistema",
-        fecha:   fechaDR
+        fecha
       }])
       .select()
       .single();
@@ -4529,35 +4531,30 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
     const ventas_credito         = parsed.reduce((a, p) => a + p.credito,       0);
     const ventas_total_taller    = facs.reduce((a, f) => a + Number(f.total),   0);
 
-    // Egresos de caja chica del día — 3 queries para cubrir todos los formatos de fecha posibles
-    const { data: gastosCC } = await supabase
+    // Egresos de caja chica del día.
+    // La tabla caja_chica solo tiene columnas: id, fecha, descripcion, monto, tipo, usuario
+    // (NO existe created_at). Por eso filtramos el día RD en JS, de forma robusta
+    // a cualquier formato guardado en `fecha` (instante ISO, timestamp naive UTC, o solo fecha).
+    const { data: ccRows } = await supabase
       .from("caja_chica")
-      .select("id, monto, tipo, fecha, created_at")
-      .gte("created_at", desde)
-      .lte("created_at", hasta);
+      .select("id, monto, tipo, fecha")
+      .eq("tipo", "EGRESO")
+      .order("fecha", { ascending: false })
+      .limit(1000);
 
-    // Query 2: por campo fecha con rango timezone-aware (registros con ISO completo en fecha)
-    const { data: gastosCC2 } = await supabase
-      .from("caja_chica")
-      .select("id, monto, tipo, fecha, created_at")
-      .gte("fecha", desde)
-      .lte("fecha", hasta);
+    // Devuelve la fecha-calendario en zona RD (YYYY-MM-DD) de un valor de fecha cualquiera.
+    const fechaDiaRD = (val) => {
+      if (!val) return null;
+      const s = String(val).trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;            // ya es solo fecha
+      const hasTz = /[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s);
+      const dt = new Date(hasTz ? s : `${s.replace(" ", "T")}Z`); // naive => interpretar como UTC
+      return isNaN(dt.getTime())
+        ? null
+        : dt.toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+    };
 
-    // Query 3: por campo fecha = YYYY-MM-DD exacto (registros nuevos donde fecha es solo la fecha DR)
-    const { data: gastosCC3 } = await supabase
-      .from("caja_chica")
-      .select("id, monto, tipo, fecha, created_at")
-      .eq("fecha", fecha);
-
-    const gastosUnion = [...(gastosCC || []), ...(gastosCC2 || []), ...(gastosCC3 || [])];
-    const seen = new Set();
-    const gastosDelDia = gastosUnion.filter(g => {
-      // Clave única: usar id si existe, sino combinación de campos
-      const key = (g.id ? String(g.id) : String(g.monto) + "|" + g.tipo + "|" + (g.created_at || g.fecha || ""));
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return g.tipo === "EGRESO";
-    });
+    const gastosDelDia = (ccRows || []).filter(g => fechaDiaRD(g.fecha) === fecha);
     const gastos = gastosDelDia.reduce((a, g) => a + Number(g.monto), 0);
 
     // Efectivo del taller solamente (cafetería tiene su propio cuadre)
