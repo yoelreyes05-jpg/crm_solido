@@ -4533,17 +4533,19 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .gte("created_at", desde)
       .lte("created_at", hasta);
 
-    // También buscar por campo fecha si es DATE
+    // También buscar por campo fecha (guardado como ISO completo) usando rango
     const { data: gastosCC2 } = await supabase
       .from("caja_chica")
       .select("monto, tipo, fecha, created_at")
-      .eq("fecha", fecha);
+      .gte("fecha", desde)
+      .lte("fecha", hasta);
 
     const gastosUnion = [...(gastosCC || []), ...(gastosCC2 || [])];
     const seen = new Set();
     const gastosDelDia = gastosUnion.filter(g => {
-      if (seen.has(g.monto + g.tipo + (g.created_at || g.fecha))) return false;
-      seen.add(g.monto + g.tipo + (g.created_at || g.fecha));
+      const key = String(g.monto) + "|" + g.tipo + "|" + (g.created_at || g.fecha || "");
+      if (seen.has(key)) return false;
+      seen.add(key);
       return g.tipo === "EGRESO";
     });
     const gastos = gastosDelDia.reduce((a, g) => a + Number(g.monto), 0);

@@ -290,12 +290,20 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
   Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
   </body></html>`;
 
-  const w = window.open("", "_blank", "width=720,height=750");
-  if (!w) { alert("⚠️ Tu navegador bloqueó la ventana emergente. Permite popups para este sitio e intenta de nuevo."); return; }
-  w.document.write(html);
-  w.document.close();
-  w.focus();
-  setTimeout(() => { try { w.print(); } catch(e) { /* ya fue impreso o bloqueado */ } }, 600);
+  // Usar iframe oculto para evitar bloqueo de popups
+  let frame = document.getElementById("cuadre-print-frame") as HTMLIFrameElement | null;
+  if (!frame) {
+    frame = document.createElement("iframe");
+    frame.id = "cuadre-print-frame";
+    frame.style.cssText = "position:fixed;top:-9999px;left:-9999px;width:800px;height:600px;border:none;";
+    document.body.appendChild(frame);
+  }
+  const doc = frame.contentDocument || frame.contentWindow?.document;
+  if (!doc) return;
+  doc.open();
+  doc.write(html);
+  doc.close();
+  frame.onload = () => { frame!.contentWindow?.print(); };
 }
 
 function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
