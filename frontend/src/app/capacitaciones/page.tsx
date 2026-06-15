@@ -183,6 +183,13 @@ export default function CapacitacionesPage() {
     cargar();
   };
 
+  // Marcar alumno como completado y abrir diploma
+  const marcarCompletado = async (alumno: Alumno, curso: Curso) => {
+    await supabase.from("capacitaciones_alumnos").update({ estado: "completado" }).eq("id", alumno.id);
+    await cargar();
+    abrirCertificado({ ...alumno, estado: "completado" }, curso);
+  };
+
   // ── Certificado ─────────────────────────────────────────────────────────────
   const abrirCertificado = (alumno: Alumno, curso: Curso) => {
     setCertData({ alumno, curso });
@@ -414,9 +421,21 @@ export default function CapacitacionesPage() {
                 const pagoCompleto = Number(cursoActivo.precio) === 0 || Number(a.monto_pagado) >= Number(cursoActivo.precio);
                 const puedeRecibir = a.estado === "completado";
                 const pendiente    = Math.max(0, Number(cursoActivo.precio) - Number(a.monto_pagado));
+                const hoyISO = new Date().toISOString().split("T")[0];
+                const inscritoTerminado = a.estado === "inscrito" && !!cursoActivo.fecha_fin && cursoActivo.fecha_fin <= hoyISO;
 
                 return (
                   <div key={a.id} style={{ background:"#f9fafb", borderRadius:8, padding:"10px 12px", marginBottom:8 }}>
+                    {inscritoTerminado && (
+                      <div style={{ background:"#fef3c7", border:"1px solid #fcd34d", borderRadius:6, padding:"6px 10px", marginBottom:8, display:"flex", alignItems:"center", justifyContent:"space-between", gap:8 }}>
+                        <span style={{ fontSize:12, color:"#92400e", fontWeight:600 }}>⏰ Curso finalizado — pendiente de completar</span>
+                        <button
+                          onClick={() => marcarCompletado(a, cursoActivo)}
+                          style={{ background:"#d97706", color:"#fff", border:"none", borderRadius:5, padding:"4px 10px", fontSize:11, fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" }}>
+                          ✅ Completar y diploma
+                        </button>
+                      </div>
+                    )}
                     <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
                       <div style={{ flex:1, minWidth:0 }}>
                         <div style={{ fontWeight:600, fontSize:13, color:"#111827" }}>{a.nombre}</div>
