@@ -4465,6 +4465,34 @@ app.post("/ai/consulta-cliente", async (req, res) => {
 // 🔄 CUADRE DE CAJA AUTOMÁTICO
 // =====================================================
 
+// Parsear método de pago MIXTO → distribuir montos por tipo
+function parseMixtoMetodo(factura) {
+  const mp    = (factura.metodo_pago || "").trim();
+  const total = Number(factura.total || 0);
+  if (mp === "EFECTIVO")      return { efectivo: total, tarjeta: 0, transferencia: 0, cheque: 0, credito: 0 };
+  if (mp === "TARJETA")       return { efectivo: 0, tarjeta: total, transferencia: 0, cheque: 0, credito: 0 };
+  if (mp === "TRANSFERENCIA") return { efectivo: 0, tarjeta: 0, transferencia: total, cheque: 0, credito: 0 };
+  if (mp === "CHEQUE")        return { efectivo: 0, tarjeta: 0, transferencia: 0, cheque: total, credito: 0 };
+  if (mp === "CREDITO")       return { efectivo: 0, tarjeta: 0, transferencia: 0, cheque: 0, credito: total };
+  if (mp.startsWith("MIXTO")) {
+    // "MIXTO (Efectivo RD$499.00 + TARJETA RD$917.00)"
+    const efecMatch  = mp.match(/Efectivo RD\$(\d+(?:\.\d+)?)/i);
+    const restoMatch = mp.match(/\+\s*(\w+)\s+RD\$(\d+(?:\.\d+)?)/i);
+    const efectivo   = efecMatch  ? Number(efecMatch[1])  : 0;
+    const restoMonto = restoMatch ? Number(restoMatch[2]) : 0;
+    const restoMet   = restoMatch ? restoMatch[1].toUpperCase() : "TARJETA";
+    return {
+      efectivo,
+      tarjeta:       restoMet === "TARJETA"       ? restoMonto : 0,
+      transferencia: restoMet === "TRANSFERENCIA" ? restoMonto : 0,
+      cheque:        restoMet === "CHEQUE"        ? restoMonto : 0,
+      credito: 0,
+    };
+  }
+  // Método desconocido → contar como efectivo
+  return { efectivo: total, tarjeta: 0, transferencia: 0, cheque: 0, credito: 0 };
+}
+
 // GET /api/contabilidad/cuadre/auto?fecha=YYYY-MM-DD
 // Calcula el cuadre del día automáticamente desde facturas + caja_chica
 app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
@@ -4488,29 +4516,37 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
       .gte("created_at", desde)
       .lte("created_at", hasta);
 
-    const facs = facturas || [];
-    const ventas_efectivo_taller = facs.filter(f => f.metodo_pago === "EFECTIVO")
-      .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_tarjeta       = facs.filter(f => f.metodo_pago === "TARJETA")
-      .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_transferencia = facs.filter(f => f.metodo_pago === "TRANSFERENCIA")
-      .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_cheque        = facs.filter(f => f.metodo_pago === "CHEQUE")
-      .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_credito       = facs.filter(f => f.metodo_pago === "CREDITO")
-      .reduce((a, f) => a + Number(f.total), 0);
-    const ventas_total_taller  = facs.reduce((a, f) => a + Number(f.total), 0);
+    // Distribuir montos por método (incluyendo MIXTO)
+    const facs   = facturas || [];
+    const parsed = facs.map(f => parseMixtoMetodo(f));
+    const ventas_efectivo_taller = parsed.reduce((a, p) => a + p.efectivo,      0);
+    const ventas_tarjeta         = parsed.reduce((a, p) => a + p.tarjeta,       0);
+    const ventas_transferencia   = parsed.reduce((a, p) => a + p.transferencia, 0);
+    const ventas_cheque          = parsed.reduce((a, p) => a + p.cheque,        0);
+    const ventas_credito         = parsed.reduce((a, p) => a + p.credito,       0);
+    const ventas_total_taller    = facs.reduce((a, f) => a + Number(f.total),   0);
 
     // Egresos de caja chica del día
     const { data: gastosCC } = await supabase
       .from("caja_chica")
-      .select("monto, tipo")
-      .gte("fecha", desde)
-      .lte("fecha", hasta);
+      .select("monto, tipo, fecha, created_at")
+      .gte("created_at", desde)
+      .lte("created_at", hasta);
 
-    const gastos = (gastosCC || [])
-      .filter(g => g.tipo === "EGRESO")
-      .reduce((a, g) => a + Number(g.monto), 0);
+    // También buscar por campo fecha si es DATE
+    const { data: gastosCC2 } = await supabase
+      .from("caja_chica")
+      .select("monto, tipo, fecha, created_at")
+      .eq("fecha", fecha);
+
+    const gastosUnion = [...(gastosCC || []), ...(gastosCC2 || [])];
+    const seen = new Set();
+    const gastosDelDia = gastosUnion.filter(g => {
+      if (seen.has(g.monto + g.tipo + (g.created_at || g.fecha))) return false;
+      seen.add(g.monto + g.tipo + (g.created_at || g.fecha));
+      return g.tipo === "EGRESO";
+    });
+    const gastos = gastosDelDia.reduce((a, g) => a + Number(g.monto), 0);
 
     // Efectivo del taller solamente (cafetería tiene su propio cuadre)
     const ventas_efectivo = ventas_efectivo_taller;

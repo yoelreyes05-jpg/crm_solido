@@ -183,12 +183,20 @@ export default function ContabilidadPage() {
 // Imprimir un cuadre de caja
 function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
   const _e = getEmpresaSync();
-  const EMPRESA = { nombre: _e.nombre, tel: _e.telefono, dir: _e.direccion };
-  const saldoEsperado = Number(c.ventas_efectivo) - Number(c.gastos);
+  const EMPRESA = { nombre: _e.nombre || "Sólido Auto Servicio", tel: _e.telefono || "", dir: _e.direccion || "" };
+  const ef           = Number(c.ventas_efectivo      || 0);
+  const tar          = Number(c.ventas_tarjeta       || 0);
+  const tra          = Number(c.ventas_transferencia || 0);
+  const che          = Number(c.ventas_cheque        || 0);
+  const cre          = Number(c.ventas_credito       || 0);
+  const gastos       = Number(c.gastos               || 0);
+  const efectivoNeto = ef - gastos;
+  const ventas_total = ef + tar + tra + che + cre;
+  const totalNeto    = ventas_total - gastos;
+  const saldoEsperado = efectivoNeto;
   const diferencia    = c.efectivo_contado !== null && c.efectivo_contado !== undefined
     ? Number(c.efectivo_contado) - saldoEsperado
     : Number(c.diferencia || 0);
-  const ventas_total  = Number(c.ventas_efectivo || 0) + Number(c.ventas_tarjeta || 0) + Number(c.ventas_transferencia || 0) + Number(c.ventas_cheque || 0) + Number(c.ventas_credito || 0);
 
   const row = (label: string, val: string, color = "#111", bold = false) =>
     `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;">
@@ -228,33 +236,40 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
 
 
   ${section("Ventas del Taller",
-    row("Ventas en efectivo", fmt(c.ventas_efectivo || 0)) +
-    row("Ventas con tarjeta", fmt(c.ventas_tarjeta || 0)) +
-    row("Ventas por transferencia", fmt(c.ventas_transferencia || 0)) +
-    (Number(c.ventas_cheque || 0) > 0 ? row("Ventas con cheque", fmt(c.ventas_cheque || 0)) : "") +
-    (Number(c.ventas_credito || 0) > 0 ? row("Ventas a crédito", fmt(c.ventas_credito || 0)) : "") +
+    row("💵 Efectivo",       fmt(ef)) +
+    row("💳 Tarjeta",        fmt(tar)) +
+    row("🏦 Transferencia",  fmt(tra)) +
+    (che > 0 ? row("🔖 Cheque",  fmt(che))  : "") +
+    (cre > 0 ? row("📋 Crédito", fmt(cre))  : "") +
     `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #6366f1;margin-top:4px;">
-       <span style="font-weight:800;">TOTAL VENTAS DÍA</span>
-       <span style="font-weight:800;font-size:16px;">${fmt(ventas_total)}</span>
+       <span style="font-weight:800;">TOTAL VENTAS BRUTAS</span>
+       <span style="font-weight:800;font-size:15px;">${fmt(ventas_total)}</span>
      </div>`
   )}
 
-  ${section("Egresos del Día", row("Gastos caja chica", fmt(c.gastos || 0), "#ef4444", true))}
+  ${section("Egresos del Día", row("💸 Gastos caja chica (efectivo)", fmt(gastos), "#ef4444", true))}
 
-  ${section("Cuadre Final",
-    row("Ventas efectivo del día", fmt(c.ventas_efectivo || 0)) +
-    row("− Gastos del día", fmt(c.gastos || 0)) +
+  ${section("Cuadre Final — Neto por Método",
+    row("💵 Efectivo bruto",            fmt(ef)) +
+    row("   − Gastos caja chica",       fmt(gastos), "#ef4444") +
+    `<div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid #f0f0f0;font-weight:700;color:${efectivoNeto>=0?"#065f46":"#991b1b"};">
+       <span>   = Efectivo neto en caja</span><span>${fmt(efectivoNeto)}</span></div>` +
+    (tar > 0 ? row("💳 Tarjeta (banco)", fmt(tar)) : "") +
+    (tra > 0 ? row("🏦 Transferencia (banco)", fmt(tra)) : "") +
+    (che > 0 ? row("🔖 Cheque", fmt(che)) : "") +
+    (cre > 0 ? row("📋 Crédito pendiente", fmt(cre)) : "") +
     `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #111;margin-top:4px;">
-       <span style="font-weight:800;">SALDO ESPERADO EN CAJA</span>
-       <span style="font-weight:800;font-size:16px;">${fmt(saldoEsperado)}</span>
+       <span style="font-weight:800;">TOTAL NETO DEL DÍA</span>
+       <span style="font-weight:900;font-size:16px;color:${totalNeto>=0?"#065f46":"#991b1b"};">${fmt(totalNeto)}</span>
      </div>` +
     (c.efectivo_contado !== null && c.efectivo_contado !== undefined
-      ? row("Efectivo contado físicamente", fmt(c.efectivo_contado), "#111", true) +
+      ? `<div style="margin-top:10px;padding-top:10px;border-top:1px dashed #ddd;">` +
+        row("💰 Efectivo contado físicamente", fmt(c.efectivo_contado), "#111", true) +
         `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid ${diferencia >= 0 ? "#10b981" : "#ef4444"};margin-top:4px;">
-           <span style="font-weight:800;">DIFERENCIA</span>
-           <span style="font-weight:900;font-size:16px;color:${diferencia >= 0 ? "#10b981" : "#ef4444"};">${diferencia >= 0 ? "+" : ""}${fmt(diferencia)}</span>
-         </div>`
-      : `<div style="display:flex;justify-content:space-between;padding:6px 0;"><span style="color:#888;font-size:12px;">Sin conteo físico registrado</span><span style="color:#888;font-size:12px;">Diferencia: —</span></div>`)
+           <span style="font-weight:800;">DIFERENCIA (contado − esperado)</span>
+           <span style="font-weight:900;font-size:15px;color:${diferencia >= 0 ? "#10b981" : "#ef4444"};">${diferencia >= 0 ? "+" : ""}${fmt(diferencia)}</span>
+         </div></div>`
+      : `<div style="color:#888;font-size:12px;margin-top:6px;">Sin conteo físico registrado</div>`)
   )}
 
   ${c.notas ? section("Notas", `<p style="color:#555;font-size:13px;">${c.notas}</p>`) : ""}
@@ -273,11 +288,14 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
 
   <div class="footer">${EMPRESA.nombre} · ${EMPRESA.tel} · ${EMPRESA.dir}<br/>
   Impreso: ${new Date().toLocaleString("es-DO",{day:"numeric",month:"numeric",year:"2-digit",hour:"2-digit",minute:"2-digit",timeZone:"America/Santo_Domingo"})}</div>
-  <script>setTimeout(()=>window.print(),500);<\/script>
   </body></html>`;
 
   const w = window.open("", "_blank", "width=720,height=750");
-  if (w) { w.document.write(html); w.document.close(); }
+  if (!w) { alert("⚠️ Tu navegador bloqueó la ventana emergente. Permite popups para este sitio e intenta de nuevo."); return; }
+  w.document.write(html);
+  w.document.close();
+  w.focus();
+  setTimeout(() => { try { w.print(); } catch(e) { /* ya fue impreso o bloqueado */ } }, 600);
 }
 
 function CuadreDeCaja({ usuario }: { usuario: Usuario }) {
