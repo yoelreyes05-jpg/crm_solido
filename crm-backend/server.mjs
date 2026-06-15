@@ -2791,6 +2791,9 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
       }
     }
 
+    // Guardar fecha como YYYY-MM-DD en zona horaria DR (no UTC) para que el cuadre del día coincida
+    const fechaDR = new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+
     const { data, error } = await supabase
       .from("caja_chica")
       .insert([{
@@ -2798,7 +2801,7 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
         monto:   Number(monto),
         tipo,
         usuario: usuario || "Sistema",
-        fecha:   new Date().toISOString()
+        fecha:   fechaDR
       }])
       .select()
       .single();
@@ -4526,24 +4529,31 @@ app.get("/api/contabilidad/cuadre/auto", async (req, res) => {
     const ventas_credito         = parsed.reduce((a, p) => a + p.credito,       0);
     const ventas_total_taller    = facs.reduce((a, f) => a + Number(f.total),   0);
 
-    // Egresos de caja chica del día
+    // Egresos de caja chica del día — 3 queries para cubrir todos los formatos de fecha posibles
     const { data: gastosCC } = await supabase
       .from("caja_chica")
-      .select("monto, tipo, fecha, created_at")
+      .select("id, monto, tipo, fecha, created_at")
       .gte("created_at", desde)
       .lte("created_at", hasta);
 
-    // También buscar por campo fecha (guardado como ISO completo) usando rango
+    // Query 2: por campo fecha con rango timezone-aware (registros con ISO completo en fecha)
     const { data: gastosCC2 } = await supabase
       .from("caja_chica")
-      .select("monto, tipo, fecha, created_at")
+      .select("id, monto, tipo, fecha, created_at")
       .gte("fecha", desde)
       .lte("fecha", hasta);
 
-    const gastosUnion = [...(gastosCC || []), ...(gastosCC2 || [])];
+    // Query 3: por campo fecha = YYYY-MM-DD exacto (registros nuevos donde fecha es solo la fecha DR)
+    const { data: gastosCC3 } = await supabase
+      .from("caja_chica")
+      .select("id, monto, tipo, fecha, created_at")
+      .eq("fecha", fecha);
+
+    const gastosUnion = [...(gastosCC || []), ...(gastosCC2 || []), ...(gastosCC3 || [])];
     const seen = new Set();
     const gastosDelDia = gastosUnion.filter(g => {
-      const key = String(g.monto) + "|" + g.tipo + "|" + (g.created_at || g.fecha || "");
+      // Clave única: usar id si existe, sino combinación de campos
+      const key = (g.id ? String(g.id) : String(g.monto) + "|" + g.tipo + "|" + (g.created_at || g.fecha || ""));
       if (seen.has(key)) return false;
       seen.add(key);
       return g.tipo === "EGRESO";
