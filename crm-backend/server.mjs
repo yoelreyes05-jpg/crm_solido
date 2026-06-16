@@ -6174,6 +6174,7 @@ const TRANSICIONES_VALIDAS = {
   ESPERANDO_APROBACION:  ["REPARACION", "CANCELADA"],
   REPARACION:            ["CONTROL_CALIDAD"],
   CONTROL_CALIDAD:       ["LISTO", "REPARACION"],   // puede devolver al técnico
+  EN_LAVADO:             ["LISTO", "CANCELADA"],     // carril rápido de car wash
   LISTO:                 ["ENTREGADO"],
   CANCELADA:             [],
   ENTREGADO:             [],
@@ -6472,10 +6473,170 @@ app.post("/ordenes/:id/calidad-rechazada", async (req, res) => {
 });
 
 // ── POST /ordenes/:id/entregar — cliente paga y recibe el vehículo ──────────
+// ═══════════════════════════════════════════════════════════════════════════
+// 🚿 CAR WASH / LAVADO — carril rápido dentro del taller
+// ═══════════════════════════════════════════════════════════════════════════
+
+// Tipos de lavado (editables)
+app.get("/carwash/servicios", async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from("carwash_servicios").select("*")
+      .order("orden", { ascending: true }).order("id", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.post("/carwash/servicios", async (req, res) => {
+  try {
+    const { nombre, precio, orden } = req.body;
+    if (!nombre) return res.status(400).json({ error: "Nombre requerido" });
+    const { data, error } = await supabase.from("carwash_servicios")
+      .insert([{ nombre, precio: Number(precio || 0), orden: Number(orden || 0) }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.patch("/carwash/servicios/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("carwash_servicios")
+      .update(req.body).eq("id", req.params.id).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+app.delete("/carwash/servicios/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("carwash_servicios").delete().eq("id", req.params.id);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Crear orden de lavado (entra directo a EN_LAVADO, sin diagnóstico/reparación)
+app.post("/carwash", async (req, res) => {
+  try {
+    const { cliente_id, vehiculo_id, servicio_id, servicio_nombre, precio, usuario_nombre } = req.body;
+    if (!cliente_id || !vehiculo_id) return res.status(400).json({ error: "cliente_id y vehiculo_id son requeridos" });
+    let nombre = servicio_nombre || null;
+    let monto = (precio !== undefined && precio !== null && precio !== "") ? Number(precio) : null;
+    if (servicio_id) {
+      const { data: s } = await supabase.from("carwash_servicios").select("nombre, precio").eq("id", servicio_id).maybeSingle();
+      if (s) { if (!nombre) nombre = s.nombre; if (monto === null) monto = Number(s.precio); }
+    }
+    const payload = {
+      cliente_id:  Number(cliente_id),
+      vehiculo_id: Number(vehiculo_id),
+      descripcion: `Lavado: ${nombre || "Car wash"}`,
+      estado:      "EN_LAVADO",
+      tipo_orden:  "LAVADO",
+      total:       Number(monto || 0),
+    };
+    const { data, error } = await supabase.from("ordenes_trabajo").insert([payload]).select();
+    if (error) return res.status(400).json({ error: error.message });
+    const orden = data[0];
+    const numeroOrden = `LAV-${String(orden.id).padStart(4, "0")}`;
+    await supabase.from("ordenes_trabajo").update({ numero_orden: numeroOrden }).eq("id", orden.id).then(() => {}).catch(() => {});
+    orden.numero_orden = numeroOrden;
+    supabase.from("orden_trabajo_log").insert([{
+      orden_id: orden.id, estado_anterior: null, estado_nuevo: "EN_LAVADO",
+      usuario_nombre: usuario_nombre || "Recepción", motivo: "Lavado registrado", metadata: {},
+    }]).then(() => {}).catch(() => {});
+    res.json(orden);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Lista de lavados activos (no entregados) con su estado de facturación
+app.get("/carwash", async (req, res) => {
+  try {
+    const { data: ordenes } = await supabase
+      .from("ordenes_trabajo").select("*").eq("tipo_orden", "LAVADO")
+      .neq("estado", "ENTREGADO").neq("estado", "CANCELADA")
+      .order("id", { ascending: false }).limit(100);
+    const ids = (ordenes || []).map(o => o.id);
+    const facMap = {};
+    if (ids.length) {
+      const { data: facs } = await supabase.from("facturas")
+        .select("id, orden_id, total, ncf").in("orden_id", ids).neq("estado", "ANULADA");
+      for (const f of (facs || [])) facMap[f.orden_id] = f;
+    }
+    res.json((ordenes || []).map(o => ({ ...o, factura: facMap[o.id] || null, facturado: !!facMap[o.id] })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Marcar lavado terminado: EN_LAVADO → LISTO
+app.post("/carwash/:id/listo", async (req, res) => {
+  try {
+    const r = await transicionarEstado(Number(req.params.id), "LISTO", {
+      usuarioNombre: req.body.usuario_nombre || "Recepción", motivo: "Lavado terminado",
+    });
+    if (!r.ok) return res.status(400).json({ error: r.error });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Facturar (cobrar) un lavado — genera factura enlazada a la orden
+app.post("/carwash/:id/facturar", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { metodo_pago, ncf_tipo, itbis_aplica, usuario_nombre } = req.body;
+    const { data: orden } = await supabase.from("ordenes_trabajo").select("*").eq("id", Number(id)).maybeSingle();
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+    if (orden.tipo_orden !== "LAVADO") return res.status(400).json({ error: "La orden no es un lavado" });
+    const { data: yaFac } = await supabase.from("facturas").select("id").eq("orden_id", Number(id)).neq("estado", "ANULADA").limit(1).maybeSingle();
+    if (yaFac) return res.status(400).json({ error: "Este lavado ya fue facturado" });
+
+    const { data: cli } = await supabase.from("clientes").select("*").eq("id", orden.cliente_id).maybeSingle();
+    const { data: veh } = await supabase.from("vehiculos").select("*").eq("id", orden.vehiculo_id).maybeSingle();
+
+    const base = Number(orden.total || 0);
+    const itbis = itbis_aplica ? base * 0.18 : 0;
+    const subtotal = base;
+    const total = subtotal + itbis;
+
+    const tipo = ncf_tipo || "B02";
+    const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
+    let ncf;
+    const fechaVence = new Date(); fechaVence.setFullYear(fechaVence.getFullYear() + 2);
+    if (ncfData) {
+      const nuevo = (ncfData.secuencia_actual || 0) + 1;
+      await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
+      ncf = (ncfData.prefijo || tipo) + String(nuevo).padStart(8, "0");
+    } else {
+      ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
+    }
+
+    const vehInfo = veh ? [veh.marca, veh.modelo, veh.placa].filter(Boolean).join(" ") : null;
+    const { data: factura, error } = await supabase.from("facturas").insert([{
+      ncf, ncf_tipo: tipo, ncf_vence: fechaVence.toISOString().split("T")[0], estado: "ACTIVA",
+      cliente_id: orden.cliente_id, cliente_nombre: cli?.nombre || "Consumidor Final",
+      cliente_rnc: cli?.rnc || cli?.cedula || null,
+      vehiculo_id: orden.vehiculo_id, vehiculo_info: vehInfo,
+      orden_id: Number(id), diagnostico_id: null,
+      subtotal, itbis, total, metodo_pago: metodo_pago || "EFECTIVO",
+      notas: `Lavado: ${orden.descripcion || ""}`, creado_por: usuario_nombre || "Recepción", created_at: new Date(),
+    }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true, factura });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/ordenes/:id/entregar", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo, notas_entrega, firma_entrega, usuario_entrego } = req.body;
+
+    // 🔒 Candado de pago para LAVADOS: no se entrega si no está facturado (pagado en caja).
+    const { data: ordenLav } = await supabase
+      .from("ordenes_trabajo").select("tipo_orden").eq("id", Number(id)).maybeSingle();
+    if (ordenLav && ordenLav.tipo_orden === "LAVADO") {
+      const { data: fact } = await supabase
+        .from("facturas").select("id").eq("orden_id", Number(id)).neq("estado", "ANULADA").limit(1).maybeSingle();
+      if (!fact) {
+        return res.status(400).json({ error: "El lavado no se puede entregar: primero debe cobrarse/facturarse en caja." });
+      }
+    }
+
     const result = await transicionarEstado(Number(id), "ENTREGADO", {
       usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Recepcionista",
       motivo: motivo || "Vehículo entregado al cliente",

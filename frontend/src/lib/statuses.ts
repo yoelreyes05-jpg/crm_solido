@@ -20,6 +20,11 @@ export const STATUSES = [
     badge: 'badge-yellow',
   },
   {
+    value: 'EN_LAVADO',
+    label: 'En lavado',
+    badge: 'badge-orange',
+  },
+  {
     value: 'LISTO',
     label: 'Listo para retiro del cliente',
     badge: 'badge-green',

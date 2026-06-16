@@ -15,6 +15,11 @@ export const ORDER_STATUSES = [
     badge: 'badge-red',
   },
   {
+    value: 'EN_LAVADO',
+    label: 'En lavado',
+    badge: 'badge-orange',
+  },
+  {
     value: 'REPARACION',
     label: 'En reparación',
     badge: 'badge-orange',
