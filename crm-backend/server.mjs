@@ -8226,6 +8226,169 @@ app.delete("/api/nomina/:id", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 🧾 MÓDULOS CONTABLES INDEPENDIENTES (Cafetería y Capacitación)
+// Registra un set completo de endpoints (caja chica + CxC + CxP) para un módulo,
+// usando sus PROPIAS tablas, totalmente separadas de la contabilidad del taller.
+// ══════════════════════════════════════════════════════════════════════════════
+function mountContabilidadModulo(base, T) {
+  // Hora local de RD (naive "YYYY-MM-DD HH:mm:ss"), consistente con el resto del sistema.
+  const ahoraRD = () => new Date().toLocaleString("sv-SE", { timeZone: "America/Santo_Domingo" });
+  const hoyRD   = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+
+  // ─── CAJA CHICA ───────────────────────────────────────────────────────────
+  app.get(`${base}/caja-chica`, async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from(T.cajaChica).select("*").order("fecha", { ascending: false }).order("id", { ascending: false });
+      if (error) return res.status(500).json({ error: error.message });
+      const movimientos = data || [];
+      const fondo_actual = movimientos.reduce(
+        (acc, m) => (m.tipo === "INGRESO" ? acc + Number(m.monto) : acc - Number(m.monto)), 0);
+      res.json({ movimientos, fondo_actual });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.post(`${base}/caja-chica`, async (req, res) => {
+    try {
+      const { descripcion, monto, tipo, categoria, usuario } = req.body;
+      if (!descripcion || !monto || !tipo)
+        return res.status(400).json({ error: "Descripción, monto y tipo son requeridos" });
+      if (!["INGRESO", "EGRESO"].includes(tipo))
+        return res.status(400).json({ error: "Tipo debe ser INGRESO o EGRESO" });
+      if (tipo === "EGRESO") {
+        const { data: movs } = await supabase.from(T.cajaChica).select("monto, tipo");
+        const saldo = (movs || []).reduce((a, m) => m.tipo === "INGRESO" ? a + Number(m.monto) : a - Number(m.monto), 0);
+        if (Number(monto) > saldo)
+          return res.status(400).json({ error: `Fondos insuficientes. Saldo actual: RD$ ${saldo.toFixed(2)}` });
+      }
+      const { data, error } = await supabase.from(T.cajaChica).insert([{
+        descripcion, monto: Number(monto), tipo,
+        categoria: categoria || "Otro",
+        usuario: usuario || "Sistema",
+        fecha: ahoraRD(),
+      }]).select().single();
+      if (error) return res.status(500).json({ error: error.message });
+      res.json(data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  app.delete(`${base}/caja-chica/:id`, async (req, res) => {
+    try {
+      const { error } = await supabase.from(T.cajaChica).delete().eq("id", req.params.id);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ ok: true });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // ─── Helper genérico de cuentas (cobrar/pagar) ────────────────────────────
+  const registrarCuentas = (sufijo, tablaCuentas, tablaPagos, campoNombre) => {
+    app.get(`${base}/${sufijo}`, async (req, res) => {
+      try {
+        const { data, error } = await supabase
+          .from(tablaCuentas).select("*").order("fecha_vencimiento", { ascending: true });
+        if (error) return res.status(500).json({ error: error.message });
+        const hoy = hoyRD();
+        const cuentas = (data || []).map(c => {
+          const saldo = Number(c.monto_original) - Number(c.monto_pagado);
+          const vencida = c.estado !== "PAGADO" && c.estado !== "ANULADO" && c.fecha_vencimiento < hoy;
+          return { ...c, saldo, vencida };
+        });
+        res.json({ cuentas });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.post(`${base}/${sufijo}`, async (req, res) => {
+      try {
+        const b = req.body;
+        if (!b.descripcion || !b.monto_original || !b.fecha_vencimiento)
+          return res.status(400).json({ error: "Descripción, monto y fecha de vencimiento son requeridos" });
+        const fila = {
+          descripcion: b.descripcion,
+          monto_original: Number(b.monto_original),
+          monto_pagado: 0,
+          fecha_emision: b.fecha_emision || hoyRD(),
+          fecha_vencimiento: b.fecha_vencimiento,
+          estado: "PENDIENTE",
+          notas: b.notas || null,
+          created_by: b.created_by || "Sistema",
+        };
+        fila[campoNombre] = b[campoNombre] || null;
+        const { data, error } = await supabase.from(tablaCuentas).insert([fila]).select().single();
+        if (error) return res.status(400).json({ error: error.message });
+        res.json(data);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.post(`${base}/${sufijo}/:id/pago`, async (req, res) => {
+      try {
+        const { id } = req.params;
+        const { monto, fecha, metodo, referencia, notas, usuario } = req.body;
+        if (!monto || Number(monto) <= 0) return res.status(400).json({ error: "Monto inválido" });
+        const { data: cuenta } = await supabase.from(tablaCuentas).select("*").eq("id", id).single();
+        if (!cuenta) return res.status(404).json({ error: "Cuenta no encontrada" });
+        const saldoActual = Number(cuenta.monto_original) - Number(cuenta.monto_pagado);
+        if (Number(monto) > saldoActual + 0.01)
+          return res.status(400).json({ error: `Monto excede el saldo. Saldo: RD$ ${saldoActual.toFixed(2)}` });
+        const { data: pago, error: errPago } = await supabase.from(tablaPagos).insert([{
+          cuenta_id: Number(id), monto: Number(monto),
+          fecha: fecha || hoyRD(), metodo: metodo || "EFECTIVO",
+          referencia: referencia || null, notas: notas || null, usuario: usuario || "Sistema",
+        }]).select().single();
+        if (errPago) return res.status(400).json({ error: errPago.message });
+        const nuevoMontoPagado = Number(cuenta.monto_pagado) + Number(monto);
+        const nuevoEstado = nuevoMontoPagado >= Number(cuenta.monto_original) - 0.01 ? "PAGADO" : "PARCIAL";
+        await supabase.from(tablaCuentas).update({
+          monto_pagado: nuevoMontoPagado, estado: nuevoEstado, updated_at: new Date().toISOString(),
+        }).eq("id", id);
+        res.json({ pago, nuevo_estado: nuevoEstado, saldo_restante: Number(cuenta.monto_original) - nuevoMontoPagado });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.get(`${base}/${sufijo}/:id/pagos`, async (req, res) => {
+      try {
+        const { data, error } = await supabase
+          .from(tablaPagos).select("*").eq("cuenta_id", req.params.id).order("fecha", { ascending: false });
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ pagos: data || [] });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.patch(`${base}/${sufijo}/:id`, async (req, res) => {
+      try {
+        const { data, error } = await supabase.from(tablaCuentas)
+          .update({ ...req.body, updated_at: new Date().toISOString() })
+          .eq("id", req.params.id).select().single();
+        if (error) return res.status(400).json({ error: error.message });
+        res.json(data);
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+
+    app.delete(`${base}/${sufijo}/:id`, async (req, res) => {
+      try {
+        const { error } = await supabase.from(tablaCuentas).delete().eq("id", req.params.id);
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ ok: true });
+      } catch (err) { res.status(500).json({ error: err.message }); }
+    });
+  };
+
+  registrarCuentas("cuentas-cobrar", T.cxc, T.pagosCxc, "cliente_nombre");
+  registrarCuentas("cuentas-pagar",  T.cxp, T.pagosCxp, "suplidor_nombre");
+}
+
+// Montar los dos módulos contables independientes
+mountContabilidadModulo("/cafeteria/contabilidad", {
+  cajaChica: "cafeteria_caja_chica",
+  cxc: "cafeteria_cuentas_cobrar", pagosCxc: "cafeteria_pagos_cobrar",
+  cxp: "cafeteria_cuentas_pagar",  pagosCxp: "cafeteria_pagos_pagar",
+});
+mountContabilidadModulo("/capacitacion/contabilidad", {
+  cajaChica: "capacitacion_caja_chica",
+  cxc: "capacitacion_cuentas_cobrar", pagosCxc: "capacitacion_pagos_cobrar",
+  cxp: "capacitacion_cuentas_pagar",  pagosCxp: "capacitacion_pagos_pagar",
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
 // ══════════════════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 4000;

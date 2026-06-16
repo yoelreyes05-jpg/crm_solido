@@ -252,6 +252,9 @@ export default function CapacitacionesPage() {
           <Link href="/capacitaciones/facturacion" style={{ ...S.btn, ...S.btnPurple, textDecoration:"none", display:"flex", alignItems:"center", gap:6 }}>
             🧾 Facturación de Cursos
           </Link>
+          <Link href="/capacitaciones/contabilidad" style={{ ...S.btn, textDecoration:"none", display:"flex", alignItems:"center", gap:6, background:"#0d9488", color:"#fff" }}>
+            📊 Contabilidad
+          </Link>
           {puedeCrear && (
             <button style={{ ...S.btn, ...S.btnBlue }} onClick={abrirNuevoCurso}>+ Nuevo Curso</button>
           )}

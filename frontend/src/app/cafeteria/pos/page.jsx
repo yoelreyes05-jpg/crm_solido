@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import { API_URL as API } from "@/config";
+import ModuloContable from "@/components/ModuloContable";
 
 // ─── Empresa ─────────────────────────────────────────────────────────────────
 const EMPRESA = {
@@ -240,7 +241,7 @@ export default function CafeteriaPOS() {
         </div>
         {/* Tabs */}
         <div style={{ display:"flex", gap:6 }}>
-          {[{ k:"pos", icon:"🛒", label:"POS" }, { k:"historial", icon:"📋", label:"Historial" }].map(t => (
+          {[{ k:"pos", icon:"🛒", label:"POS" }, { k:"historial", icon:"📋", label:"Historial" }, { k:"contabilidad", icon:"🧾", label:"Contabilidad" }].map(t => (
             <button key={t.k} onClick={() => setTab(t.k)} style={{
               padding:"7px 16px", borderRadius:8, border:"none", cursor:"pointer", fontWeight:700, fontSize:13,
               background: tab === t.k ? "#3b82f6" : "#334155",
@@ -457,6 +458,20 @@ export default function CafeteriaPOS() {
               })}
             </div>
           )}
+        </div>
+      )}
+
+      {/* ══ TAB: CONTABILIDAD ═══════════════════════════════════════════════ */}
+      {tab === "contabilidad" && (
+        <div style={{ flex:1, overflowY:"auto", padding:20 }}>
+          <ModuloContable
+            apiBase="/cafeteria/contabilidad"
+            theme="dark"
+            titulo="Contabilidad — Cafetería"
+            usuario="Cafetería"
+            nombreEntidad="Cliente / Evento"
+            nombreSuplidor="Suplidor"
+          />
         </div>
       )}
 
