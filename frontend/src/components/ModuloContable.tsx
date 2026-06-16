@@ -67,9 +67,10 @@ export default function ModuloContable({
   nombreEntidad = "Cliente", nombreSuplidor = "Suplidor",
 }: Props) {
   const P = pal(theme);
-  const [sub, setSub] = useState<"chica" | "cobrar" | "pagar" | "resumen">("chica");
+  const [sub, setSub] = useState<"cuadre" | "chica" | "cobrar" | "pagar" | "resumen">("cuadre");
 
   const TABS = [
+    { k: "cuadre", label: "🏦 Cuadre de Caja" },
     { k: "chica", label: "💵 Caja Chica" },
     { k: "cobrar", label: "💳 Cuentas x Cobrar" },
     { k: "pagar", label: "📤 Cuentas x Pagar" },
@@ -97,6 +98,7 @@ export default function ModuloContable({
         ))}
       </div>
 
+      {sub === "cuadre" && <Cuadre apiBase={apiBase} usuario={usuario} P={P} S={S} />}
       {sub === "chica" && <CajaChica apiBase={apiBase} usuario={usuario} P={P} S={S} />}
       {sub === "cobrar" && <Cuentas apiBase={apiBase} sufijo="cuentas-cobrar" campoNombre="cliente_nombre" etiquetaNombre={nombreEntidad} usuario={usuario} P={P} S={S} color={P.green} />}
       {sub === "pagar" && <Cuentas apiBase={apiBase} sufijo="cuentas-pagar" campoNombre="suplidor_nombre" etiquetaNombre={nombreSuplidor} usuario={usuario} P={P} S={S} color={P.amber} />}
@@ -113,6 +115,138 @@ function Kpi({ label, value, color, P }: any) {
     </div>
   );
 }
+
+// ════════════════════════ CUADRE DE CAJA ════════════════════════
+function Cuadre({ apiBase, usuario, P, S }: any) {
+  const [fecha, setFecha] = useState(hoyRD());
+  const [prev, setPrev] = useState<any>(null);
+  const [contado, setContado] = useState("");
+  const [notas, setNotas] = useState("");
+  const [fetching, setFetching] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [hist, setHist] = useState<any[]>([]);
+
+  const cargarHist = useCallback(async () => {
+    try { const d = await fetch(`${API}${apiBase}/cuadre`).then(r => r.json()); setHist(d.cuadres || []); }
+    catch { setHist([]); }
+  }, [apiBase]);
+  useEffect(() => { cargarHist(); }, [cargarHist]);
+
+  const generar = async (f: string) => {
+    setFetching(true); setPrev(null);
+    try {
+      const d = await fetch(`${API}${apiBase}/cuadre/auto?fecha=${f}`).then(r => r.json());
+      setPrev(d); setContado(String(d.efectivo_esperado ?? ""));
+    } catch { alert("No se pudo calcular el cuadre"); }
+    setFetching(false);
+  };
+
+  const guardar = async () => {
+    if (!prev) return;
+    setSaving(true);
+    try {
+      const r = await fetch(`${API}${apiBase}/cuadre`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ ...prev, efectivo_contado: Number(contado || 0), notas, usuario }),
+      });
+      if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || "No se pudo guardar"); setSaving(false); return; }
+      setPrev(null); setContado(""); setNotas("");
+      cargarHist();
+      alert("Cuadre guardado ✓");
+    } catch { alert("Error al guardar el cuadre"); }
+    setSaving(false);
+  };
+
+  const diferencia = prev ? Number(contado || 0) - Number(prev.efectivo_esperado || 0) : 0;
+  const fila = (l: string, v: any, c?: string) => (
+    <div style={{ display: "flex", justifyContent: "space-between", padding: "9px 4px", borderBottom: `1px solid ${P.rowBorder}` }}>
+      <span style={{ color: P.sub, fontSize: 14 }}>{l}</span>
+      <span style={{ fontWeight: 700, color: c || P.text }}>{v}</span>
+    </div>
+  );
+
+  return (
+    <div>
+      <div style={{ ...S.card, display: "flex", gap: 12, alignItems: "flex-end", flexWrap: "wrap" }}>
+        <div>
+          <label style={{ display: "block", fontSize: 12, fontWeight: 600, color: P.sub, marginBottom: 4 }}>Fecha del cuadre</label>
+          <input type="date" value={fecha} onChange={e => setFecha(e.target.value)} style={{ ...S.input, width: 180 }} />
+        </div>
+        <button onClick={() => generar(fecha)} disabled={fetching} style={S.btn}>{fetching ? "Calculando..." : "🔄 Generar cuadre"}</button>
+      </div>
+
+      {prev && (
+        <div style={S.card}>
+          <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📋 Cuadre del {prev.fecha}</h3>
+          <p style={{ fontSize: 12, color: P.sub, marginBottom: 14 }}>{prev.movimientos_count} movimiento(s) de caja chica en el día</p>
+          {fila("Fondo inicial (cierre día anterior)", fmt(prev.fondo_inicial))}
+          {fila("+ Ingresos de caja chica (efectivo)", fmt(prev.ingresos_caja), P.green)}
+          {fila("+ Cobros en efectivo", fmt(prev.cobros_efectivo), P.green)}
+          {fila("− Egresos / gastos de caja chica", fmt(prev.egresos_caja), P.red)}
+          <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 4px", background: theme_safe(P), borderRadius: 8, marginTop: 6 }}>
+            <span style={{ fontWeight: 800 }}>= Efectivo esperado en caja</span>
+            <span style={{ fontWeight: 800, color: P.blue }}>{fmt(prev.efectivo_esperado)}</span>
+          </div>
+
+          {(Number(prev.cobros_tarjeta) > 0 || Number(prev.cobros_transferencia) > 0) && (
+            <div style={{ marginTop: 12 }}>
+              {fila("Cobros con tarjeta (no efectivo)", fmt(prev.cobros_tarjeta), P.sub)}
+              {fila("Cobros por transferencia (no efectivo)", fmt(prev.cobros_transferencia), P.sub)}
+            </div>
+          )}
+
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px 18px", marginTop: 16 }}>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: P.sub }}>💵 Efectivo contado (físico)</label>
+              <input type="number" value={contado} onChange={e => setContado(e.target.value)} style={{ ...S.input, marginTop: 4 }} />
+            </div>
+            <div>
+              <label style={{ fontSize: 12, fontWeight: 600, color: P.sub }}>Diferencia</label>
+              <div style={{ ...S.input, marginTop: 4, fontWeight: 800, color: Math.abs(diferencia) < 0.01 ? P.green : P.red, background: "transparent" }}>
+                {fmt(diferencia)} {Math.abs(diferencia) < 0.01 ? "✓ Cuadra" : (diferencia > 0 ? "▲ Sobrante" : "▼ Faltante")}
+              </div>
+            </div>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <label style={{ fontSize: 12, fontWeight: 600, color: P.sub }}>📝 Notas (opcional)</label>
+              <input value={notas} onChange={e => setNotas(e.target.value)} style={{ ...S.input, marginTop: 4 }} />
+            </div>
+          </div>
+          <button onClick={guardar} disabled={saving} style={{ ...S.btn, width: "100%", marginTop: 14, background: P.green }}>{saving ? "Guardando..." : "💾 Confirmar y guardar cuadre"}</button>
+        </div>
+      )}
+
+      <div style={S.card}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 12 }}>📋 Historial de cuadres</h3>
+        {hist.length === 0 ? <p style={{ color: P.sub, textAlign: "center", padding: 20 }}>Sin cuadres registrados.</p> : (
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse" }}>
+              <thead><tr>{["Fecha", "Fondo inic.", "Ingresos", "Egresos", "Cobros efvo.", "Esperado", "Contado", "Diferencia"].map(h => <th key={h} style={S.th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {hist.map(c => {
+                  const dif = Number(c.diferencia || 0);
+                  return (
+                    <tr key={c.id}>
+                      <td style={{ ...S.td, fontWeight: 700 }}>{fmtFecha(c.fecha)}</td>
+                      <td style={S.td}>{fmt(c.fondo_inicial)}</td>
+                      <td style={{ ...S.td, color: P.green }}>{fmt(c.ingresos_caja)}</td>
+                      <td style={{ ...S.td, color: P.red }}>{fmt(c.egresos_caja)}</td>
+                      <td style={S.td}>{fmt(c.cobros_efectivo)}</td>
+                      <td style={{ ...S.td, fontWeight: 700 }}>{fmt(c.efectivo_esperado)}</td>
+                      <td style={S.td}>{fmt(c.efectivo_contado)}</td>
+                      <td style={{ ...S.td, fontWeight: 700, color: Math.abs(dif) < 0.01 ? P.green : P.red }}>{fmt(dif)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function theme_safe(P: any) { return P.card === "#1e293b" ? "#0f172a" : "#f8fafc"; }
 
 // ════════════════════════ CAJA CHICA ════════════════════════
 function CajaChica({ apiBase, usuario, P, S }: any) {

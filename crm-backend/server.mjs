@@ -8374,6 +8374,95 @@ function mountContabilidadModulo(base, T) {
 
   registrarCuentas("cuentas-cobrar", T.cxc, T.pagosCxc, "cliente_nombre");
   registrarCuentas("cuentas-pagar",  T.cxp, T.pagosCxp, "suplidor_nombre");
+
+  // ─── CUADRE DE CAJA ───────────────────────────────────────────────────────
+  // Día-calendario RD (YYYY-MM-DD) de un valor de fecha cualquiera (naive = hora RD).
+  const fechaDiaRD = (val) => {
+    if (!val) return null;
+    const s = String(val).trim();
+    if (/^\d{4}-\d{2}-\d{2}([ T]|$)/.test(s) && !/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s)) return s.slice(0, 10);
+    const dt = new Date(s);
+    return isNaN(dt.getTime()) ? null : dt.toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+  };
+  const esEfectivo = (m) => /^efectivo/i.test(String(m || ""));
+  const esTarjeta  = (m) => /tarjeta/i.test(String(m || ""));
+
+  // Historial de cuadres
+  app.get(`${base}/cuadre`, async (req, res) => {
+    try {
+      const { data, error } = await supabase
+        .from(T.cuadre).select("*").order("fecha", { ascending: false }).order("id", { ascending: false }).limit(90);
+      if (error) return res.status(500).json({ error: error.message });
+      res.json({ cuadres: data || [] });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Cálculo automático del cuadre del día (desde caja chica + cobros del módulo)
+  app.get(`${base}/cuadre/auto`, async (req, res) => {
+    try {
+      const fecha = req.query.fecha || hoyRD();
+
+      // Movimientos de caja chica del día (la caja chica es efectivo)
+      const { data: ccRows } = await supabase.from(T.cajaChica).select("monto, tipo, fecha").limit(2000);
+      const delDia = (ccRows || []).filter(m => fechaDiaRD(m.fecha) === fecha);
+      const ingresos_caja = delDia.filter(m => m.tipo === "INGRESO").reduce((a, m) => a + Number(m.monto), 0);
+      const egresos_caja  = delDia.filter(m => m.tipo === "EGRESO").reduce((a, m) => a + Number(m.monto), 0);
+
+      // Cobros de cuentas por cobrar del día, por método
+      const { data: pagos } = await supabase.from(T.pagosCxc).select("monto, metodo, fecha").eq("fecha", fecha);
+      const cobros_efectivo      = (pagos || []).filter(p => esEfectivo(p.metodo)).reduce((a, p) => a + Number(p.monto), 0);
+      const cobros_tarjeta       = (pagos || []).filter(p => esTarjeta(p.metodo)).reduce((a, p) => a + Number(p.monto), 0);
+      const cobros_transferencia = (pagos || []).filter(p => !esEfectivo(p.metodo) && !esTarjeta(p.metodo)).reduce((a, p) => a + Number(p.monto), 0);
+
+      // Fondo inicial = efectivo_final del último cuadre anterior a esta fecha
+      const { data: ultimo } = await supabase
+        .from(T.cuadre).select("efectivo_final, fecha").lt("fecha", fecha).order("fecha", { ascending: false }).limit(1).maybeSingle();
+      const fondo_inicial = ultimo ? Number(ultimo.efectivo_final || 0) : 0;
+
+      const efectivo_esperado = fondo_inicial + ingresos_caja + cobros_efectivo - egresos_caja;
+
+      res.json({
+        fecha, fondo_inicial, ingresos_caja, egresos_caja,
+        cobros_efectivo, cobros_tarjeta, cobros_transferencia,
+        efectivo_esperado,
+        movimientos_count: delDia.length,
+      });
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
+
+  // Guardar cuadre (upsert por fecha)
+  app.post(`${base}/cuadre`, async (req, res) => {
+    try {
+      const b = req.body;
+      const fecha = b.fecha || hoyRD();
+      const efectivo_contado = Number(b.efectivo_contado || 0);
+      const efectivo_esperado = Number(b.efectivo_esperado || 0);
+      const fila = {
+        fecha,
+        fondo_inicial:        Number(b.fondo_inicial || 0),
+        ingresos_caja:        Number(b.ingresos_caja || 0),
+        egresos_caja:         Number(b.egresos_caja || 0),
+        cobros_efectivo:      Number(b.cobros_efectivo || 0),
+        cobros_tarjeta:       Number(b.cobros_tarjeta || 0),
+        cobros_transferencia: Number(b.cobros_transferencia || 0),
+        efectivo_esperado,
+        efectivo_contado,
+        efectivo_final:       efectivo_contado,
+        diferencia:           efectivo_contado - efectivo_esperado,
+        usuario:              b.usuario || "Sistema",
+        notas:                b.notas || null,
+      };
+      const { data: existe } = await supabase.from(T.cuadre).select("id").eq("fecha", fecha).maybeSingle();
+      let result;
+      if (existe) {
+        result = await supabase.from(T.cuadre).update(fila).eq("id", existe.id).select().single();
+      } else {
+        result = await supabase.from(T.cuadre).insert([fila]).select().single();
+      }
+      if (result.error) return res.status(400).json({ error: result.error.message });
+      res.json(result.data);
+    } catch (err) { res.status(500).json({ error: err.message }); }
+  });
 }
 
 // Montar los dos módulos contables independientes
@@ -8381,11 +8470,13 @@ mountContabilidadModulo("/cafeteria/contabilidad", {
   cajaChica: "cafeteria_caja_chica",
   cxc: "cafeteria_cuentas_cobrar", pagosCxc: "cafeteria_pagos_cobrar",
   cxp: "cafeteria_cuentas_pagar",  pagosCxp: "cafeteria_pagos_pagar",
+  cuadre: "cafeteria_cuadre_caja",
 });
 mountContabilidadModulo("/capacitacion/contabilidad", {
   cajaChica: "capacitacion_caja_chica",
   cxc: "capacitacion_cuentas_cobrar", pagosCxc: "capacitacion_pagos_cobrar",
   cxp: "capacitacion_cuentas_pagar",  pagosCxp: "capacitacion_pagos_pagar",
+  cuadre: "capacitacion_cuadre_caja",
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

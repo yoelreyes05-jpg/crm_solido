@@ -183,7 +183,10 @@ export default function CapacitacionesFacturacionPage() {
   // ── Factura completa (solo cuando pago completo) ────────────────────────────
   const imprimirFactura = (alumno: Alumno, curso: Curso) => {
     const ps = pagosDe(alumno.id);
-    const totalPagado = ps.reduce((s, p) => s + Number(p.monto), 0);
+    const totalPagosRows = ps.reduce((s, p) => s + Number(p.monto), 0);
+    // Fuente de verdad del total pagado: el campo monto_pagado del alumno
+    // (la tabla de pagos puede estar incompleta si un abono no generó registro).
+    const totalPagado = Math.max(Number(alumno.monto_pagado) || 0, totalPagosRows);
     const saldoPend = Math.max(0, Number(curso.precio) - totalPagado);
     const estadoPago = saldoPend <= 0 ? "PAGADO" : (totalPagado > 0 ? "PARCIAL" : "PENDIENTE");
     const estadoBadge = saldoPend <= 0
@@ -250,12 +253,16 @@ export default function CapacitacionesFacturacionPage() {
       <table>
         <thead><tr><th>Fecha</th><th>Método</th><th>Referencia</th><th style="text-align:right">Monto</th></tr></thead>
         <tbody>
-          ${ps.map(p => `<tr>
+          ${ps.length > 0
+            ? ps.map(p => `<tr>
             <td>${p.fecha}</td>
             <td>${p.metodo}</td>
             <td style="color:#6b7280">${p.referencia || "—"}</td>
             <td style="text-align:right;color:#15803d;font-weight:600">RD$ ${Number(p.monto).toLocaleString("es-DO")}</td>
-          </tr>`).join("")}
+          </tr>`).join("")
+            : (totalPagado > 0
+              ? `<tr><td>${alumno.fecha_inscripcion || ""}</td><td>—</td><td style="color:#6b7280">Abono registrado</td><td style="text-align:right;color:#15803d;font-weight:600">RD$ ${totalPagado.toLocaleString("es-DO")}</td></tr>`
+              : `<tr><td colspan="4" style="color:#9ca3af;text-align:center">Sin pagos registrados</td></tr>`)}
           <tr class="total-row">
             <td colspan="3">TOTAL PAGADO</td>
             <td style="text-align:right">RD$ ${totalPagado.toLocaleString("es-DO")}</td>

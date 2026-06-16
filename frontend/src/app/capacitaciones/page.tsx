@@ -165,15 +165,37 @@ export default function CapacitacionesPage() {
     if (!cursoActivo) return;
     if (!formAlumno.nombre.trim()) { setErrAlumno("El nombre del alumno es requerido."); return; }
     setGuardandoAl(true); setErrAlumno(null);
-    const payload = { ...formAlumno, curso_id: cursoActivo.id, monto_pagado: Number(formAlumno.monto_pagado) };
+    const montoNuevo = Number(formAlumno.monto_pagado);
+    const payload = { ...formAlumno, curso_id: cursoActivo.id, monto_pagado: montoNuevo };
     let error: any;
+    let alumnoId: number | null = editAlumno ? editAlumno.id : null;
     if (editAlumno) {
       ({ error } = await supabase.from("capacitaciones_alumnos").update(payload).eq("id", editAlumno.id));
     } else {
-      ({ error } = await supabase.from("capacitaciones_alumnos").insert(payload));
+      const { data, error: eIns } = await supabase.from("capacitaciones_alumnos").insert(payload).select().single();
+      error = eIns;
+      alumnoId = data?.id ?? null;
     }
+    if (error) { setGuardandoAl(false); setErrAlumno("Error: " + error.message); return; }
+
+    // Registrar el abono inicial (o el aumento al editar) como pago, para que el
+    // historial de pagos y la factura queden completos. No bloquea si falla.
+    const montoPrevio = editAlumno ? Number(editAlumno.monto_pagado) : 0;
+    const delta = montoNuevo - montoPrevio;
+    if (alumnoId && delta > 0) {
+      try {
+        await supabase.from("capacitaciones_pagos").insert({
+          alumno_id:  alumnoId,
+          monto:      delta,
+          fecha:      formAlumno.fecha_inscripcion || new Date().toISOString().split("T")[0],
+          metodo:     "Efectivo",
+          referencia: editAlumno ? "Ajuste de inscripción" : "Abono de inscripción",
+          notas:      "",
+        });
+      } catch { /* el monto_pagado ya quedó guardado; el pago es complementario */ }
+    }
+
     setGuardandoAl(false);
-    if (error) { setErrAlumno("Error: " + error.message); return; }
     setModalAlumno(false); cargar();
   };
 
