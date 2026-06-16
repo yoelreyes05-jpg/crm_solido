@@ -10,6 +10,10 @@ CREATE TABLE IF NOT EXISTS cafeteria_cuadre_caja (
   id                    BIGSERIAL PRIMARY KEY,
   fecha                 DATE NOT NULL DEFAULT CURRENT_DATE,
   fondo_inicial         NUMERIC(12,2) DEFAULT 0,   -- efectivo con el que abre la caja
+  ventas_efectivo       NUMERIC(12,2) DEFAULT 0,   -- ventas del POS en efectivo (la entrada)
+  ventas_tarjeta        NUMERIC(12,2) DEFAULT 0,
+  ventas_transferencia  NUMERIC(12,2) DEFAULT 0,
+  ventas_total          NUMERIC(12,2) DEFAULT 0,
   ingresos_caja         NUMERIC(12,2) DEFAULT 0,   -- ingresos de caja chica del dia
   egresos_caja          NUMERIC(12,2) DEFAULT 0,   -- egresos/gastos de caja chica del dia
   cobros_efectivo       NUMERIC(12,2) DEFAULT 0,   -- cobros de cuentas x cobrar en efectivo

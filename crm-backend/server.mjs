@@ -1312,7 +1312,7 @@ app.post("/cafeteria/ordenes", async (req, res) => {
 });
 
 app.post("/cafeteria/venta", async (req, res) => {
-  const { items, total, metodo_pago, ncf_tipo } = req.body;
+  const { items, total, metodo_pago, ncf_tipo, monto_efectivo, monto_tarjeta, monto_transferencia } = req.body;
   const tipo = ncf_tipo || "B02";
 
   const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
@@ -1324,9 +1324,18 @@ app.post("/cafeteria/venta", async (req, res) => {
     ncf = ncfData.prefijo + String(nuevo).padStart(8, "0");
   }
 
+  // Para pago MIXTO guardamos el desglose (requiere migración v13).
+  // Las ventas normales no tocan esas columnas para no romper si aún no se corrió.
+  const fila = { total: Number(total), metodo_pago, ncf, ncf_tipo: tipo, created_at: new Date() };
+  if (String(metodo_pago).toUpperCase() === "MIXTO") {
+    fila.monto_efectivo      = Number(monto_efectivo || 0);
+    fila.monto_tarjeta       = Number(monto_tarjeta || 0);
+    fila.monto_transferencia = Number(monto_transferencia || 0);
+  }
+
   const { data: venta, error } = await supabase
     .from("cafeteria_ventas")
-    .insert([{ total: Number(total), metodo_pago, ncf, ncf_tipo: tipo, created_at: new Date() }])
+    .insert([fila])
     .select();
   if (error) return res.json({ error: error.message });
 
@@ -8414,16 +8423,47 @@ function mountContabilidadModulo(base, T) {
       const cobros_tarjeta       = (pagos || []).filter(p => esTarjeta(p.metodo)).reduce((a, p) => a + Number(p.monto), 0);
       const cobros_transferencia = (pagos || []).filter(p => !esEfectivo(p.metodo) && !esTarjeta(p.metodo)).reduce((a, p) => a + Number(p.monto), 0);
 
+      // Ventas del POS del día (si el módulo tiene tabla de ventas, ej. cafetería).
+      // Es la ENTRADA principal del cuadre; los gastos se le descuentan.
+      let ventas_efectivo = 0, ventas_tarjeta = 0, ventas_transferencia = 0, ventas_total = 0, ventas_count = 0;
+      const tieneVentas = !!T.ventas;
+      if (tieneVentas) {
+        // created_at de ventas es naive en UTC (default now()). El día de RD (UTC-4)
+        // va de las 04:00 UTC de ese día a las 03:59:59 UTC del día siguiente.
+        const finDR = new Date(`${fecha}T12:00:00Z`);
+        finDR.setUTCDate(finDR.getUTCDate() + 1);
+        const fechaSig = finDR.toISOString().slice(0, 10);
+        const { data: ventas } = await supabase
+          .from(T.ventas).select("*")
+          .gte("created_at", `${fecha}T04:00:00`)
+          .lte("created_at", `${fechaSig}T03:59:59`);
+        for (const v of (ventas || [])) {
+          const m = String(v.metodo_pago || "EFECTIVO").toUpperCase();
+          ventas_total += Number(v.total || 0);
+          ventas_count += 1;
+          if (m === "MIXTO") {
+            ventas_efectivo      += Number(v.monto_efectivo      || 0);
+            ventas_tarjeta       += Number(v.monto_tarjeta       || 0);
+            ventas_transferencia += Number(v.monto_transferencia || 0);
+          } else if (m === "TARJETA")       { ventas_tarjeta       += Number(v.total || 0); }
+          else if (m === "TRANSFERENCIA")   { ventas_transferencia += Number(v.total || 0); }
+          else                              { ventas_efectivo      += Number(v.total || 0); }
+        }
+      }
+
       // Fondo inicial = efectivo_final del último cuadre anterior a esta fecha
       const { data: ultimo } = await supabase
         .from(T.cuadre).select("efectivo_final, fecha").lt("fecha", fecha).order("fecha", { ascending: false }).limit(1).maybeSingle();
       const fondo_inicial = ultimo ? Number(ultimo.efectivo_final || 0) : 0;
 
-      const efectivo_esperado = fondo_inicial + ingresos_caja + cobros_efectivo - egresos_caja;
+      // Efectivo esperado = fondo + ventas en efectivo + ingresos caja + cobros efectivo − gastos (egresos)
+      const efectivo_esperado = fondo_inicial + ventas_efectivo + ingresos_caja + cobros_efectivo - egresos_caja;
 
       res.json({
         fecha, fondo_inicial, ingresos_caja, egresos_caja,
         cobros_efectivo, cobros_tarjeta, cobros_transferencia,
+        tiene_ventas: tieneVentas,
+        ventas_efectivo, ventas_tarjeta, ventas_transferencia, ventas_total, ventas_count,
         efectivo_esperado,
         movimientos_count: delDia.length,
       });
@@ -8440,6 +8480,10 @@ function mountContabilidadModulo(base, T) {
       const fila = {
         fecha,
         fondo_inicial:        Number(b.fondo_inicial || 0),
+        ventas_efectivo:      Number(b.ventas_efectivo || 0),
+        ventas_tarjeta:       Number(b.ventas_tarjeta || 0),
+        ventas_transferencia: Number(b.ventas_transferencia || 0),
+        ventas_total:         Number(b.ventas_total || 0),
         ingresos_caja:        Number(b.ingresos_caja || 0),
         egresos_caja:         Number(b.egresos_caja || 0),
         cobros_efectivo:      Number(b.cobros_efectivo || 0),
@@ -8471,6 +8515,7 @@ mountContabilidadModulo("/cafeteria/contabilidad", {
   cxc: "cafeteria_cuentas_cobrar", pagosCxc: "cafeteria_pagos_cobrar",
   cxp: "cafeteria_cuentas_pagar",  pagosCxp: "cafeteria_pagos_pagar",
   cuadre: "cafeteria_cuadre_caja",
+  ventas: "cafeteria_ventas",
 });
 mountContabilidadModulo("/capacitacion/contabilidad", {
   cajaChica: "capacitacion_caja_chica",

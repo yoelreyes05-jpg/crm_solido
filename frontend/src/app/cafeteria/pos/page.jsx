@@ -18,6 +18,7 @@ const METODOS = [
   { key: "EFECTIVO",       label: "💵 Efectivo",       color: "#10b981" },
   { key: "TARJETA",        label: "💳 Tarjeta",         color: "#3b82f6" },
   { key: "TRANSFERENCIA",  label: "📲 Transferencia",   color: "#8b5cf6" },
+  { key: "MIXTO",          label: "🔀 Mixto",           color: "#f59e0b" },
 ];
 
 // ─── Tipos NCF ────────────────────────────────────────────────────────────────
@@ -50,12 +51,17 @@ function imprimirHTML(html) {
 }
 
 // ─── HTML del recibo ──────────────────────────────────────────────────────────
-function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId) {
+function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId, mix) {
   const fecha = new Date().toLocaleString("es-DO", { day:"2-digit", month:"2-digit", year:"numeric", hour:"2-digit", minute:"2-digit" });
   const ncfDesc = NCF_DESC[ncfTipo] || ncfTipo;
   const lineas = items.map(p =>
     `<div class="item"><span>${p.nombre} x${p.qty}</span><span>RD$ ${(p.precio * p.qty).toFixed(2)}</span></div>`
   ).join("");
+  const mixLineas = (metodo === "MIXTO" && mix) ? [
+    Number(mix.monto_efectivo)      > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#666;"><span>· Efectivo</span><span>RD$ ${Number(mix.monto_efectivo).toFixed(2)}</span></div>` : "",
+    Number(mix.monto_tarjeta)       > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#666;"><span>· Tarjeta</span><span>RD$ ${Number(mix.monto_tarjeta).toFixed(2)}</span></div>` : "",
+    Number(mix.monto_transferencia) > 0 ? `<div style="display:flex;justify-content:space-between;font-size:11px;color:#666;"><span>· Transferencia</span><span>RD$ ${Number(mix.monto_transferencia).toFixed(2)}</span></div>` : "",
+  ].join("") : "";
   return `<!DOCTYPE html><html lang="es"><head><meta charset="UTF-8"/><title>Recibo Cafetería</title>
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
@@ -89,6 +95,7 @@ function generarRecibo(items, total, metodo, ncf, ncfTipo, ventaId) {
   <div style="display:flex;justify-content:space-between;font-size:11px;margin-top:5px;color:#666;">
     <span>Pago: ${metodo}</span><span>${ncfTipo} · ${ncfDesc}</span>
   </div>
+  ${mixLineas}
   ${ncf ? `<div class="ncf-box">
     <div class="sm" style="color:rgba(255,255,255,.6);margin-bottom:2px;">Número de Comprobante Fiscal</div>
     <div class="ncf-num">${ncf}</div>
@@ -105,6 +112,7 @@ export default function CafeteriaPOS() {
   const [carrito,      setCarrito]      = useState([]);
   const [catActiva,    setCatActiva]    = useState("Todos");
   const [metodo,       setMetodo]       = useState("EFECTIVO");
+  const [mixto,        setMixto]        = useState({ efectivo: "", tarjeta: "", transferencia: "" });
   const [ncfTipo,      setNcfTipo]      = useState("B02");
   const [tab,          setTab]          = useState("pos"); // "pos" | "historial"
   const [historial,    setHistorial]    = useState([]);
@@ -182,6 +190,19 @@ export default function CafeteriaPOS() {
   // ── Cobrar ────────────────────────────────────────────────────────────────
   const cobrar = async () => {
     if (carrito.length === 0) return;
+
+    // Pago mixto: validar que el desglose sume el total
+    let mixPayload = {};
+    if (metodo === "MIXTO") {
+      const e = Number(mixto.efectivo || 0), t = Number(mixto.tarjeta || 0), tr = Number(mixto.transferencia || 0);
+      const suma = e + t + tr;
+      if (Math.abs(suma - total) > 0.01) {
+        alert(`El desglose del pago mixto (RD$ ${suma.toFixed(2)}) debe sumar exactamente el total (RD$ ${total.toFixed(2)}).`);
+        return;
+      }
+      mixPayload = { monto_efectivo: e, monto_tarjeta: t, monto_transferencia: tr };
+    }
+
     setCobrando(true);
     try {
       const res = await fetch(`${API}/cafeteria/venta`, {
@@ -192,6 +213,7 @@ export default function CafeteriaPOS() {
           total,
           metodo_pago: metodo,
           ncf_tipo: ncfTipo,
+          ...mixPayload,
         }),
       });
       const data = await res.json();
@@ -201,8 +223,9 @@ export default function CafeteriaPOS() {
       }
       setUltimaVenta(data);
       // Imprimir recibo
-      imprimirHTML(generarRecibo(carrito, total, metodo, data.ncf, ncfTipo, data.id));
+      imprimirHTML(generarRecibo(carrito, total, metodo, data.ncf, ncfTipo, data.id, mixPayload));
       setCarrito([]);
+      setMixto({ efectivo: "", tarjeta: "", transferencia: "" });
       cargarProductos();
     } catch (e) {
       alert("Error de conexión: " + e.message);
@@ -372,6 +395,40 @@ export default function CafeteriaPOS() {
                   }}>{m.label}</button>
                 ))}
               </div>
+
+              {/* Desglose de pago MIXTO */}
+              {metodo === "MIXTO" && (() => {
+                const e = Number(mixto.efectivo || 0), t = Number(mixto.tarjeta || 0), tr = Number(mixto.transferencia || 0);
+                const suma = e + t + tr;
+                const resta = total - suma;
+                const inStyle = { width:"100%", background:"#0f172a", border:"1px solid #475569", borderRadius:7, color:"#f1f5f9", padding:"7px 9px", fontSize:13 };
+                const cuadra = Math.abs(resta) < 0.01;
+                return (
+                  <div style={{ background:"#1e293b", border:"1px solid #f59e0b", borderRadius:10, padding:"10px 12px", marginBottom:10 }}>
+                    <div style={{ fontSize:10, color:"#fbbf24", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:7 }}>
+                      Desglose del pago (debe sumar RD$ {total.toFixed(2)})
+                    </div>
+                    <div style={{ display:"flex", gap:6, marginBottom:7 }}>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:10, color:"#94a3b8", marginBottom:3 }}>💵 Efectivo</div>
+                        <input type="number" value={mixto.efectivo} onChange={ev => setMixto({ ...mixto, efectivo: ev.target.value })} placeholder="0" style={inStyle} />
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:10, color:"#94a3b8", marginBottom:3 }}>💳 Tarjeta</div>
+                        <input type="number" value={mixto.tarjeta} onChange={ev => setMixto({ ...mixto, tarjeta: ev.target.value })} placeholder="0" style={inStyle} />
+                      </div>
+                      <div style={{ flex:1 }}>
+                        <div style={{ fontSize:10, color:"#94a3b8", marginBottom:3 }}>📲 Transf.</div>
+                        <input type="number" value={mixto.transferencia} onChange={ev => setMixto({ ...mixto, transferencia: ev.target.value })} placeholder="0" style={inStyle} />
+                      </div>
+                    </div>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, fontWeight:700, color: cuadra ? "#10b981" : "#f59e0b" }}>
+                      <span>Suma: RD$ {suma.toFixed(2)}</span>
+                      <span>{cuadra ? "✓ Cuadra" : (resta > 0 ? `Falta RD$ ${resta.toFixed(2)}` : `Sobra RD$ ${(-resta).toFixed(2)}`)}</span>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* NCF tipo — botones explícitos para evitar bugs visuales del select */}
               <div style={{ marginBottom:10 }}>

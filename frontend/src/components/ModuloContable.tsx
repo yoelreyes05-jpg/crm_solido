@@ -180,18 +180,22 @@ function Cuadre({ apiBase, usuario, P, S }: any) {
           <h3 style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>📋 Cuadre del {prev.fecha}</h3>
           <p style={{ fontSize: 12, color: P.sub, marginBottom: 14 }}>{prev.movimientos_count} movimiento(s) de caja chica en el día</p>
           {fila("Fondo inicial (cierre día anterior)", fmt(prev.fondo_inicial))}
+          {prev.tiene_ventas && fila(`+ Ventas en efectivo (POS · ${prev.ventas_count || 0} transacc.)`, fmt(prev.ventas_efectivo), P.green)}
           {fila("+ Ingresos de caja chica (efectivo)", fmt(prev.ingresos_caja), P.green)}
-          {fila("+ Cobros en efectivo", fmt(prev.cobros_efectivo), P.green)}
-          {fila("− Egresos / gastos de caja chica", fmt(prev.egresos_caja), P.red)}
+          {Number(prev.cobros_efectivo) > 0 && fila("+ Cobros en efectivo", fmt(prev.cobros_efectivo), P.green)}
+          {fila("− Gastos del día (egresos de caja chica)", fmt(prev.egresos_caja), P.red)}
           <div style={{ display: "flex", justifyContent: "space-between", padding: "12px 4px", background: theme_safe(P), borderRadius: 8, marginTop: 6 }}>
             <span style={{ fontWeight: 800 }}>= Efectivo esperado en caja</span>
             <span style={{ fontWeight: 800, color: P.blue }}>{fmt(prev.efectivo_esperado)}</span>
           </div>
 
-          {(Number(prev.cobros_tarjeta) > 0 || Number(prev.cobros_transferencia) > 0) && (
+          {(Number(prev.ventas_tarjeta) > 0 || Number(prev.ventas_transferencia) > 0 || Number(prev.cobros_tarjeta) > 0 || Number(prev.cobros_transferencia) > 0) && (
             <div style={{ marginTop: 12 }}>
-              {fila("Cobros con tarjeta (no efectivo)", fmt(prev.cobros_tarjeta), P.sub)}
-              {fila("Cobros por transferencia (no efectivo)", fmt(prev.cobros_transferencia), P.sub)}
+              <div style={{ fontSize: 11, fontWeight: 700, color: P.sub, textTransform: "uppercase", marginBottom: 4 }}>No afectan el efectivo</div>
+              {prev.tiene_ventas && Number(prev.ventas_tarjeta) > 0 && fila("Ventas con tarjeta", fmt(prev.ventas_tarjeta), P.sub)}
+              {prev.tiene_ventas && Number(prev.ventas_transferencia) > 0 && fila("Ventas por transferencia", fmt(prev.ventas_transferencia), P.sub)}
+              {Number(prev.cobros_tarjeta) > 0 && fila("Cobros con tarjeta", fmt(prev.cobros_tarjeta), P.sub)}
+              {Number(prev.cobros_transferencia) > 0 && fila("Cobros por transferencia", fmt(prev.cobros_transferencia), P.sub)}
             </div>
           )}
 
