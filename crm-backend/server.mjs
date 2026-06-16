@@ -1350,6 +1350,22 @@ app.post("/cafeteria/venta", async (req, res) => {
   res.json({ ...venta[0], ncf });
 });
 
+// GET /cafeteria/ventas?limit=N — lista de ventas (usada por los dashboards)
+app.get("/cafeteria/ventas", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const { data, error } = await supabase
+      .from("cafeteria_ventas")
+      .select("*")
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =====================================================
 // ☕ CUADRE DE CAFETERÍA
 // =====================================================
