@@ -1324,19 +1324,30 @@ app.post("/cafeteria/venta", async (req, res) => {
     ncf = ncfData.prefijo + String(nuevo).padStart(8, "0");
   }
 
-  // Para pago MIXTO guardamos el desglose (requiere migración v13).
-  // Las ventas normales no tocan esas columnas para no romper si aún no se corrió.
-  const fila = { total: Number(total), metodo_pago, ncf, ncf_tipo: tipo, created_at: new Date() };
-  if (String(metodo_pago).toUpperCase() === "MIXTO") {
-    fila.monto_efectivo      = Number(monto_efectivo || 0);
-    fila.monto_tarjeta       = Number(monto_tarjeta || 0);
-    fila.monto_transferencia = Number(monto_transferencia || 0);
-  }
+  // Base de la venta (siempre válida).
+  const filaBase = { total: Number(total), metodo_pago, ncf, ncf_tipo: tipo, created_at: new Date() };
+  const esMixto = String(metodo_pago).toUpperCase() === "MIXTO";
+  // Para pago MIXTO intentamos guardar el desglose. Si las columnas no existen
+  // (migración v13 no corrida), reintentamos sin ellas para que la venta NO se rechace.
+  const fila = esMixto ? {
+    ...filaBase,
+    monto_efectivo:      Number(monto_efectivo || 0),
+    monto_tarjeta:       Number(monto_tarjeta || 0),
+    monto_transferencia: Number(monto_transferencia || 0),
+  } : filaBase;
 
-  const { data: venta, error } = await supabase
+  let { data: venta, error } = await supabase
     .from("cafeteria_ventas")
     .insert([fila])
     .select();
+
+  // Fallback: si falló por columnas inexistentes del desglose mixto, guardar solo lo básico.
+  if (error && esMixto && /column|monto_|schema|does not exist|could not find/i.test(error.message || "")) {
+    ({ data: venta, error } = await supabase
+      .from("cafeteria_ventas")
+      .insert([filaBase])
+      .select());
+  }
   if (error) return res.json({ error: error.message });
 
   for (const item of items) {

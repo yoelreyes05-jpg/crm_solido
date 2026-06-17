@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef, useCallback } from "react";
 import { API_URL as API } from "@/config";
 import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
 import { usePermisos } from "@/lib/usePermisos";
+import ModuloContable from "@/components/ModuloContable";
 
 // Datos fijos de la cafetería (nombre y logo propios).
 // Sin RNC — operación informal dentro del taller, no constituida como empresa.
@@ -110,6 +111,7 @@ export default function CafeteriaPage() {
   const [productos, setProductos] = useState([]);
   const [carrito, setCarrito] = useState([]);
   const [metodoPago, setMetodoPago] = useState("EFECTIVO");
+  const [mixto, setMixto] = useState({ efectivo: "", tarjeta: "", transferencia: "" });
   const [ncfTipo, setNcfTipo] = useState("B02");
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState("vender");
@@ -161,8 +163,18 @@ export default function CafeteriaPage() {
 
   const despachar = async () => {
     if (carrito.length === 0) return alert("Carrito vacío");
-    if (Number(montoRecibido) > 0 && vuelto < 0)
+
+    // Pago MIXTO: validar que el desglose sume el total exacto
+    let mixPayload: any = {};
+    if (metodoPago === "MIXTO") {
+      const e = Number(mixto.efectivo || 0), t = Number(mixto.tarjeta || 0), tr = Number(mixto.transferencia || 0);
+      const suma = e + t + tr;
+      if (Math.abs(suma - total) > 0.01)
+        return alert(`El desglose del pago mixto (RD$ ${suma.toFixed(2)}) debe sumar exactamente el total (RD$ ${total.toFixed(2)}).`);
+      mixPayload = { monto_efectivo: e, monto_tarjeta: t, monto_transferencia: tr };
+    } else if (Number(montoRecibido) > 0 && vuelto < 0) {
       return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
+    }
 
     setLoading(true);
     const snap = [...carrito];
@@ -171,7 +183,7 @@ export default function CafeteriaPage() {
       const res = await fetch(`${API}/cafeteria/venta`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ items: snap, total, metodo_pago: metodoPago, ncf_tipo: ncfTipo })
+        body: JSON.stringify({ items: snap, total, metodo_pago: metodoPago, ncf_tipo: ncfTipo, ...mixPayload })
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
@@ -183,6 +195,7 @@ export default function CafeteriaPage() {
 
       setCarrito([]);
       setMontoRecibido("");
+      setMixto({ efectivo: "", tarjeta: "", transferencia: "" });
       obtener();
     } catch (e) {
       console.error(e);
@@ -287,6 +300,7 @@ export default function CafeteriaPage() {
           { k: "productos", l: "➕ Gestionar Productos" },
           { k: "almacen",   l: "📦 Almacén" },
           { k: "cuadre",    l: "🏦 Cuadre" },
+          { k: "contabilidad", l: "🧾 Contabilidad" },
           { k: "receta",    l: "📋 Receta" },
           { k: "historial", l: "📄 Historial" },
         ].map(t => (
@@ -333,6 +347,7 @@ export default function CafeteriaPage() {
                   { k: "EFECTIVO",      l: "💵 Efectivo",     c: "#10b981" },
                   { k: "TARJETA",       l: "💳 Tarjeta",      c: "#3b82f6" },
                   { k: "TRANSFERENCIA", l: "📲 Transfer.",    c: "#8b5cf6" },
+                  { k: "MIXTO",         l: "🔀 Mixto",        c: "#f59e0b" },
                 ].map(m => (
                   <button key={m.k} onClick={() => setMetodoPago(m.k)} style={{
                     flex: 1, padding: "9px 6px", borderRadius: 8, border: "none",
@@ -344,6 +359,41 @@ export default function CafeteriaPage() {
                 ))}
               </div>
             </div>
+
+            {/* Desglose de pago MIXTO */}
+            {metodoPago === "MIXTO" && (() => {
+              const e = Number(mixto.efectivo || 0), t = Number(mixto.tarjeta || 0), tr = Number(mixto.transferencia || 0);
+              const suma = e + t + tr;
+              const resta = total - suma;
+              const cuadra = Math.abs(resta) < 0.01;
+              const miniIn: any = { width: "100%", padding: "8px 10px", borderRadius: 7, border: "1px solid #fcd34d", fontSize: 14, boxSizing: "border-box" };
+              return (
+                <div style={{ background: "#fffbeb", border: "1px solid #f59e0b", borderRadius: 10, padding: 12, marginBottom: 12 }}>
+                  <div style={{ fontSize: 11, fontWeight: 700, color: "#b45309", textTransform: "uppercase", letterSpacing: 1, marginBottom: 8 }}>
+                    Desglose (debe sumar RD$ {total.toFixed(2)})
+                  </div>
+                  <div style={{ display: "flex", gap: 6, marginBottom: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#92400e", marginBottom: 3 }}>💵 Efectivo</div>
+                      <input type="number" value={mixto.efectivo} onChange={ev => setMixto({ ...mixto, efectivo: ev.target.value })} placeholder="0" style={miniIn} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#92400e", marginBottom: 3 }}>💳 Tarjeta</div>
+                      <input type="number" value={mixto.tarjeta} onChange={ev => setMixto({ ...mixto, tarjeta: ev.target.value })} placeholder="0" style={miniIn} />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: 10, color: "#92400e", marginBottom: 3 }}>📲 Transfer.</div>
+                      <input type="number" value={mixto.transferencia} onChange={ev => setMixto({ ...mixto, transferencia: ev.target.value })} placeholder="0" style={miniIn} />
+                    </div>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", fontSize: 12, fontWeight: 700, color: cuadra ? "#15803d" : "#b45309" }}>
+                    <span>Suma: RD$ {suma.toFixed(2)}</span>
+                    <span>{cuadra ? "✓ Cuadra" : (resta > 0 ? `Falta RD$ ${resta.toFixed(2)}` : `Sobra RD$ ${(-resta).toFixed(2)}`)}</span>
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* Tipo comprobante — botones para evitar bug visual del select */}
             <div style={{ marginBottom: 12 }}>
               <label style={label}>🧾 Tipo Comprobante</label>
@@ -427,6 +477,17 @@ export default function CafeteriaPage() {
       )}
 
       {tab === "cuadre" && <CafeteriaCuadre usuario={typeof window !== "undefined" ? (() => { try { return JSON.parse(localStorage.getItem("usuario") || "{}"); } catch { return {}; } })() : {}} />}
+
+      {tab === "contabilidad" && (
+        <ModuloContable
+          apiBase="/cafeteria/contabilidad"
+          theme="light"
+          titulo="Contabilidad — Cafetería"
+          usuario="Cafetería"
+          nombreEntidad="Cliente / Evento"
+          nombreSuplidor="Suplidor"
+        />
+      )}
 
       {tab === "receta" && <CafeteriaRecetas />}
 
