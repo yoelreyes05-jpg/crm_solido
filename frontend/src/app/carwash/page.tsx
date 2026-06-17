@@ -36,6 +36,10 @@ export default function CarWashPage() {
   const [factModal, setFactModal] = useState<any>(null);
   const [factForm, setFactForm] = useState<any>({ metodo_pago: "EFECTIVO", ncf_tipo: "B02", itbis_aplica: false });
 
+  // Gestión de tipos de lavado
+  const [gestion, setGestion] = useState(false);
+  const [nuevoServ, setNuevoServ] = useState({ nombre: "", precio: "" });
+
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
@@ -127,6 +131,41 @@ export default function CarWashPage() {
     alert("Vehículo entregado ✓");
   };
 
+  // ── Gestión de tipos de lavado ──
+  const recargarServicios = async () => {
+    const s = await fetch(`${API}/carwash/servicios`).then(r => r.json()).catch(() => []);
+    setServicios(Array.isArray(s) ? s : []);
+  };
+  const setServField = (id: number, field: string, val: any) =>
+    setServicios(prev => prev.map(s => s.id === id ? { ...s, [field]: val } : s));
+  const guardarServicio = async (s: any) => {
+    if (!s.nombre?.trim()) { alert("El nombre no puede estar vacío."); return; }
+    const r = await fetch(`${API}/carwash/servicios/${s.id}`, {
+      method: "PATCH", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: s.nombre, precio: Number(s.precio || 0), activo: s.activo !== false }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) { alert(d.error || "No se pudo guardar"); return; }
+    await recargarServicios();
+  };
+  const crearServicio = async () => {
+    if (!nuevoServ.nombre.trim()) { alert("Escribe el nombre del nuevo tipo."); return; }
+    const r = await fetch(`${API}/carwash/servicios`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre: nuevoServ.nombre, precio: Number(nuevoServ.precio || 0) }),
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) { alert(d.error || "No se pudo crear"); return; }
+    setNuevoServ({ nombre: "", precio: "" });
+    await recargarServicios();
+  };
+  const eliminarServicio = async (id: number) => {
+    if (!confirm("¿Eliminar este tipo de lavado?")) return;
+    const r = await fetch(`${API}/carwash/servicios/${id}`, { method: "DELETE" });
+    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || "No se pudo eliminar"); return; }
+    await recargarServicios();
+  };
+
   return (
     <div style={{ padding: 24, background: C.bg, minHeight: "100vh", fontFamily: "system-ui, sans-serif" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18, flexWrap: "wrap", gap: 10 }}>
@@ -197,7 +236,10 @@ export default function CarWashPage() {
           )}
 
           {/* Servicio */}
-          <label style={sLabel}>Tipo de lavado</label>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+            <label style={sLabel}>Tipo de lavado</label>
+            <button onClick={() => setGestion(true)} style={{ background: "none", border: "none", color: C.blue, cursor: "pointer", fontWeight: 700, fontSize: 12, marginBottom: 4 }}>⚙️ Gestionar tipos</button>
+          </div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 10 }}>
             {servicios.filter(s => s.activo !== false).map(s => (
               <button key={s.id} onClick={() => elegirServicio(s)} style={{
@@ -266,6 +308,47 @@ export default function CarWashPage() {
             )}
         </div>
       </div>
+
+      {/* Gestionar tipos de lavado */}
+      {gestion && (
+        <div onClick={() => setGestion(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 14, padding: 24, width: 520, maxWidth: "94vw", maxHeight: "88vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 14 }}>
+              <h3 style={{ fontSize: 17, fontWeight: 800, margin: 0 }}>⚙️ Tipos de lavado</h3>
+              <button onClick={() => setGestion(false)} style={{ background: "none", border: "none", fontSize: 20, cursor: "pointer", color: C.sub }}>✕</button>
+            </div>
+
+            {/* Encabezado */}
+            <div style={{ display: "flex", gap: 8, fontSize: 11, fontWeight: 700, color: C.sub, padding: "0 4px 6px", textTransform: "uppercase" }}>
+              <span style={{ flex: 2 }}>Nombre</span>
+              <span style={{ width: 110 }}>Precio</span>
+              <span style={{ width: 130 }}></span>
+            </div>
+
+            {/* Filas editables */}
+            {servicios.map(s => (
+              <div key={s.id} style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
+                <input value={s.nombre || ""} onChange={e => setServField(s.id, "nombre", e.target.value)} style={{ ...sInput, flex: 2 }} />
+                <input type="number" value={s.precio ?? ""} onChange={e => setServField(s.id, "precio", e.target.value)} style={{ ...sInput, width: 110 }} />
+                <div style={{ display: "flex", gap: 4, width: 130 }}>
+                  <button onClick={() => guardarServicio(s)} style={{ ...sBtn, background: C.green, padding: "8px 10px", fontSize: 12 }}>Guardar</button>
+                  <button onClick={() => eliminarServicio(s.id)} style={{ ...sBtn, background: "#fee2e2", color: C.red, padding: "8px 10px", fontSize: 12 }}>🗑️</button>
+                </div>
+              </div>
+            ))}
+
+            {/* Agregar nuevo */}
+            <div style={{ borderTop: `1px solid ${C.border}`, marginTop: 12, paddingTop: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: C.sub, marginBottom: 6 }}>➕ Agregar tipo nuevo</div>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input value={nuevoServ.nombre} onChange={e => setNuevoServ({ ...nuevoServ, nombre: e.target.value })} placeholder="Ej: Lavado de motor" style={{ ...sInput, flex: 2 }} />
+                <input type="number" value={nuevoServ.precio} onChange={e => setNuevoServ({ ...nuevoServ, precio: e.target.value })} placeholder="Precio" style={{ ...sInput, width: 110 }} />
+                <button onClick={crearServicio} style={{ ...sBtn, background: C.blue, padding: "8px 12px", fontSize: 12, width: 130 }}>Agregar</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Facturar modal */}
       {factModal && (
