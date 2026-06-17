@@ -299,7 +299,6 @@ export default function CafeteriaPage() {
           { k: "vender",    l: "🛒 Vender" },
           { k: "productos", l: "➕ Gestionar Productos" },
           { k: "almacen",   l: "📦 Almacén" },
-          { k: "cuadre",    l: "🏦 Cuadre" },
           { k: "contabilidad", l: "🧾 Contabilidad" },
           { k: "receta",    l: "📋 Receta" },
           { k: "historial", l: "📄 Historial" },
@@ -475,8 +474,6 @@ export default function CafeteriaPage() {
           </div>
         </div>
       )}
-
-      {tab === "cuadre" && <CafeteriaCuadre usuario={typeof window !== "undefined" ? (() => { try { return JSON.parse(localStorage.getItem("usuario") || "{}"); } catch { return {}; } })() : {}} />}
 
       {tab === "contabilidad" && (
         <ModuloContable
