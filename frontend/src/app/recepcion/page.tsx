@@ -678,12 +678,9 @@ export default function RecepcionPage() {
           <h1 style={{ fontSize: 24, fontWeight: 800, marginBottom: 6, color: TEXT }}>
             Recepción de Vehículo
           </h1>
-          <a href="/carwash" style={{ textDecoration: "none", background: "#0ea5e9", color: "#fff", borderRadius: 10, padding: "10px 18px", fontWeight: 800, fontSize: 14, whiteSpace: "nowrap", boxShadow: "0 2px 8px rgba(14,165,233,0.35)" }}>
-            🚿 Car Wash / Lavado
-          </a>
         </div>
         <p style={{ color: MUTED, fontSize: 14, marginBottom: 28 }}>
-          Completa los 4 pasos para registrar la entrada del vehículo al taller. ¿Solo lavado? Usa el botón Car Wash.
+          Completa los 4 pasos para registrar la entrada del vehículo al taller. ¿Solo lavado? Usa el módulo Car Wash en el menú lateral.
         </p>
 
         <StepIndicator paso={paso} />

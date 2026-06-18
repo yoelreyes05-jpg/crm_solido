@@ -47,6 +47,7 @@ const MODULOS: Modulo[] = [
     id: "taller", label: "Operaciones de Taller", icon: "🔧", color: "#f59e0b",
     items: [
       { href: "/taller",             icon: "👨‍🔧", label: "Mi Taller",           key: "taller",             iconBg: "linear-gradient(145deg,#78350f,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.7),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/carwash",            icon: "🚿", label: "Car Wash",            key: "carwash",            iconBg: "linear-gradient(145deg,#0c4a6e,#0ea5e9)", iconShadow: "0 4px 12px rgba(14,165,233,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/aprobacion",         icon: "✅", label: "Aprobaciones",        key: "aprobacion",         iconBg: "linear-gradient(145deg,#065f46,#10b981)", iconShadow: "0 4px 12px rgba(16,185,129,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/vehiculos",          icon: "🚗", label: "Vehículos",           key: "vehiculos",          iconBg: "linear-gradient(145deg,#312e81,#6366f1)", iconShadow: "0 4px 12px rgba(99,102,241,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/ordenes",            icon: "🔧", label: "Órdenes de Trabajo",  key: "ordenes",            iconBg: "linear-gradient(145deg,#92400e,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
