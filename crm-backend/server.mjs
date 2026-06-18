@@ -2233,7 +2233,7 @@ app.get("/dashboard/operaciones", async (req, res) => {
       supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", hoyISO),
       supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", hoyISO),
       supabase.from("ordenes_trabajo")
-        .select("id, numero_orden, estado, descripcion, total, cliente_id, vehiculo_id, created_at, tecnico_asignado_id")
+        .select("id, numero_orden, estado, descripcion, total, cliente_id, vehiculo_id, created_at, tecnico_asignado_id, fecha_listo, fecha_entrega")
         .eq("tipo_orden", "LAVADO").order("id", { ascending: false }).limit(200),
     ]);
 
@@ -2261,6 +2261,8 @@ app.get("/dashboard/operaciones", async (req, res) => {
       descripcion: o.descripcion,
       total: Number(o.total || 0),
       created_at: o.created_at,
+      fecha_listo: o.fecha_listo || null,
+      fecha_entrega: o.fecha_entrega || null,
       cliente_nombre: cliMap[o.cliente_id] || "Cliente",
       vehiculo_info: vehMap[o.vehiculo_id] || "Vehículo",
       tecnico_nombre: tecMap[o.tecnico_asignado_id] || null,
@@ -2268,8 +2270,10 @@ app.get("/dashboard/operaciones", async (req, res) => {
 
     const en_lavado = lavados.filter(o => o.estado === "EN_LAVADO").map(fmtLav);
     const listo     = lavados.filter(o => o.estado === "LISTO").map(fmtLav);
+    // Entregados de hoy (por fecha de entrega). El cliente decide cuánto tiempo
+    // mostrarlos; la pantalla TV los oculta tras 1 hora pero la info no se borra.
     const entregado = lavados
-      .filter(o => o.estado === "ENTREGADO" && new Date(o.created_at).getTime() >= hoy.getTime())
+      .filter(o => o.estado === "ENTREGADO" && o.fecha_entrega && new Date(o.fecha_entrega).getTime() >= hoy.getTime())
       .map(fmtLav);
 
     // Ingreso car wash de hoy: facturas de órdenes LAVADO creadas hoy

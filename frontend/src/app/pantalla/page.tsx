@@ -13,10 +13,19 @@ const FASES = [
 ];
 
 const SLIDE_DURATION = 10_000; // 10 s por slide
+const ENTREGADO_VENTANA_MS = 60 * 60 * 1000; // ocultar entregados tras 1 hora
+
+// Columnas del tablero de car wash en la pantalla (sin montos)
+const CARWASH_COLS = [
+  { key: "en_lavado", label: "En Lavado", icon: "🚿", color: "#0891b2", bg: "#ecfeff" },
+  { key: "listo",     label: "Listo ✓",   color: "#10b981", icon: "✅", bg: "#ecfdf5" },
+  { key: "entregado", label: "Entregado", color: "#6b7280", icon: "🏁", bg: "#f9fafb" },
+];
 
 export default function PantallaTV() {
   const [ordenes,   setOrdenes]   = useState<any[]>([]);
   const [productos, setProductos] = useState<any[]>([]);
+  const [oper,      setOper]      = useState<any>(null);
   const [slideIdx,  setSlideIdx]  = useState(0);
   const [hora,      setHora]      = useState("");
   const [fecha,     setFecha]     = useState("");
@@ -24,15 +33,17 @@ export default function PantallaTV() {
   // ── Carga datos ───────────────────────────────────────────────────────────
   const cargar = useCallback(async () => {
     try {
-      const [oRes, pRes] = await Promise.all([
+      const [oRes, pRes, opRes] = await Promise.all([
         fetch(`${API}/ordenes`),
         fetch(`${API}/cafeteria/productos`),
+        fetch(`${API}/dashboard/operaciones`),
       ]);
       const o = await oRes.json();
       const p = await pRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
       // Solo productos activos con stock
       setProductos(Array.isArray(p) ? p.filter((x: any) => x.stock > 0) : []);
+      try { setOper(await opRes.json()); } catch { setOper(null); }
     } catch {}
   }, []);
 
@@ -60,8 +71,29 @@ export default function PantallaTV() {
     return Array.from(cats) as string[];
   }, [productos]);
 
-  // totalSlides = 1 (taller) + N categorías
-  const totalSlides = 1 + categorias.length;
+  // ── Datos car wash (con entregados ocultos tras 1 hora) ───────────────────
+  const carwash = useMemo(() => {
+    const lav = oper?.lavados || {};
+    const ahora = Date.now();
+    const entregadoVisible = (lav.entregado || []).filter((o: any) =>
+      o.fecha_entrega && (ahora - new Date(o.fecha_entrega).getTime()) <= ENTREGADO_VENTANA_MS
+    );
+    return {
+      en_lavado: lav.en_lavado || [],
+      listo:     lav.listo || [],
+      entregado: entregadoVisible,
+    };
+  }, [oper, hora]); // depende de "hora" para recalcular cada minuto el filtro de 1h
+  const hayCarwash = carwash.en_lavado.length + carwash.listo.length + carwash.entregado.length > 0;
+
+  // ── Slides dinámicos: taller → car wash (si hay) → categorías cafetería ──
+  const slides = useMemo(() => {
+    const arr: ({ type: "taller" } | { type: "carwash" } | { type: "cafeteria"; cat: string })[] = [{ type: "taller" }];
+    if (hayCarwash) arr.push({ type: "carwash" });
+    categorias.forEach(c => arr.push({ type: "cafeteria", cat: c }));
+    return arr;
+  }, [hayCarwash, categorias]);
+  const totalSlides = slides.length;
 
   useEffect(() => {
     if (totalSlides < 2) return;
@@ -76,9 +108,11 @@ export default function PantallaTV() {
   const activas = ordenes.filter((o: any) => o.estado !== "ENTREGADO");
   const listos  = byFase["LISTO"]?.length || 0;
 
-  // ── Datos cafetería (slide actual) ────────────────────────────────────────
-  const esSliderTaller = slideIdx === 0;
-  const catActual      = categorias[slideIdx - 1] || "";
+  // ── Slide actual ──────────────────────────────────────────────────────────
+  const current        = slides[slideIdx] || slides[0];
+  const esSliderTaller  = current.type === "taller";
+  const esSliderCarwash = current.type === "carwash";
+  const catActual       = current.type === "cafeteria" ? current.cat : "";
   const prodsCatActual = productos.filter((p: any) => (p.categoria || "General") === catActual);
 
   // ── Cols de grid según cantidad de productos ──────────────────────────────
@@ -99,7 +133,7 @@ export default function PantallaTV() {
       <div style={{
         display: "flex", alignItems: "stretch",
         background: "#fff",
-        borderBottom: "3px solid " + (esSliderTaller ? "#3b82f6" : "#f97316"),
+        borderBottom: "3px solid " + (esSliderTaller ? "#3b82f6" : esSliderCarwash ? "#0891b2" : "#f97316"),
         boxShadow: "0 2px 12px rgba(0,0,0,0.08)",
         flexShrink: 0,
         transition: "border-color 0.5s",
@@ -134,15 +168,20 @@ export default function PantallaTV() {
         {/* Indicador de slide */}
         <div style={{ flex: 1, display: "flex", alignItems: "center", paddingLeft: 24, gap: 14 }}>
           <div style={{
-            background: esSliderTaller ? "#eff6ff" : "#fff7ed",
-            border: `1.5px solid ${esSliderTaller ? "#bfdbfe" : "#fed7aa"}`,
+            background: esSliderTaller ? "#eff6ff" : esSliderCarwash ? "#ecfeff" : "#fff7ed",
+            border: `1.5px solid ${esSliderTaller ? "#bfdbfe" : esSliderCarwash ? "#a5f3fc" : "#fed7aa"}`,
             borderRadius: 10, padding: "6px 16px",
             fontSize: 13, fontWeight: 800,
-            color: esSliderTaller ? "#1d4ed8" : "#ea580c",
+            color: esSliderTaller ? "#1d4ed8" : esSliderCarwash ? "#0e7490" : "#ea580c",
           }}>
-            {esSliderTaller ? "🔧 Estado del Taller" : `☕ ${catActual}`}
+            {esSliderTaller ? "🔧 Estado del Taller" : esSliderCarwash ? "🚿 Car Wash / Lavado" : `☕ ${catActual}`}
           </div>
-          {!esSliderTaller && (
+          {esSliderCarwash && (
+            <div style={{ fontSize: 13, color: "#6b7280" }}>
+              {carwash.en_lavado.length + carwash.listo.length} vehículo{(carwash.en_lavado.length + carwash.listo.length) !== 1 ? "s" : ""} en proceso
+            </div>
+          )}
+          {!esSliderTaller && !esSliderCarwash && (
             <div style={{ fontSize: 13, color: "#6b7280" }}>
               {prodsCatActual.length} producto{prodsCatActual.length !== 1 ? "s" : ""} disponible{prodsCatActual.length !== 1 ? "s" : ""}
             </div>
@@ -262,8 +301,84 @@ export default function PantallaTV() {
           </div>
         )}
 
+        {/* ─ SLIDE CAR WASH ─────────────────────────────────────────────── */}
+        {esSliderCarwash && (
+          <div style={{ height: "100%", display: "flex", flexDirection: "column", padding: "16px 22px", gap: 12 }}>
+            {/* Alerta: lavados listos */}
+            {carwash.listo.length > 0 && (
+              <div style={{
+                background: "linear-gradient(135deg,#065f46,#10b981)",
+                borderRadius: 12, padding: "10px 20px",
+                display: "flex", alignItems: "center", gap: 14,
+                boxShadow: "0 4px 14px rgba(16,185,129,0.3)", flexShrink: 0,
+              }}>
+                <span style={{ fontSize: 26 }}>🎉</span>
+                <div style={{ color: "#fff" }}>
+                  <div style={{ fontWeight: 900, fontSize: 18 }}>
+                    {carwash.listo.length} vehículo{carwash.listo.length > 1 ? "s" : ""} de lavado LISTO{carwash.listo.length > 1 ? "S" : ""}
+                  </div>
+                  <div style={{ fontSize: 12, opacity: 0.85 }}>Puede pasar a recoger su vehículo</div>
+                </div>
+              </div>
+            )}
+
+            {/* Tablero 3 columnas — SIN precios */}
+            <div style={{ flex: 1, display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 14, overflow: "hidden" }}>
+              {CARWASH_COLS.map(col => {
+                const items: any[] = (carwash as any)[col.key] || [];
+                return (
+                  <div key={col.key} style={{
+                    background: "#fff", borderRadius: 14,
+                    border: `1.5px solid ${col.color}33`,
+                    boxShadow: "0 2px 8px rgba(0,0,0,0.05)",
+                    display: "flex", flexDirection: "column", overflow: "hidden",
+                  }}>
+                    <div style={{
+                      padding: "11px 16px", background: col.bg,
+                      borderBottom: `3px solid ${col.color}`,
+                      display: "flex", justifyContent: "space-between", alignItems: "center",
+                    }}>
+                      <span style={{ fontSize: 18, fontWeight: 900, color: "#111" }}>{col.icon} {col.label}</span>
+                      <div style={{
+                        background: col.color, color: "#fff",
+                        borderRadius: "50%", minWidth: 32, height: 32, padding: "0 8px",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                        fontSize: 15, fontWeight: 900,
+                      }}>{items.length}</div>
+                    </div>
+                    <div style={{ flex: 1, overflowY: "hidden", padding: "10px 12px" }}>
+                      {items.length === 0 ? (
+                        <div style={{ textAlign: "center", color: "#d1d5db", fontSize: 14, padding: "20px 0", fontWeight: 600 }}>
+                          Sin vehículos
+                        </div>
+                      ) : items.slice(0, 7).map((o: any) => (
+                        <div key={o.id} style={{
+                          background: col.bg, borderRadius: 10, padding: "10px 12px",
+                          marginBottom: 8, border: `1px solid ${col.color}22`,
+                        }}>
+                          <div style={{ fontSize: 17, fontWeight: 900, color: "#111", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            🚗 {o.vehiculo_info}
+                          </div>
+                          <div style={{ fontSize: 13, color: "#6b7280", marginTop: 2, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                            {o.cliente_nombre}
+                          </div>
+                        </div>
+                      ))}
+                      {items.length > 7 && (
+                        <div style={{ fontSize: 13, color: col.color, textAlign: "center", fontWeight: 700 }}>
+                          +{items.length - 7} más
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
         {/* ─ SLIDE CAFETERÍA (por categoría) ──────────────────────────── */}
-        {!esSliderTaller && (
+        {!esSliderTaller && !esSliderCarwash && (
           <div style={{ height: "100%", display: "flex", overflow: "hidden" }}>
 
             {/* Sidebar — lista de categorías */}
@@ -386,32 +501,32 @@ export default function PantallaTV() {
         padding: "8px 0", background: "#fff",
         borderTop: "1px solid #f3f4f6", flexShrink: 0,
       }}>
-        {/* Slide anterior */}
-        {Array.from({ length: totalSlides }).map((_, i) => {
+        {/* Indicadores de slide */}
+        {slides.map((s, i) => {
           const isActive = i === slideIdx;
-          const isTaller = i === 0;
-          const cat = categorias[i - 1];
+          const dotColor    = s.type === "taller" ? "#3b82f6" : s.type === "carwash" ? "#0891b2" : "#f97316";
+          const textColor   = s.type === "taller" ? "#1d4ed8" : s.type === "carwash" ? "#0e7490" : "#ea580c";
+          const bgActive    = s.type === "taller" ? "#eff6ff" : s.type === "carwash" ? "#ecfeff" : "#fff7ed";
+          const borderActive= s.type === "taller" ? "#bfdbfe" : s.type === "carwash" ? "#a5f3fc" : "#fed7aa";
+          const label       = s.type === "taller" ? "🔧 Taller" : s.type === "carwash" ? "🚿 Car Wash" : `☕ ${s.cat}`;
           return (
             <div key={i} style={{
               display: "flex", alignItems: "center", gap: 4,
               padding: isActive ? "4px 12px" : "4px 6px",
               borderRadius: 20,
-              background: isActive ? (isTaller ? "#eff6ff" : "#fff7ed") : "transparent",
-              border: isActive ? `1.5px solid ${isTaller ? "#bfdbfe" : "#fed7aa"}` : "none",
+              background: isActive ? bgActive : "transparent",
+              border: isActive ? `1.5px solid ${borderActive}` : "none",
               transition: "all 0.4s ease",
             }}>
               <div style={{
                 width: isActive ? 0 : 7, height: 7, borderRadius: "50%",
-                background: isTaller ? "#3b82f6" : "#f97316",
+                background: dotColor,
                 flexShrink: 0,
                 display: isActive ? "none" : "block",
               }} />
               {isActive && (
-                <span style={{
-                  fontSize: 11, fontWeight: 700,
-                  color: isTaller ? "#1d4ed8" : "#ea580c",
-                }}>
-                  {isTaller ? "🔧 Taller" : `☕ ${cat}`}
+                <span style={{ fontSize: 11, fontWeight: 700, color: textColor }}>
+                  {label}
                 </span>
               )}
             </div>
