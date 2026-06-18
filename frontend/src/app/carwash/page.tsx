@@ -20,6 +20,8 @@ export default function CarWashPage() {
   const [clientes, setClientes] = useState<any[]>([]);
   const [vehiculos, setVehiculos] = useState<any[]>([]);
   const [lavados, setLavados] = useState<any[]>([]);
+  const [usuarios, setUsuarios] = useState<any[]>([]);
+  const [tecnicoSel, setTecnicoSel] = useState<any>(null);
   const [loading, setLoading] = useState(false);
 
   // Form
@@ -43,16 +45,18 @@ export default function CarWashPage() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c, v, l] = await Promise.all([
+      const [s, c, v, l, u] = await Promise.all([
         fetch(`${API}/carwash/servicios`).then(r => r.json()).catch(() => []),
         fetch(`${API}/clientes`).then(r => r.json()).catch(() => []),
         fetch(`${API}/vehiculos`).then(r => r.json()).catch(() => []),
         fetch(`${API}/carwash`).then(r => r.json()).catch(() => []),
+        fetch(`${API}/usuarios`).then(r => r.json()).catch(() => []),
       ]);
       setServicios(Array.isArray(s) ? s : []);
       setClientes(Array.isArray(c) ? c : []);
       setVehiculos(Array.isArray(v) ? v : []);
       setLavados(Array.isArray(l) ? l : []);
+      setUsuarios(Array.isArray(u) ? u : []);
     } catch { /* noop */ }
     setLoading(false);
   }, []);
@@ -60,6 +64,11 @@ export default function CarWashPage() {
 
   const cliMap: any = {}; clientes.forEach(c => { cliMap[c.id] = c; });
   const vehMap: any = {}; vehiculos.forEach(v => { vehMap[v.id] = v; });
+  const usuMap: any = {}; usuarios.forEach(u => { usuMap[u.id] = u; });
+  const lavadores = usuarios.filter(u => {
+    const rol = (u.rol || "").toLowerCase();
+    return u.activo !== false && (rol === "lavador" || rol === "tecnico");
+  });
   const vehDeCliente = cliSel ? vehiculos.filter(v => v.cliente_id === cliSel.id) : [];
   const clientesFiltrados = busqCli
     ? clientes.filter(c => (c.nombre || "").toLowerCase().includes(busqCli.toLowerCase()) || (c.telefono || "").includes(busqCli)).slice(0, 8)
@@ -92,13 +101,13 @@ export default function CarWashPage() {
       if (!servSel) { alert("Selecciona el tipo de lavado."); setSaving(false); return; }
       const r = await fetch(`${API}/carwash`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ cliente_id: clienteId, vehiculo_id: vehiculoId, servicio_id: servSel.id, servicio_nombre: servSel.nombre, precio: Number(precio || servSel.precio) }),
+        body: JSON.stringify({ cliente_id: clienteId, vehiculo_id: vehiculoId, servicio_id: servSel.id, servicio_nombre: servSel.nombre, precio: Number(precio || servSel.precio), tecnico_asignado_id: tecnicoSel?.id || null }),
       });
       const o = await r.json();
       if (o.error) { alert("Error: " + o.error); setSaving(false); return; }
       // reset
       setCliSel(null); setVehSel(null); setNuevoCli({ nombre: "", telefono: "" }); setNuevoVeh({ marca: "", modelo: "", placa: "" });
-      setServSel(null); setPrecio(""); setBusqCli("");
+      setServSel(null); setPrecio(""); setBusqCli(""); setTecnicoSel(null);
       await cargar();
       alert("🚿 Lavado registrado y en proceso.");
     } catch (e: any) { alert("Error de conexión: " + e.message); }
@@ -257,6 +266,21 @@ export default function CarWashPage() {
             </div>
           )}
 
+          {/* Técnico de lavado asignado */}
+          <label style={sLabel}>Técnico de lavado asignado</label>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 14 }}>
+            {lavadores.length === 0 && (
+              <span style={{ fontSize: 12, color: C.sub }}>No hay técnicos de lavado. Crea un usuario con rol "Lavador".</span>
+            )}
+            {lavadores.map(t => (
+              <button key={t.id} onClick={() => setTecnicoSel(tecnicoSel?.id === t.id ? null : t)} style={{
+                padding: "8px 12px", borderRadius: 9, cursor: "pointer", fontSize: 12, fontWeight: 700,
+                border: tecnicoSel?.id === t.id ? `2px solid ${C.blue}` : `1px solid ${C.border}`,
+                background: tecnicoSel?.id === t.id ? "#eff6ff" : "#fff", color: C.text,
+              }}>👤 {t.nombre}</button>
+            ))}
+          </div>
+
           <button onClick={registrar} disabled={saving} style={{ ...sBtn, width: "100%", background: C.green, fontSize: 15, padding: "12px" }}>
             {saving ? "Registrando..." : "🚿 Registrar entrada de lavado"}
           </button>
@@ -282,6 +306,9 @@ export default function CarWashPage() {
                           <div style={{ fontWeight: 800, fontSize: 14 }}>{o.numero_orden || `LAV-${o.id}`} · {c?.nombre || "Cliente"}</div>
                           <div style={{ fontSize: 12, color: C.sub }}>{v ? [v.marca, v.modelo, v.placa].filter(Boolean).join(" ") : "Vehículo"}</div>
                           <div style={{ fontSize: 12, color: C.text, marginTop: 2 }}>{o.descripcion} · <b>{fmt(o.total)}</b></div>
+                          <div style={{ fontSize: 12, color: o.tecnico_asignado_id ? "#155e75" : C.sub, marginTop: 2 }}>
+                            👤 {o.tecnico_asignado_id && usuMap[o.tecnico_asignado_id] ? usuMap[o.tecnico_asignado_id].nombre : "Sin técnico asignado"}
+                          </div>
                         </div>
                         <div style={{ textAlign: "right" }}>
                           <span style={{ padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 700, background: enLavado ? "#ffedd5" : "#dcfce7", color: enLavado ? "#9a3412" : "#166534" }}>

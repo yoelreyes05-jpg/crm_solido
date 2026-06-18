@@ -13,7 +13,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria"] as const;
+const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria", "lavador"] as const;
 type RolEditable = (typeof ROLES_EDITABLES)[number];
 
 const ROL_META: Record<string, { label: string; icon: string; color: string; bg: string; border: string; desc: string }> = {
@@ -22,6 +22,7 @@ const ROL_META: Record<string, { label: string; icon: string; color: string; bg:
   tecnico:    { label: "Técnico",    icon: "🔧", color: "#065f46", bg: "#ecfdf5", border: "#34d399", desc: "Taller y diagnósticos" },
   almacen:    { label: "Almacén",    icon: "📦", color: "#7c3aed", bg: "#f5f3ff", border: "#a78bfa", desc: "Inventario y suplidores" },
   cafeteria:  { label: "Cafetería",  icon: "☕", color: "#9f3a20", bg: "#fff7ed", border: "#fb923c", desc: "Módulo de cafetería" },
+  lavador:    { label: "Lavador",    icon: "🚿", color: "#155e75", bg: "#ecfeff", border: "#67e8f9", desc: "Panel de lavados asignados" },
 };
 
 const ACCION_META: { key: Accion; label: string; trackOn: string; thumbShadow: string }[] = [
@@ -305,7 +306,7 @@ export default function PermisosPage() {
                   className="text-xs border border-gray-200 rounded-xl px-3 py-2 bg-white text-gray-600 focus:outline-none focus:ring-2 focus:ring-indigo-300 cursor-pointer"
                 >
                   <option value="">📋 Copiar desde…</option>
-                  {["secretaria", "tecnico", "almacen", "cafeteria"].filter(r => r !== rolActivo).map(r => (
+                  {["secretaria", "tecnico", "almacen", "cafeteria", "lavador"].filter(r => r !== rolActivo).map(r => (
                     <option key={r} value={r}>{ROL_META[r]?.icon} {ROL_META[r]?.label}</option>
                   ))}
                 </select>

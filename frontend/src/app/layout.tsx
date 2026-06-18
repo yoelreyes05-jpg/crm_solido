@@ -5,7 +5,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
 import AsistenteIA from "@/components/AsistenteIA";
-import { PERMISOS_DEFAULT, type PermisosConfig } from "@/lib/permisos";
+import { PERMISOS_DEFAULT, mergePermisos, type PermisosConfig } from "@/lib/permisos";
 
 // Mapeo de claves del sidebar → clave en el sistema de permisos (cuando difieren)
 const KEY_MAP: Record<string, string> = {
@@ -48,6 +48,7 @@ const MODULOS: Modulo[] = [
     items: [
       { href: "/taller",             icon: "👨‍🔧", label: "Mi Taller",           key: "taller",             iconBg: "linear-gradient(145deg,#78350f,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.7),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/carwash",            icon: "🚿", label: "Car Wash",            key: "carwash",            iconBg: "linear-gradient(145deg,#0c4a6e,#0ea5e9)", iconShadow: "0 4px 12px rgba(14,165,233,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/carwash/tecnico",    icon: "🧼", label: "Mis Lavados",         key: "mis_lavados",        iconBg: "linear-gradient(145deg,#155e75,#22d3ee)", iconShadow: "0 4px 12px rgba(34,211,238,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/aprobacion",         icon: "✅", label: "Aprobaciones",        key: "aprobacion",         iconBg: "linear-gradient(145deg,#065f46,#10b981)", iconShadow: "0 4px 12px rgba(16,185,129,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/vehiculos",          icon: "🚗", label: "Vehículos",           key: "vehiculos",          iconBg: "linear-gradient(145deg,#312e81,#6366f1)", iconShadow: "0 4px 12px rgba(99,102,241,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/ordenes",            icon: "🔧", label: "Órdenes de Trabajo",  key: "ordenes",            iconBg: "linear-gradient(145deg,#92400e,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
@@ -147,10 +148,9 @@ export default function RootLayout({ children }) {
     fetch(`${API}/permisos`)
       .then(r => r.ok ? r.json() : null)
       .then(data => {
-        if (data && typeof data === "object" && Object.keys(data).length > 0) {
-          setPermisosConfig(data as PermisosConfig);
-        }
-        // Si no hay config guardada, permisosConfig queda null → usa PERMISOS_DEFAULT
+        // Combinar lo guardado SOBRE los defaults para que módulos/roles nuevos
+        // (ej. carwash, lavador) siempre tengan su permiso por defecto.
+        setPermisosConfig(mergePermisos(data as Partial<PermisosConfig>));
       })
       .catch(() => {});
   }, [usuario]);

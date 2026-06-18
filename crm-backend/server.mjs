@@ -6527,7 +6527,7 @@ app.delete("/carwash/servicios/:id", async (req, res) => {
 // Crear orden de lavado (entra directo a EN_LAVADO, sin diagnóstico/reparación)
 app.post("/carwash", async (req, res) => {
   try {
-    const { cliente_id, vehiculo_id, servicio_id, servicio_nombre, precio, usuario_nombre } = req.body;
+    const { cliente_id, vehiculo_id, servicio_id, servicio_nombre, precio, usuario_nombre, tecnico_asignado_id } = req.body;
     if (!cliente_id || !vehiculo_id) return res.status(400).json({ error: "cliente_id y vehiculo_id son requeridos" });
     let nombre = servicio_nombre || null;
     let monto = (precio !== undefined && precio !== null && precio !== "") ? Number(precio) : null;
@@ -6543,6 +6543,7 @@ app.post("/carwash", async (req, res) => {
       tipo_orden:  "LAVADO",
       total:       Number(monto || 0),
     };
+    if (tecnico_asignado_id) payload.tecnico_asignado_id = Number(tecnico_asignado_id);
     const { data, error } = await supabase.from("ordenes_trabajo").insert([payload]).select();
     if (error) return res.status(400).json({ error: error.message });
     const orden = data[0];

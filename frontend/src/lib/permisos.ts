@@ -46,6 +46,7 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   // Servicios
   { key: "cafeteria",       label: "Cafetería",              descripcion: "POS de cafetería",                                     grupo: "Servicios" },
   { key: "carwash",         label: "Car Wash / Lavado",      descripcion: "Registro y cobro de lavados de vehículos",             grupo: "Servicios" },
+  { key: "mis_lavados",     label: "Mis Lavados",            descripcion: "Panel del técnico de lavado — vehículos asignados",     grupo: "Servicios" },
   // Administración
   { key: "mantenimiento",   label: "Mantenimiento",          descripcion: "Planes y alertas de mantenimiento preventivo",         grupo: "Admin"     },
   { key: "inteligencia",    label: "Inteligencia Predictiva",descripcion: "Análisis predictivo e inteligencia de negocios",       grupo: "Admin"     },
@@ -178,9 +179,53 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
   },
+
+  // Técnico de lavado — solo ve su panel de lavados asignados
+  lavador: {
+    recepcion:       NADA,
+    taller:          NADA,
+    diagnostico:     NADA,
+    reparacion:      NADA,
+    aprobacion:      NADA,
+    control_calidad: NADA,
+    entrega:         NADA,
+    clientes:        NADA,
+    vehiculos:       NADA,
+    ordenes:         NADA,
+    historial:       NADA,
+    inventario:      NADA,
+    suplidores:      NADA,
+    ventas:          NADA,
+    facturacion:     NADA,
+    contabilidad:    NADA,
+    cafeteria:       NADA,
+    carwash:         NADA,
+    mis_lavados:     OPERACION,
+    mantenimiento:   NADA,
+    inteligencia:    NADA,
+    usuarios:        NADA,
+    configuracion:   NADA,
+    permisos:        NADA,
+  },
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Combina la config guardada en el backend SOBRE los permisos por defecto.
+ * Así, módulos y roles nuevos agregados en el código (ej. carwash, lavador)
+ * siempre tienen un valor por defecto aunque exista una config previa guardada.
+ * Lo guardado tiene prioridad módulo por módulo.
+ */
+export function mergePermisos(saved?: Partial<PermisosConfig> | null): PermisosConfig {
+  const base: PermisosConfig = JSON.parse(JSON.stringify(PERMISOS_DEFAULT));
+  if (!saved || typeof saved !== "object") return base;
+  const out: PermisosConfig = { ...base };
+  for (const rol of Object.keys(saved)) {
+    out[rol] = { ...(base[rol] || {}), ...(saved[rol] || {}) } as PermisosRol;
+  }
+  return out;
+}
 
 /** Devuelve el mapa de permisos para un rol dado (con fallback a tecnico) */
 export function getPermisosRol(rol: string, config?: PermisosConfig): PermisosRol {

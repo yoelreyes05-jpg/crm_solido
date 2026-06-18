@@ -9,6 +9,7 @@ const ROLES = [
   { value: "tecnico",    label: "🔧 Técnico",            desc: "Órdenes de trabajo y Diagnósticos" },
   { value: "almacen",    label: "📦 Almacén",            desc: "Inventario, Suplidores, Ventas" },
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },
+  { value: "lavador",    label: "🚿 Lavador",            desc: "Solo su panel de lavados asignados" },
 ];
 
 const PERMISOS = {
@@ -17,6 +18,7 @@ const PERMISOS = {
   tecnico:    ["Órdenes", "Diagnósticos"],
   almacen:    ["Inventario", "Suplidores", "Ventas"],
   cafeteria:  ["Cafetería"],
+  lavador:    ["Mis Lavados"],
 };
 
 export default function UsuariosPage() {

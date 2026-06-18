@@ -570,14 +570,24 @@ export default function TallerPage() {
         padding: "14px 24px", display: "flex", alignItems: "center",
         justifyContent: "space-between", flexWrap: "wrap", gap: 12,
       }}>
-        <div>
-          <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>🔧 Mi Taller</h1>
-          <p style={{ margin: "3px 0 0", fontSize: 12, color: C.muted }}>
-            Centro operativo · {nombreTecnico} ·{" "}
-            <span style={{ color: C.yellow }}>
-              Actualizado {lastUpdate.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
-            </span>
-          </p>
+        <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+          <div>
+            <h1 style={{ margin: 0, fontSize: 20, fontWeight: 800 }}>🔧 Mi Taller</h1>
+            <p style={{ margin: "3px 0 0", fontSize: 12, color: C.muted }}>
+              Centro operativo · {nombreTecnico} ·{" "}
+              <span style={{ color: C.yellow }}>
+                Actualizado {lastUpdate.toLocaleTimeString("es-DO", { hour: "2-digit", minute: "2-digit" })}
+              </span>
+            </p>
+          </div>
+          {/* Nueva Recepción */}
+          <Link href="/recepcion">
+            <button style={{ background: C.green, color: "#fff", border: "none",
+              borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+              boxShadow: `0 2px 10px ${C.green}44` }}>
+              🚗 Nueva Recepción
+            </button>
+          </Link>
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* Toggle vista */}
@@ -591,14 +601,6 @@ export default function TallerPage() {
               borderRadius: 8, padding: "6px 14px", cursor: "pointer", fontSize: 13, fontWeight: 600 }}>
             ↻ Actualizar
           </button>
-          {/* Nueva Recepción */}
-          <Link href="/recepcion">
-            <button style={{ background: C.green, color: "#fff", border: "none",
-              borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-              boxShadow: `0 2px 10px ${C.green}44` }}>
-              🚗 Nueva Recepción
-            </button>
-          </Link>
         </div>
       </div>
 

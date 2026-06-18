@@ -33,6 +33,7 @@ export default function LoginPage() {
         tecnico:    "/ordenes",
         almacen:    "/inventario",
         cafeteria:  "/cafeteria",
+        lavador:    "/carwash/tecnico",
       };
       router.push(destinos[data.usuario.rol] || "/dashboard");
     } catch {
