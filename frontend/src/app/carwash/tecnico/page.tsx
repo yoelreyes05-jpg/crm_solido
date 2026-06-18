@@ -4,6 +4,16 @@ import { API_URL as API } from "@/config";
 
 const fmt = (n: any) => "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Tiempo transcurrido desde una fecha ISO → "MM:SS" o "HH:MM:SS"
+function elapsed(fromIso: string, nowMs: number) {
+  const start = new Date(fromIso).getTime();
+  let secs = Math.max(0, Math.floor((nowMs - start) / 1000));
+  const h = Math.floor(secs / 3600); secs -= h * 3600;
+  const m = Math.floor(secs / 60); const s = secs - m * 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return { texto: h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`, mins: Math.floor((nowMs - start) / 60000) };
+}
+
 const C = {
   bg: "#f5f7fb", card: "#fff", border: "#e5e7eb", text: "#111827", sub: "#6b7280",
   green: "#10b981", blue: "#2563eb", amber: "#d97706", cyan: "#0891b2",
@@ -17,6 +27,13 @@ export default function TecnicoLavadoPage() {
   const [loading, setLoading] = useState(true);
   const [marcando, setMarcando] = useState<number | null>(null);
   const [ultima, setUltima] = useState<Date>(new Date());
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Tick del cronómetro cada segundo
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   useEffect(() => {
     try { setUsuario(JSON.parse(localStorage.getItem("usuario") || "null")); } catch { /* noop */ }
@@ -91,6 +108,24 @@ export default function TecnicoLavadoPage() {
             {terminado ? "✓ LISTO" : "EN LAVADO"}
           </span>
         </div>
+
+        {!terminado && (() => {
+          const e = elapsed(o.created_at, now);
+          const col = e.mins >= 45 ? "#dc2626" : e.mins >= 25 ? "#d97706" : C.cyan;
+          return (
+            <div style={{
+              display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+              padding: "10px", marginBottom: 12, borderRadius: 12,
+              background: `${col}12`, border: `1px solid ${col}33`,
+            }}>
+              <span style={{ fontSize: 18 }}>⏱️</span>
+              <span style={{ fontSize: 28, fontWeight: 900, color: col, fontVariantNumeric: "tabular-nums", letterSpacing: 1 }}>
+                {e.texto}
+              </span>
+              <span style={{ fontSize: 12, color: C.sub, fontWeight: 600 }}>en lavado</span>
+            </div>
+          );
+        })()}
 
         {terminado ? (
           <div style={{ textAlign: "center", padding: "10px", background: "#f0fdf4", borderRadius: 12, color: "#166534", fontSize: 14, fontWeight: 700 }}>

@@ -4,12 +4,22 @@ import Link from "next/link";
 import { API_URL as API } from "@/config";
 
 const fmt = (n: any) => "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+// Tiempo transcurrido desde una fecha ISO → "MM:SS" o "HH:MM:SS"
+function elapsed(fromIso: string, nowMs: number) {
+  const start = new Date(fromIso).getTime();
+  let secs = Math.max(0, Math.floor((nowMs - start) / 1000));
+  const h = Math.floor(secs / 3600); secs -= h * 3600;
+  const m = Math.floor(secs / 60); const s = secs - m * 60;
+  const pad = (x: number) => String(x).padStart(2, "0");
+  return { texto: h > 0 ? `${h}:${pad(m)}:${pad(s)}` : `${pad(m)}:${pad(s)}`, mins: Math.floor((nowMs - start) / 60000) };
+}
 const METODOS = ["EFECTIVO", "TARJETA", "TRANSFERENCIA"];
 const NCF = [{ k: "B02", d: "Consumidor Final" }, { k: "B01", d: "Crédito Fiscal" }];
 
 const C = {
   bg: "#f5f7fb", card: "#fff", border: "#e5e7eb", text: "#111827", sub: "#6b7280",
-  green: "#10b981", blue: "#2563eb", amber: "#d97706", red: "#dc2626", input: "#fafafa",
+  green: "#10b981", blue: "#2563eb", amber: "#d97706", red: "#dc2626", cyan: "#0891b2", input: "#fafafa",
 };
 const sInput: any = { width: "100%", padding: "9px 12px", borderRadius: 8, border: `1px solid ${C.border}`, fontSize: 14, background: C.input, color: C.text, boxSizing: "border-box" };
 const sBtn: any = { padding: "9px 16px", borderRadius: 9, border: "none", cursor: "pointer", fontWeight: 700, fontSize: 13, background: C.blue, color: "#fff" };
@@ -23,6 +33,13 @@ export default function CarWashPage() {
   const [usuarios, setUsuarios] = useState<any[]>([]);
   const [tecnicoSel, setTecnicoSel] = useState<any>(null);
   const [loading, setLoading] = useState(false);
+  const [now, setNow] = useState<number>(Date.now());
+
+  // Tick del cronómetro cada segundo
+  useEffect(() => {
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, []);
 
   // Form
   const [busqCli, setBusqCli] = useState("");
@@ -317,6 +334,15 @@ export default function CarWashPage() {
                           <div style={{ marginTop: 4, fontSize: 11, fontWeight: 700, color: o.facturado ? C.green : C.amber }}>
                             {o.facturado ? "✓ Facturado" : "● Sin facturar"}
                           </div>
+                          {enLavado && (() => {
+                            const e = elapsed(o.created_at, now);
+                            const col = e.mins >= 45 ? C.red : e.mins >= 25 ? C.amber : C.cyan;
+                            return (
+                              <div style={{ marginTop: 4, fontSize: 14, fontWeight: 800, color: col, fontVariantNumeric: "tabular-nums" }}>
+                                ⏱️ {e.texto}
+                              </div>
+                            );
+                          })()}
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
