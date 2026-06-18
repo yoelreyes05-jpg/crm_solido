@@ -95,6 +95,7 @@ export default function Dashboard() {
   const [kpisGerente, setKpisGerente] = useState<any>(null);
   const [vinHoy,  setVinHoy]  = useState(0);
   const [cafeHoy, setCafeHoy] = useState<number|null>(null);
+  const [oper,    setOper]    = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [expandidas, setExpandidas] = useState<Record<string, boolean>>({});
 
@@ -112,13 +113,17 @@ export default function Dashboard() {
         fetch(`${API}/ordenes`),
         fetch(`${API}/api/predictivo/vin-historial`),
         fetch(`${API}/cafeteria/ventas?limit=200`),
+        fetch(`${API}/dashboard/operaciones`),
       ];
       if (esGerente) requests.push(fetch(`${API}/dashboard/kpis-gerente`));
 
-      const [sRes, oRes, vinRes, cafeRes, kRes] = await Promise.all(requests);
+      const [sRes, oRes, vinRes, cafeRes, operRes, kRes] = await Promise.all(requests);
       setStats(await sRes.json());
       const o = await oRes.json();
       setOrdenes(Array.isArray(o) ? o : []);
+
+      // Operaciones: ingresos por canal + tablero de lavados
+      try { setOper(await operRes.json()); } catch { setOper(null); }
 
       // VIN: contar consultas de hoy
       try {
@@ -176,6 +181,16 @@ export default function Dashboard() {
   const listos   = byFase["LISTO"]?.length || 0;
   const enTaller = ordenes.filter(o => o.estado !== "ENTREGADO").length;
 
+  const money = (n: number) => "$" + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
+  // Tablero de lavados (car wash) por estado
+  const LAV_COLS = [
+    { key: "en_lavado", label: "En Lavado", icon: "🚿", color: "#0891b2", light: "#ecfeff" },
+    { key: "listo",     label: "Listo",     icon: "✅", color: "#10b981", light: "#ecfdf5" },
+    { key: "entregado", label: "Entregado", icon: "🏁", color: "#6b7280", light: "#f9fafb" },
+  ];
+  const lav = oper?.lavados || { en_lavado: [], listo: [], entregado: [] };
+
   if (loading) return (
     <div style={{ display:"flex", justifyContent:"center", alignItems:"center", height:"60vh", fontSize:18, color:"#888" }}>
       Cargando dashboard...
@@ -227,13 +242,69 @@ export default function Dashboard() {
           { label:"👥 Clientes",    valor: stats?.clientes||0,              color:"#8b5cf6" },
           { label:"⚠️ Stock Bajo",  valor: stats?.stockBajo||0,             color: stats?.stockBajo > 0 ? "#ef4444" : "#6b7280" },
           { label:"🔎 VIN Hoy",     valor: vinHoy,                          color:"#7c3aed" },
-          ...(cafeHoy !== null ? [{ label:"☕ Café Hoy", valor: `$${cafeHoy.toLocaleString("es-DO",{minimumFractionDigits:2,maximumFractionDigits:2})}`, color:"#d97706" }] : []),
         ].map(k => (
           <div key={k.label} style={{ background:"#fff", borderRadius:14, padding:"18px 16px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", borderLeft:`5px solid ${k.color}` }}>
             <div style={{ fontSize:13, color:"#888", marginBottom:8, fontWeight:600 }}>{k.label}</div>
             <div style={{ fontSize:34, fontWeight:900, color:"#111" }}>{k.valor}</div>
           </div>
         ))}
+      </div>
+
+      {/* ── VENTAS DE HOY POR CANAL ── */}
+      <div style={S.section}>
+        <h2 style={S.sectionTitle}>💰 Ventas de Hoy por Canal</h2>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fit,minmax(190px,1fr))", gap:14 }}>
+          {[
+            { label:"☕ Cafetería POS", valor: oper?.cafeteriaHoy ?? cafeHoy ?? 0, color:"#d97706", href:"/cafeteria" },
+            { label:"🎓 Cursos",        valor: oper?.cursosHoy ?? 0,               color:"#7c3aed", href:"/capacitaciones" },
+            { label:"🚿 Car Wash",      valor: oper?.carwashHoy ?? 0,              color:"#0891b2", href:"/carwash" },
+            { label:"🧮 Total del Día",  valor: (Number(oper?.cafeteriaHoy)||0)+(Number(oper?.cursosHoy)||0)+(Number(oper?.carwashHoy)||0), color:"#10b981", href:"/contabilidad" },
+          ].map(k => (
+            <Link key={k.label} href={k.href} style={{ textDecoration:"none" }}>
+              <div style={{ background:"#fff", borderRadius:14, padding:"18px 16px", boxShadow:"0 2px 12px rgba(0,0,0,0.06)", borderLeft:`5px solid ${k.color}` }}>
+                <div style={{ fontSize:13, color:"#888", marginBottom:8, fontWeight:600 }}>{k.label}</div>
+                <div style={{ fontSize:26, fontWeight:900, color:"#111" }}>{money(Number(k.valor) || 0)}</div>
+              </div>
+            </Link>
+          ))}
+        </div>
+      </div>
+
+      {/* ── TABLERO DE LAVADOS (CAR WASH) ── */}
+      <div style={S.section}>
+        <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:14 }}>
+          <h2 style={{ ...S.sectionTitle, marginBottom:0 }}>🚿 Lavados — En Pantalla</h2>
+          <Link href="/carwash" style={{ fontSize:14, color:"#0891b2", fontWeight:600, textDecoration:"none" }}>Ir a Car Wash →</Link>
+        </div>
+        <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:12, alignItems:"start" }}>
+          {LAV_COLS.map(col => {
+            const items: any[] = lav[col.key] || [];
+            return (
+              <div key={col.key} style={{ background:"#fff", borderRadius:14, boxShadow:"0 2px 12px rgba(0,0,0,0.06)", overflow:"hidden", border:`1px solid ${col.color}22` }}>
+                <div style={{ padding:"10px 14px", background:col.light, borderBottom:`2px solid ${col.color}`, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span style={{ fontSize:13, fontWeight:800, color:"#111" }}>{col.icon} {col.label}</span>
+                  <span style={{ background:col.color, color:"#fff", borderRadius:"50%", minWidth:22, height:22, padding:"0 6px", display:"flex", alignItems:"center", justifyContent:"center", fontSize:11, fontWeight:800 }}>
+                    {items.length}
+                  </span>
+                </div>
+                <div style={{ padding:10, minHeight:60 }}>
+                  {items.length === 0 ? (
+                    <div style={{ textAlign:"center", color:"#ccc", fontSize:12, padding:"18px 4px", fontWeight:600 }}>Sin vehículos</div>
+                  ) : items.map(o => (
+                    <div key={o.id} style={{ border:"1px solid #f0f0f0", borderLeft:`3px solid ${col.color}`, borderRadius:10, padding:"9px 11px", marginBottom:8, background:"#fcfcfd" }}>
+                      <div style={{ fontSize:13, fontWeight:800, color:"#111" }}>{o.vehiculo_info}</div>
+                      <div style={{ fontSize:12, color:"#888" }}>{o.cliente_nombre}</div>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginTop:4 }}>
+                        <span style={{ fontSize:11, color:"#0891b2", fontWeight:700 }}>👤 {o.tecnico_nombre || "Sin técnico"}</span>
+                        <span style={{ fontSize:12, fontWeight:800, color:"#10b981" }}>{money(o.total)}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
 
       {/* ── KPIs GERENTE (C7) ── */}

@@ -2222,6 +2222,72 @@ app.get("/dashboard/stats", async (req, res) => {
   }
 });
 
+// GET /dashboard/operaciones — ingresos del día por canal (cafetería, cursos,
+// car wash) + tablero de lavados por estado (EN_LAVADO → LISTO → ENTREGADO).
+app.get("/dashboard/operaciones", async (req, res) => {
+  try {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0);
+    const hoyISO = hoy.toISOString();
+
+    const [cafeR, cursosR, lavadosR] = await Promise.all([
+      supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", hoyISO),
+      supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", hoyISO),
+      supabase.from("ordenes_trabajo")
+        .select("id, numero_orden, estado, descripcion, total, cliente_id, vehiculo_id, created_at, tecnico_asignado_id")
+        .eq("tipo_orden", "LAVADO").order("id", { ascending: false }).limit(200),
+    ]);
+
+    const cafeteriaHoy = (cafeR.data || []).reduce((s, v) => s + Number(v.total || 0), 0);
+    const cursosHoy    = (cursosR.data || []).reduce((s, p) => s + Number(p.monto || 0), 0);
+    const lavados = lavadosR.data || [];
+
+    // Resolver nombres de cliente, vehículo y técnico
+    const cliIds = [...new Set(lavados.map(o => o.cliente_id).filter(Boolean))];
+    const vehIds = [...new Set(lavados.map(o => o.vehiculo_id).filter(Boolean))];
+    const tecIds = [...new Set(lavados.map(o => o.tecnico_asignado_id).filter(Boolean))];
+    const [cliR, vehR, tecR] = await Promise.all([
+      cliIds.length ? supabase.from("clientes").select("id, nombre").in("id", cliIds) : Promise.resolve({ data: [] }),
+      vehIds.length ? supabase.from("vehiculos").select("id, marca, modelo, placa").in("id", vehIds) : Promise.resolve({ data: [] }),
+      tecIds.length ? supabase.from("usuarios").select("id, nombre").in("id", tecIds) : Promise.resolve({ data: [] }),
+    ]);
+    const cliMap = Object.fromEntries((cliR.data || []).map(c => [c.id, c.nombre]));
+    const vehMap = Object.fromEntries((vehR.data || []).map(v => [v.id, [v.marca, v.modelo, v.placa].filter(Boolean).join(" ")]));
+    const tecMap = Object.fromEntries((tecR.data || []).map(u => [u.id, u.nombre]));
+
+    const fmtLav = o => ({
+      id: o.id,
+      numero_orden: o.numero_orden || `LAV-${o.id}`,
+      estado: o.estado,
+      descripcion: o.descripcion,
+      total: Number(o.total || 0),
+      created_at: o.created_at,
+      cliente_nombre: cliMap[o.cliente_id] || "Cliente",
+      vehiculo_info: vehMap[o.vehiculo_id] || "Vehículo",
+      tecnico_nombre: tecMap[o.tecnico_asignado_id] || null,
+    });
+
+    const en_lavado = lavados.filter(o => o.estado === "EN_LAVADO").map(fmtLav);
+    const listo     = lavados.filter(o => o.estado === "LISTO").map(fmtLav);
+    const entregado = lavados
+      .filter(o => o.estado === "ENTREGADO" && new Date(o.created_at).getTime() >= hoy.getTime())
+      .map(fmtLav);
+
+    // Ingreso car wash de hoy: facturas de órdenes LAVADO creadas hoy
+    let carwashHoy = 0;
+    const lavadoIds = lavados.map(o => o.id);
+    if (lavadoIds.length) {
+      const { data: facs } = await supabase.from("facturas")
+        .select("total, created_at, orden_id").in("orden_id", lavadoIds)
+        .neq("estado", "ANULADA").gte("created_at", hoyISO);
+      carwashHoy = (facs || []).reduce((s, f) => s + Number(f.total || 0), 0);
+    }
+
+    res.json({ cafeteriaHoy, cursosHoy, carwashHoy, lavados: { en_lavado, listo, entregado } });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /dashboard/kpis-gerente — KPIs avanzados para el rol gerente (C7)
 app.get("/dashboard/kpis-gerente", async (req, res) => {
   try {

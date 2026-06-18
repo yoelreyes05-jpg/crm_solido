@@ -5,9 +5,20 @@ import { API_URL as API } from "@/config";
 
 const fmt = (n: any) => "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Convierte una fecha de la BD a milisegundos. Si viene SIN zona horaria
+// (p.ej. "2026-06-18 14:30:00"), se asume UTC para no desfasar el cronómetro.
+function fechaMs(fromIso: string): number {
+  let iso = String(fromIso || "").trim();
+  if (!iso) return NaN;
+  if (iso.includes(" ") && !iso.includes("T")) iso = iso.replace(" ", "T");
+  if (!/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
+  return new Date(iso).getTime();
+}
+
 // Tiempo transcurrido desde una fecha ISO → "MM:SS" o "HH:MM:SS"
 function elapsed(fromIso: string, nowMs: number) {
-  const start = new Date(fromIso).getTime();
+  const start = fechaMs(fromIso);
+  if (isNaN(start)) return { texto: "--:--", mins: 0 };
   let secs = Math.max(0, Math.floor((nowMs - start) / 1000));
   const h = Math.floor(secs / 3600); secs -= h * 3600;
   const m = Math.floor(secs / 60); const s = secs - m * 60;
@@ -129,12 +140,6 @@ export default function CarWashPage() {
       alert("🚿 Lavado registrado y en proceso.");
     } catch (e: any) { alert("Error de conexión: " + e.message); }
     setSaving(false);
-  };
-
-  const marcarListo = async (id: number) => {
-    const r = await fetch(`${API}/carwash/${id}/listo`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
-    if (!r.ok) { const e = await r.json().catch(() => ({})); alert(e.error || "No se pudo marcar listo"); return; }
-    cargar();
   };
 
   const facturar = async () => {
@@ -346,7 +351,11 @@ export default function CarWashPage() {
                         </div>
                       </div>
                       <div style={{ display: "flex", gap: 6, marginTop: 10, flexWrap: "wrap" }}>
-                        {enLavado && <button onClick={() => marcarListo(o.id)} style={{ ...sBtn, background: C.blue, padding: "6px 12px" }}>✓ Listo</button>}
+                        {enLavado && (
+                          <span style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "6px 12px", borderRadius: 9, fontSize: 12, fontWeight: 700, background: "#ecfeff", color: C.cyan, border: `1px solid #a5f3fc` }}>
+                            ⏳ Esperando al técnico
+                          </span>
+                        )}
                         {!o.facturado && <button onClick={() => { setFactModal(o); setFactForm({ metodo_pago: "EFECTIVO", ncf_tipo: "B02", itbis_aplica: false }); }} style={{ ...sBtn, background: C.amber, padding: "6px 12px" }}>💵 Cobrar / Facturar</button>}
                         <button onClick={() => entregar(o.id)} disabled={!listo || !o.facturado}
                           title={!o.facturado ? "Debe facturarse antes de entregar" : (!listo ? "Marca Listo primero" : "")}

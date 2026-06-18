@@ -4,9 +4,20 @@ import { API_URL as API } from "@/config";
 
 const fmt = (n: any) => "RD$ " + Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
+// Convierte una fecha de la BD a milisegundos. Si viene SIN zona horaria
+// (p.ej. "2026-06-18 14:30:00"), se asume UTC para no desfasar el cronómetro.
+function fechaMs(fromIso: string): number {
+  let iso = String(fromIso || "").trim();
+  if (!iso) return NaN;
+  if (iso.includes(" ") && !iso.includes("T")) iso = iso.replace(" ", "T");
+  if (!/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(iso)) iso += "Z";
+  return new Date(iso).getTime();
+}
+
 // Tiempo transcurrido desde una fecha ISO → "MM:SS" o "HH:MM:SS"
 function elapsed(fromIso: string, nowMs: number) {
-  const start = new Date(fromIso).getTime();
+  const start = fechaMs(fromIso);
+  if (isNaN(start)) return { texto: "--:--", mins: 0 };
   let secs = Math.max(0, Math.floor((nowMs - start) / 1000));
   const h = Math.floor(secs / 3600); secs -= h * 3600;
   const m = Math.floor(secs / 60); const s = secs - m * 60;
