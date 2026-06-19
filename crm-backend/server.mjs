@@ -7487,6 +7487,22 @@ const IA_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "resumen_carwash",
+      description: "Estado del Car Wash / lavado de vehículos: cuántos están EN LAVADO, LISTOS y ENTREGADOS hoy, el técnico de lavado asignado y el ingreso del car wash de hoy. Úsalo para '¿cómo va el car wash?', '¿qué vehículos están en lavado?', '¿cuánto entró por lavados hoy?'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "ventas_por_canal",
+      description: "Ventas/ingresos de HOY desglosados por canal: cafetería (POS), cursos (capacitaciones) y car wash, más el total del día. Úsalo para '¿cuánto hemos vendido hoy?', 'ventas de cafetería', 'ingresos de cursos', 'ventas del car wash'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
 ];
 
 async function ejecutarHerramientaIA(nombre, args) {
@@ -7846,6 +7862,76 @@ async function ejecutarHerramientaIA(nombre, args) {
         };
       }
 
+      case "resumen_carwash": {
+        const hoyD = new Date(); hoyD.setHours(0, 0, 0, 0);
+        const { data: lavados } = await supabase.from("ordenes_trabajo")
+          .select("id, estado, descripcion, total, vehiculo_id, tecnico_asignado_id, fecha_entrega")
+          .eq("tipo_orden", "LAVADO").order("id", { ascending: false }).limit(200);
+        const lav = lavados || [];
+        const enLavado = lav.filter(o => o.estado === "EN_LAVADO");
+        const listos   = lav.filter(o => o.estado === "LISTO");
+        const entregadosHoy = lav.filter(o => o.estado === "ENTREGADO" && o.fecha_entrega && new Date(o.fecha_entrega) >= hoyD);
+
+        // Resolver vehículo y técnico para el detalle en proceso
+        const proceso = [...enLavado, ...listos];
+        const vehIds = [...new Set(proceso.map(o => o.vehiculo_id).filter(Boolean))];
+        const tecIds = [...new Set(proceso.map(o => o.tecnico_asignado_id).filter(Boolean))];
+        const [vR, tR] = await Promise.all([
+          vehIds.length ? supabase.from("vehiculos").select("id, marca, modelo, placa").in("id", vehIds) : Promise.resolve({ data: [] }),
+          tecIds.length ? supabase.from("usuarios").select("id, nombre").in("id", tecIds) : Promise.resolve({ data: [] }),
+        ]);
+        const vMap = {}; (vR.data || []).forEach(v => { vMap[v.id] = [v.marca, v.modelo, v.placa].filter(Boolean).join(" "); });
+        const tMap = {}; (tR.data || []).forEach(u => { tMap[u.id] = u.nombre; });
+
+        // Ingreso de car wash hoy (facturas de órdenes LAVADO creadas hoy)
+        let ingreso = 0;
+        const ids = lav.map(o => o.id);
+        if (ids.length) {
+          const { data: facs } = await supabase.from("facturas")
+            .select("total, created_at, orden_id").in("orden_id", ids)
+            .neq("estado", "ANULADA").gte("created_at", hoyD.toISOString());
+          ingreso = (facs || []).reduce((s, f) => s + Number(f.total || 0), 0);
+        }
+        return {
+          en_lavado: enLavado.length,
+          listos: listos.length,
+          entregados_hoy: entregadosHoy.length,
+          ingreso_carwash_hoy_RD: ingreso.toFixed(2),
+          detalle_en_proceso: proceso.slice(0, 15).map(o => ({
+            estado: o.estado,
+            vehiculo: vMap[o.vehiculo_id] || "—",
+            servicio: o.descripcion || "—",
+            tecnico: tMap[o.tecnico_asignado_id] || "Sin asignar",
+          })),
+        };
+      }
+
+      case "ventas_por_canal": {
+        const hoyD = new Date(); hoyD.setHours(0, 0, 0, 0);
+        const hoyISO = hoyD.toISOString();
+        const [cafeR, cursosR, lavadosR] = await Promise.all([
+          supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", hoyISO),
+          supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", hoyISO),
+          supabase.from("ordenes_trabajo").select("id").eq("tipo_orden", "LAVADO"),
+        ]);
+        const cafe   = (cafeR.data   || []).reduce((s, v) => s + Number(v.total || 0), 0);
+        const cursos = (cursosR.data || []).reduce((s, p) => s + Number(p.monto || 0), 0);
+        let carwash = 0;
+        const ids = (lavadosR.data || []).map(o => o.id);
+        if (ids.length) {
+          const { data: facs } = await supabase.from("facturas")
+            .select("total, created_at, orden_id").in("orden_id", ids)
+            .neq("estado", "ANULADA").gte("created_at", hoyISO);
+          carwash = (facs || []).reduce((s, f) => s + Number(f.total || 0), 0);
+        }
+        return {
+          cafeteria_pos_hoy_RD: cafe.toFixed(2),
+          cursos_hoy_RD: cursos.toFixed(2),
+          carwash_hoy_RD: carwash.toFixed(2),
+          total_hoy_RD: (cafe + cursos + carwash).toFixed(2),
+        };
+      }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -7877,6 +7963,12 @@ HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
 - ordenes_del_dia: órdenes de hoy o de una fecha
 - resumen_dashboard: estado general del taller (úsalo para "¿cómo va el taller?")
 - contabilidad_resumen: facturación del mes, cuentas por cobrar/pagar
+- resumen_carwash: estado del Car Wash / lavado (vehículos en lavado, listos, entregados hoy, técnico asignado) e ingreso del car wash del día. Úsalo para "¿cómo va el car wash?", "¿qué vehículos están en lavado?".
+- ventas_por_canal: ventas/ingresos de HOY por canal — cafetería (POS), cursos (capacitaciones) y car wash — más el total del día. Úsalo para "¿cuánto vendimos hoy?", "ventas de cafetería/cursos/car wash".
+
+CONTEXTO DE MÓDULOS (novedades):
+- El taller ahora tiene un carril rápido de CAR WASH (lavado de vehículos) con estados EN_LAVADO → LISTO → ENTREGADO. El lavado lo registra recepción, lo marca LISTO el técnico de lavado (rol "lavador") y recepción lo cobra/entrega. No se entrega sin factura.
+- También se venden CURSOS (capacitaciones) y productos de CAFETERÍA (POS). Para ingresos del día por canal usa ventas_por_canal.
 
 REGLAS:
 1. SIEMPRE usa una herramienta — nunca respondas de memoria.
