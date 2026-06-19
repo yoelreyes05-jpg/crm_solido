@@ -26,6 +26,7 @@ export default function InteligenciaPage() {
 
   useEffect(() => {
     if (tab === "proyeccion")     cargarTab("proyeccion",     "/api/predictivo/proyeccion-ingresos");
+    if (tab === "canales")        cargarTab("canales",        "/api/predictivo/ingresos-por-canal");
     if (tab === "inventario")     cargarTab("inventario",     "/api/predictivo/demanda-inventario");
     if (tab === "fallas")         cargarTab("fallas",         "/api/predictivo/fallas-por-modelo");
     if (tab === "clientes")       cargarTab("clientes",       "/api/predictivo/clientes-riesgo");
@@ -36,6 +37,7 @@ export default function InteligenciaPage() {
 
   const TABS = [
     { key: "proyeccion",     label: "📈 Proyección" },
+    { key: "canales",        label: "💵 Ingresos por Canal" },
     { key: "inventario",     label: "📦 Inventario" },
     { key: "fallas",         label: "🔩 Fallas por Modelo" },
     { key: "clientes",       label: "📞 Llamar Clientes" },
@@ -65,6 +67,7 @@ export default function InteligenciaPage() {
 
       {/* CONTENIDO */}
       {tab === "proyeccion"     && <TabProyeccion      d={datos["proyeccion"]}     loading={loading["proyeccion"]}     />}
+      {tab === "canales"        && <TabIngresosCanal   d={datos["canales"]}        loading={loading["canales"]}        />}
       {tab === "inventario"     && <TabInventario      d={datos["inventario"]}     loading={loading["inventario"]}     />}
       {tab === "fallas"         && <TabFallas          d={datos["fallas"]}         loading={loading["fallas"]}         />}
       {tab === "clientes"       && <TabClientesRiesgo  d={datos["clientes"]}       loading={loading["clientes"]}       />}
@@ -132,6 +135,84 @@ function TabProyeccion({ d, loading }: { d: any; loading: boolean }) {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+// ─── Ingresos por Canal ───────────────────────────────────────────────────────
+function TabIngresosCanal({ d, loading }: { d: any; loading: boolean }) {
+  if (loading || !d) return <Spinner loading={loading} />;
+  const m = d.mes_actual || {};
+  const pct = d.variacion_pct;
+  const colores: Record<string, string> = {
+    "Taller": "#6366f1", "Car Wash": "#0891b2", "Cafetería": "#d97706", "Cursos": "#7c3aed",
+  };
+
+  return (
+    <div>
+      {/* KPIs principales */}
+      <div style={S.kpiRow}>
+        <KpiCard icon="🧮" label="Total del mes (todos los canales)" value={fmt(m.total)} color="#10b981" big />
+        <KpiCard icon={pct >= 0 ? "📈" : "📉"} label="Variación vs. mes anterior"
+          value={`${pct >= 0 ? "+" : ""}${pct}%`} color={pct >= 0 ? "#10b981" : "#ef4444"} />
+        <KpiCard icon="📅" label="Mes anterior" value={fmt(d.total_mes_anterior)} color="#f59e0b" />
+      </div>
+
+      {/* KPIs por canal */}
+      <div style={S.kpiRow}>
+        <KpiCard icon="🔧" label="Taller"    value={fmt(m.taller)}    color="#6366f1" />
+        <KpiCard icon="🚿" label="Car Wash"  value={fmt(m.carwash)}   color="#0891b2" />
+        <KpiCard icon="☕" label="Cafetería" value={fmt(m.cafeteria)} color="#d97706" />
+        <KpiCard icon="🎓" label="Cursos"    value={fmt(m.cursos)}    color="#7c3aed" />
+      </div>
+
+      {/* Distribución */}
+      <div style={S.card}>
+        <h3 style={S.cardTitle}>📊 Distribución de ingresos del mes</h3>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          {(d.desglose || []).map((x: any) => (
+            <div key={x.canal}>
+              <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13, marginBottom: 4 }}>
+                <span style={{ fontWeight: 700 }}>{x.canal}</span>
+                <span style={{ color: "#888" }}>{fmt(x.monto)} · {x.pct}%</span>
+              </div>
+              <div style={{ height: 10, background: "#f1f5f9", borderRadius: 5 }}>
+                <div style={{ height: "100%", width: `${x.pct}%`,
+                  background: colores[x.canal] || "#6366f1", borderRadius: 5, transition: "width .5s ease" }} />
+              </div>
+            </div>
+          ))}
+        </div>
+        {m.total === 0 && <p style={S.empty}>Aún no hay ingresos registrados este mes.</p>}
+      </div>
+
+      {/* Tendencia 30 días */}
+      {d.tendencia_30_dias && d.tendencia_30_dias.length > 0 && (
+        <div style={S.card}>
+          <h3 style={S.cardTitle}>📆 Ingresos totales — Últimos 30 días (todos los canales)</h3>
+          <div style={{ overflowX: "auto" }}>
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 4, height: 120, padding: "8px 0" }}>
+              {d.tendencia_30_dias.map((item: any) => {
+                const maxVal = Math.max(...d.tendencia_30_dias.map((x: any) => x.total));
+                const h = maxVal > 0 ? Math.max(4, (item.total / maxVal) * 100) : 4;
+                return (
+                  <div key={item.fecha} title={`${item.fecha}: ${fmt(item.total)}`}
+                    style={{ flex: 1, minWidth: 8, background: "#10b981",
+                      borderRadius: "3px 3px 0 0", height: `${h}%`, opacity: 0.85 }} />
+                );
+              })}
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", fontSize: 10, color: "#aaa" }}>
+              <span>{d.tendencia_30_dias[0]?.fecha}</span>
+              <span>{d.tendencia_30_dias[d.tendencia_30_dias.length - 1]?.fecha}</span>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <div style={{ background: "#eff6ff", borderRadius: 10, padding: "12px 16px", fontSize: 13, color: "#1e40af" }}>
+        💡 Reúne los cuatro canales del negocio: Taller y Car Wash (de facturas), Cafetería (POS) y Cursos (pagos de capacitaciones).
+      </div>
     </div>
   );
 }

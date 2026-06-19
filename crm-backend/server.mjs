@@ -5387,6 +5387,86 @@ app.get("/api/predictivo/proyeccion-ingresos", async (req, res) => {
   }
 });
 
+// GET /api/predictivo/ingresos-por-canal
+// Desglosa los ingresos del mes por canal: Taller, Car Wash, Cafetería y Cursos.
+app.get("/api/predictivo/ingresos-por-canal", async (req, res) => {
+  try {
+    const hoy = new Date();
+    const mesIni    = new Date(hoy.getFullYear(), hoy.getMonth(), 1).toISOString();
+    const mesAntIni = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1).toISOString();
+    const mesAntFin = new Date(hoy.getFullYear(), hoy.getMonth(), 0, 23, 59, 59).toISOString();
+    const desde30   = new Date(); desde30.setDate(desde30.getDate() - 29); desde30.setHours(0, 0, 0, 0);
+    const desde30ISO = desde30.toISOString();
+
+    // IDs de órdenes de lavado para separar Car Wash del Taller
+    const { data: lavOrd } = await supabase.from("ordenes_trabajo").select("id").eq("tipo_orden", "LAVADO");
+    const lavSet = new Set((lavOrd || []).map(o => o.id));
+
+    const [
+      { data: facMes }, { data: facAnt }, { data: fac30 },
+      { data: cafMes }, { data: cafAnt }, { data: caf30 },
+      { data: curMes }, { data: curAnt }, { data: cur30 },
+    ] = await Promise.all([
+      supabase.from("facturas").select("total, orden_id, created_at").neq("estado", "CANCELADA").gte("created_at", mesIni),
+      supabase.from("facturas").select("total, orden_id, created_at").neq("estado", "CANCELADA").gte("created_at", mesAntIni).lte("created_at", mesAntFin),
+      supabase.from("facturas").select("total, orden_id, created_at").neq("estado", "CANCELADA").gte("created_at", desde30ISO),
+      supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", mesIni),
+      supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", mesAntIni).lte("created_at", mesAntFin),
+      supabase.from("cafeteria_ventas").select("total, created_at").gte("created_at", desde30ISO),
+      supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", mesIni),
+      supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", mesAntIni).lte("created_at", mesAntFin),
+      supabase.from("capacitaciones_pagos").select("monto, created_at").gte("created_at", desde30ISO),
+    ]);
+
+    const splitFac = (arr) => {
+      let taller = 0, carwash = 0;
+      (arr || []).forEach(f => {
+        const v = Number(f.total || 0);
+        if (f.orden_id && lavSet.has(f.orden_id)) carwash += v; else taller += v;
+      });
+      return { taller, carwash };
+    };
+    const sum = (arr, k) => (arr || []).reduce((s, x) => s + Number(x[k] || 0), 0);
+
+    const mFac = splitFac(facMes);
+    const aFac = splitFac(facAnt);
+    const mes_actual = {
+      taller:    mFac.taller,
+      carwash:   mFac.carwash,
+      cafeteria: sum(cafMes, "total"),
+      cursos:    sum(curMes, "monto"),
+    };
+    mes_actual.total = mes_actual.taller + mes_actual.carwash + mes_actual.cafeteria + mes_actual.cursos;
+    const totalAnt = aFac.taller + aFac.carwash + sum(cafAnt, "total") + sum(curAnt, "monto");
+
+    // Tendencia: total por día (todos los canales) en los últimos 30 días
+    const porDia = {};
+    const add = (fecha, v) => { if (!fecha) return; const d = String(fecha).slice(0, 10); porDia[d] = (porDia[d] || 0) + Number(v || 0); };
+    (fac30 || []).forEach(f => add(f.created_at, f.total));
+    (caf30 || []).forEach(c => add(c.created_at, c.total));
+    (cur30 || []).forEach(p => add(p.created_at, p.monto));
+    const tendencia30 = Object.entries(porDia).sort((a, b) => a[0].localeCompare(b[0])).map(([fecha, total]) => ({ fecha, total }));
+
+    const desglose = [
+      { canal: "Taller",    monto: mes_actual.taller },
+      { canal: "Car Wash",  monto: mes_actual.carwash },
+      { canal: "Cafetería", monto: mes_actual.cafeteria },
+      { canal: "Cursos",    monto: mes_actual.cursos },
+    ].map(x => ({ ...x, pct: mes_actual.total > 0 ? Math.round(x.monto / mes_actual.total * 100) : 0 }))
+     .sort((a, b) => b.monto - a.monto);
+
+    res.json({
+      mes_actual,
+      total_mes_anterior: totalAnt,
+      variacion_pct: totalAnt > 0 ? Math.round(((mes_actual.total - totalAnt) / totalAnt) * 100) : 0,
+      tendencia_30_dias: tendencia30,
+      desglose,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // GET /api/predictivo/top-clientes
 app.get("/api/predictivo/top-clientes", async (req, res) => {
   try {
