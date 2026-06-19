@@ -105,6 +105,12 @@ export default function PantallaTV() {
   const byFase: Record<string, any[]> = {};
   for (const f of FASES)
     byFase[f.key] = ordenes.filter((o: any) => (o.estado || "RECIBIDO") === f.key);
+  // Entregado: solo los entregados en la última hora (desaparecen tras 1h de la
+  // entrega; la información NO se borra, sigue en la base de datos e historial).
+  const ahoraMs = Date.now();
+  byFase["ENTREGADO"] = (byFase["ENTREGADO"] || []).filter((o: any) =>
+    o.fecha_entrega && (ahoraMs - new Date(o.fecha_entrega).getTime()) <= ENTREGADO_VENTANA_MS
+  );
   const activas = ordenes.filter((o: any) => o.estado !== "ENTREGADO");
   const listos  = byFase["LISTO"]?.length || 0;
 
