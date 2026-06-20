@@ -40,6 +40,7 @@ const MODULOS: Modulo[] = [
     id: "clientes_usuarios", label: "Gestión de Clientes", icon: "👥", color: "#10b981",
     items: [
       { href: "/clientes",  icon: "👤", label: "Clientes",  key: "clientes",  iconBg: "linear-gradient(145deg,#065f46,#10b981)", iconShadow: "0 4px 12px rgba(16,185,129,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/fidelizacion", icon: "🎁", label: "Fidelización", key: "fidelizacion", iconBg: "linear-gradient(145deg,#4c1d95,#a855f7)", iconShadow: "0 4px 12px rgba(168,85,247,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/usuarios",  icon: "👥", label: "Usuarios",  key: "usuarios",  iconBg: "linear-gradient(145deg,#1f2937,#6b7280)", iconShadow: "0 4px 12px rgba(107,114,128,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
     ],
   },

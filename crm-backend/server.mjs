@@ -2637,6 +2637,9 @@ app.post("/facturas", async (req, res) => {
       }]);
     }
 
+    // 🎁 Fidelización: acumular puntos de la factura (si el programa está activo)
+    if (cliente_id) await acumularPuntos(cliente_id, subtotal, "taller", facturaId, `Factura ${ncf}`);
+
     res.json(factura[0]);
   } catch (err) {
     console.error("Error creando factura:", err);
@@ -6738,6 +6741,136 @@ app.post("/carwash/:id/listo", async (req, res) => {
 });
 
 // Facturar (cobrar) un lavado — genera factura enlazada a la orden
+// ============================================================================
+// 🎁 FIDELIZACIÓN (Club Sólido) — puntos multicanal con interruptor on/off
+// ============================================================================
+let _fidelCache = { data: null, ts: 0 };
+async function getFidelizacionConfig() {
+  try {
+    if (_fidelCache.data && Date.now() - _fidelCache.ts < 15000) return _fidelCache.data;
+    const { data } = await supabase.from("fidelizacion_config").select("*").eq("id", 1).maybeSingle();
+    const cfg = data || { activo: false, rd_por_punto: 100, valor_punto: 1, vencimiento_meses: 12, nivel_plata: 10000, nivel_oro: 30000, nivel_platino: 75000 };
+    _fidelCache = { data: cfg, ts: Date.now() };
+    return cfg;
+  } catch (e) { return { activo: false, rd_por_punto: 100, valor_punto: 1, nivel_plata: 10000, nivel_oro: 30000, nivel_platino: 75000 }; }
+}
+function calcularNivel(gasto, cfg) {
+  const g = Number(gasto || 0);
+  if (g >= Number(cfg.nivel_platino)) return "PLATINO";
+  if (g >= Number(cfg.nivel_oro))     return "ORO";
+  if (g >= Number(cfg.nivel_plata))   return "PLATA";
+  return "BRONCE";
+}
+// Acumula puntos si el programa está activo. Best-effort: nunca lanza ni bloquea.
+async function acumularPuntos(clienteId, monto, origen, refId = null, descripcion = null) {
+  try {
+    if (!clienteId || !monto || Number(monto) <= 0) return null;
+    const cfg = await getFidelizacionConfig();
+    if (!cfg.activo) return null;
+    const rdPorPunto = Number(cfg.rd_por_punto) || 100;
+    const puntos = Math.floor(Number(monto) / rdPorPunto);
+    if (puntos <= 0) return null;
+    await supabase.from("puntos_movimientos").insert([{
+      cliente_id: clienteId, puntos, tipo: "GANADO", origen,
+      ref_id: refId, descripcion: descripcion || `Puntos por ${origen}`,
+    }]);
+    const { data: cf } = await supabase.from("cliente_fidelizacion").select("*").eq("cliente_id", clienteId).maybeSingle();
+    const saldo = (cf?.saldo_puntos || 0) + puntos;
+    const hist  = (cf?.puntos_historicos || 0) + puntos;
+    const gasto = Number(cf?.gasto_acumulado || 0) + Number(monto);
+    const nivel = calcularNivel(gasto, cfg);
+    if (cf) {
+      await supabase.from("cliente_fidelizacion").update({ saldo_puntos: saldo, puntos_historicos: hist, gasto_acumulado: gasto, nivel, updated_at: new Date().toISOString() }).eq("cliente_id", clienteId);
+    } else {
+      await supabase.from("cliente_fidelizacion").insert([{ cliente_id: clienteId, saldo_puntos: saldo, puntos_historicos: hist, gasto_acumulado: gasto, nivel }]);
+    }
+    return { puntos_ganados: puntos, saldo, nivel };
+  } catch (e) { console.error("acumularPuntos:", e.message); return null; }
+}
+
+// Config — leer / actualizar (incluye el interruptor activo)
+app.get("/fidelizacion/config", async (req, res) => {
+  const cfg = await getFidelizacionConfig();
+  res.json(cfg);
+});
+app.post("/fidelizacion/config", async (req, res) => {
+  try {
+    const campos = ["activo", "rd_por_punto", "valor_punto", "vencimiento_meses", "nivel_plata", "nivel_oro", "nivel_platino"];
+    const payload = { id: 1, updated_at: new Date().toISOString() };
+    for (const c of campos) if (req.body[c] !== undefined) payload[c] = req.body[c];
+    const { data, error } = await supabase.from("fidelizacion_config").upsert(payload, { onConflict: "id" }).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    _fidelCache = { data: null, ts: 0 };
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Lista de clientes con su fidelización (saldo, nivel) + datos de contacto
+app.get("/fidelizacion/clientes", async (req, res) => {
+  try {
+    const { data: cf } = await supabase.from("cliente_fidelizacion").select("*").order("saldo_puntos", { ascending: false }).limit(500);
+    const ids = (cf || []).map(c => c.cliente_id);
+    let cMap = {};
+    if (ids.length) {
+      const { data: cls } = await supabase.from("clientes").select("id, nombre, telefono").in("id", ids);
+      (cls || []).forEach(c => { cMap[c.id] = c; });
+    }
+    const cfg = await getFidelizacionConfig();
+    const clientes = (cf || []).map(f => ({
+      ...f,
+      nombre:   cMap[f.cliente_id]?.nombre || "Cliente",
+      telefono: cMap[f.cliente_id]?.telefono || null,
+      valor_rd: Number(f.saldo_puntos) * Number(cfg.valor_punto || 1),
+    }));
+    res.json({ config: cfg, clientes });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Detalle de un cliente: saldo + últimos movimientos
+app.get("/fidelizacion/cliente/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const [{ data: cf }, { data: movs }, cfg] = await Promise.all([
+      supabase.from("cliente_fidelizacion").select("*").eq("cliente_id", id).maybeSingle(),
+      supabase.from("puntos_movimientos").select("*").eq("cliente_id", id).order("created_at", { ascending: false }).limit(50),
+      getFidelizacionConfig(),
+    ]);
+    res.json({ fidelizacion: cf || { cliente_id: id, saldo_puntos: 0, nivel: "BRONCE", gasto_acumulado: 0 }, movimientos: movs || [], config: cfg });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Canjear puntos (resta del saldo)
+app.post("/fidelizacion/canjear", async (req, res) => {
+  try {
+    const { cliente_id, puntos, descripcion, ref_id } = req.body;
+    const p = Number(puntos);
+    if (!cliente_id || !p || p <= 0) return res.status(400).json({ error: "cliente_id y puntos (>0) son requeridos." });
+    const { data: cf } = await supabase.from("cliente_fidelizacion").select("*").eq("cliente_id", cliente_id).maybeSingle();
+    if (!cf || (cf.saldo_puntos || 0) < p) return res.status(400).json({ error: "Saldo de puntos insuficiente." });
+    await supabase.from("puntos_movimientos").insert([{ cliente_id, puntos: -p, tipo: "CANJEADO", origen: "canje", ref_id: ref_id || null, descripcion: descripcion || "Canje de puntos" }]);
+    const saldo = (cf.saldo_puntos || 0) - p;
+    await supabase.from("cliente_fidelizacion").update({ saldo_puntos: saldo, updated_at: new Date().toISOString() }).eq("cliente_id", cliente_id);
+    const cfg = await getFidelizacionConfig();
+    res.json({ ok: true, saldo, valor_rd: saldo * Number(cfg.valor_punto || 1) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Ajuste manual de puntos (sumar o restar)
+app.post("/fidelizacion/ajuste", async (req, res) => {
+  try {
+    const { cliente_id, puntos, descripcion } = req.body;
+    const p = Number(puntos);
+    if (!cliente_id || !p) return res.status(400).json({ error: "cliente_id y puntos son requeridos." });
+    await supabase.from("puntos_movimientos").insert([{ cliente_id, puntos: p, tipo: "AJUSTE", origen: "manual", descripcion: descripcion || "Ajuste manual" }]);
+    const { data: cf } = await supabase.from("cliente_fidelizacion").select("*").eq("cliente_id", cliente_id).maybeSingle();
+    const saldo = Math.max(0, (cf?.saldo_puntos || 0) + p);
+    const hist  = (cf?.puntos_historicos || 0) + Math.max(0, p);
+    if (cf) await supabase.from("cliente_fidelizacion").update({ saldo_puntos: saldo, puntos_historicos: hist, updated_at: new Date().toISOString() }).eq("cliente_id", cliente_id);
+    else    await supabase.from("cliente_fidelizacion").insert([{ cliente_id, saldo_puntos: saldo, puntos_historicos: hist, nivel: "BRONCE" }]);
+    res.json({ ok: true, saldo });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/carwash/:id/facturar", async (req, res) => {
   try {
     const { id } = req.params;
@@ -6779,6 +6912,8 @@ app.post("/carwash/:id/facturar", async (req, res) => {
       notas: `Lavado: ${orden.descripcion || ""}`, creado_por: usuario_nombre || "Recepción", created_at: new Date(),
     }]).select().single();
     if (error) return res.status(400).json({ error: error.message });
+    // 🎁 Fidelización: acumular puntos del lavado (si el programa está activo)
+    if (orden.cliente_id) await acumularPuntos(orden.cliente_id, subtotal, "carwash", factura.id, `Lavado ${orden.numero_orden || ("LAV-" + orden.id)}`);
     res.json({ ok: true, factura });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
