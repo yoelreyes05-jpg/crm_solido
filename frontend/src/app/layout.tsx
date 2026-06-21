@@ -14,7 +14,6 @@ const KEY_MAP: Record<string, string> = {
 
 // Items con acceso fijo por rol — no configurables desde /permisos
 const ACCESO_FIJO: Record<string, string[]> = {
-  "dashboard": ["gerente", "secretaria", "tecnico", "almacen"],
   "pantalla":  ["gerente", "cafeteria"],
 };
 

@@ -23,6 +23,8 @@ export interface ModuloInfo {
 
 // ── Definición de todos los módulos del sistema ───────────────────────────────
 export const MODULOS_SISTEMA: ModuloInfo[] = [
+  // Inicio
+  { key: "dashboard",       label: "Dashboard",              descripcion: "Panel general, KPIs y estado del taller",              grupo: "Taller"    },
   // Flujo de taller
   { key: "recepcion",       label: "Recepción",              descripcion: "Wizard de entrada de vehículos",                      grupo: "Taller"    },
   { key: "taller",          label: "Mi Taller",              descripcion: "Cola de trabajo del técnico",                          grupo: "Taller"    },
@@ -75,6 +77,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
   gerente: Object.fromEntries(MODULOS_SISTEMA.map(m => [m.key, { ...TODO }])) as PermisosRol,
 
   secretaria: {
+    dashboard:       VER,
     recepcion:       OPERACION,
     taller:          VER,
     diagnostico:     VER,
@@ -103,6 +106,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
   },
 
   tecnico: {
+    dashboard:       NADA,
     recepcion:       NADA,
     taller:          OPERACION,
     diagnostico:     OPERACION,
@@ -130,6 +134,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
   },
 
   almacen: {
+    dashboard:       VER,
     recepcion:       NADA,
     taller:          VER,
     diagnostico:     NADA,
@@ -157,6 +162,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
   },
 
   cafeteria: {
+    dashboard:       NADA,
     recepcion:       NADA,
     taller:          NADA,
     diagnostico:     NADA,
@@ -184,6 +190,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
 
   // Técnico de lavado — solo ve su panel de lavados asignados
   lavador: {
+    dashboard:       NADA,
     recepcion:       NADA,
     taller:          NADA,
     diagnostico:     NADA,
