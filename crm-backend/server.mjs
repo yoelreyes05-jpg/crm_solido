@@ -691,16 +691,18 @@ async function registrarCompatibilidadesDeOrden(ordenId) {
 
 app.get("/vehiculos/catalogo", (req, res) => {
   res.json({
-    Toyota: ["Corolla", "Hilux", "Camry", "Venza", "RAV4", "4Runner", "Yaris"],
-    Honda: ["Civic", "Accord", "CR-V", "Fit"],
-    Nissan: ["Sentra", "Altima", "Versa", "Tiida", "Rougue", "Qashqui", "Frontier"],
-    Hyundai: ["Elantra", "Tucson", "Sonada", "Avante", "Santa Fe"],
-    Kia: ["Rio", "Sportage", "K5", "Sorento"],
-    Ford: ["F-150", "Explorer", "Scape", "Ranger"],
-    Chevrolet: ["Silverado", "Tahoe", "Spark"],
-    BMW: ["X5", "X3", "Serie 3"],
-    Volkswagen: ["Amarok", "Jetta", "Polo"],
-    Mercedes: ["C-Class", "E-Class", "GLC"],
+    Toyota: ["Corolla", "Camry", "Yaris", "Hilux", "RAV4", "4Runner", "Venza", "Tacoma", "Tundra", "Fortuner", "Land Cruiser", "Prado", "Highlander"],
+    Honda: ["Civic", "Accord", "City", "CR-V", "HR-V", "Pilot", "Fit"],
+    Hyundai: ["Accent", "Elantra", "Sonata", "Tucson", "Santa Fe", "Avante", "Palisade"],
+    Kia: ["Rio", "Forte", "K5", "Sportage", "Sorento", "Telluride"],
+    Nissan: ["Versa", "Sentra", "Altima", "X-Trail", "Pathfinder", "Frontier", "Tiida", "Rogue", "Qashqai"],
+    Mazda: ["Mazda 2", "Mazda 3", "Mazda 6", "CX-3", "CX-5", "CX-9"],
+    Mitsubishi: ["Lancer", "Mirage", "Montero Sport", "Outlander", "L200"],
+    Ford: ["Fiesta", "Focus", "Fusion", "Escape", "Explorer", "Ranger", "F-150"],
+    Chevrolet: ["Spark", "Aveo", "Cruze", "Malibu", "Equinox", "Tahoe", "Silverado"],
+    BMW: ["Serie 3", "Serie 5", "X1", "X3", "X5"],
+    Mercedes: ["Clase C", "Clase E", "GLC", "GLE", "Clase G"],
+    Volkswagen: ["Polo", "Jetta", "Passat", "Tiguan", "Amarok"],
     Jeep: ["Wrangler", "Grand Cherokee"],
     OTRO: ["Personalizado"]
   });
