@@ -3,6 +3,7 @@ import React, { useEffect, useState, useCallback, useRef, CSSProperties } from "
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { API_URL as API } from "@/config";
+import { usePermisos } from "@/lib/usePermisos";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 interface Orden {
@@ -127,6 +128,11 @@ export default function TallerPage() {
   const puedeAprobar  = ["gerente","secretaria","admin"].includes(rolUsuario);
   const puedeCalidad  = ["gerente","admin"].includes(rolUsuario);
   const puedeEntregar = ["gerente","secretaria","admin"].includes(rolUsuario);
+
+  // Permisos gestionables desde /permisos
+  const { puede } = usePermisos();
+  const puedeRecepcionar = puede("recepcion", "crear");   // botón Nueva Recepción
+  const puedeAvisarRetiro = puede("entrega", "ver");      // avisos de WhatsApp para retiro
 
   const showToast = (msg: string, tipo: "ok"|"err" = "ok") => {
     setToast({ msg, tipo });
@@ -475,7 +481,7 @@ export default function TallerPage() {
                   </div>
                 );
               })()}
-              {orden.cliente_telefono && (
+              {puedeAvisarRetiro && orden.cliente_telefono && (
                 <a
                   href={`https://wa.me/${(() => { const d = (orden.cliente_telefono||"").replace(/\D/g,""); return d.startsWith("1") ? d : "1"+d; })()}?text=${encodeURIComponent(`Hola ${orden.cliente_nombre}, le informamos que su ${orden.vehiculo_marca||""} ${orden.vehiculo_modelo||""} (placa ${orden.vehiculo_placa||""}) ya está listo para retirar en Sólido Auto Servicio.${monto > 0 ? ` Total a pagar: ${fmtDinero(monto)}.` : ""} ¡Le esperamos! 🔧`)}`}
                   target="_blank" rel="noopener noreferrer"
@@ -580,14 +586,16 @@ export default function TallerPage() {
               </span>
             </p>
           </div>
-          {/* Nueva Recepción */}
-          <Link href="/recepcion">
-            <button style={{ background: C.green, color: "#fff", border: "none",
-              borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700,
-              boxShadow: `0 2px 10px ${C.green}44` }}>
-              🚗 Nueva Recepción
-            </button>
-          </Link>
+          {/* Nueva Recepción — solo con permiso de recepción */}
+          {puedeRecepcionar && (
+            <Link href="/recepcion">
+              <button style={{ background: C.green, color: "#fff", border: "none",
+                borderRadius: 8, padding: "8px 16px", cursor: "pointer", fontSize: 13, fontWeight: 700,
+                boxShadow: `0 2px 10px ${C.green}44` }}>
+                🚗 Nueva Recepción
+              </button>
+            </Link>
+          )}
         </div>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           {/* Toggle vista */}
@@ -654,7 +662,7 @@ export default function TallerPage() {
                         {monto > 0 && <span style={{ color: C.green, fontWeight: 700, marginLeft: 6 }}>· {fmtDinero(monto)}</span>}
                       </div>
                     </div>
-                    {o.cliente_telefono && (
+                    {puedeAvisarRetiro && o.cliente_telefono && (
                       <a
                         href={`https://wa.me/${(() => { const d=(o.cliente_telefono||"").replace(/\D/g,""); return d.startsWith("1")?d:"1"+d; })()}?text=${encodeURIComponent(`Hola ${o.cliente_nombre}, su ${o.vehiculo_marca||""} ${o.vehiculo_modelo||""} (placa ${o.vehiculo_placa||""}) ya está listo para retirar en Sólido Auto Servicio.${monto>0?` Total: ${fmtDinero(monto)}.`:""} ¡Le esperamos! 🔧`)}`}
                         target="_blank" rel="noopener noreferrer" style={{ textDecoration: "none" }}
