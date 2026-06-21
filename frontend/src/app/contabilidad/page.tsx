@@ -259,18 +259,6 @@ function imprimirCuadre(c: Cuadre & { por_metodo?: any[] }) {
   </div>
 
 
-  ${section("Ventas del Taller",
-    row("💵 Efectivo",       fmt(ef)) +
-    row("💳 Tarjeta",        fmt(tar)) +
-    row("🏦 Transferencia",  fmt(tra)) +
-    (che > 0 ? row("🔖 Cheque",  fmt(che))  : "") +
-    (cre > 0 ? row("📋 Crédito", fmt(cre))  : "") +
-    `<div style="display:flex;justify-content:space-between;padding:8px 0;border-top:2px solid #6366f1;margin-top:4px;">
-       <span style="font-weight:800;">TOTAL VENTAS BRUTAS</span>
-       <span style="font-weight:800;font-size:15px;">${fmt(ventas_total)}</span>
-     </div>`
-  )}
-
   ${section("Egresos del Día", row("💸 Gastos caja chica (efectivo)", fmt(gastos), "#ef4444", true))}
 
   ${section("Cuadre Final — Neto por Método",
