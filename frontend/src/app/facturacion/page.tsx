@@ -323,6 +323,7 @@ export default function FacturaPage() {
   const [cobrando, setCobrando]         = useState<any>(null);
   const [cobroMetodo, setCobroMetodo]   = useState("EFECTIVO");
   const [cobrandoLoading, setCobrandoLoading] = useState(false);
+  const [montoRecibidoCobro, setMontoRecibidoCobro] = useState("");
 
   // ── Carga inicial ────────────────────────────────────────────────────────
   const fetchData = async () => {
@@ -752,10 +753,16 @@ export default function FacturaPage() {
   const abrirCobro = (f: any) => {
     setCobrando(f);
     setCobroMetodo(f.metodo_pago && f.metodo_pago !== "CREDITO" ? f.metodo_pago : "EFECTIVO");
+    setMontoRecibidoCobro("");
   };
+
+  const vueltoCobro = Number(montoRecibidoCobro || 0) - Number(cobrando?.total || 0);
 
   const confirmarCobro = async () => {
     if (!cobrando) return;
+    if (cobroMetodo === "EFECTIVO" && Number(montoRecibidoCobro) > 0 && vueltoCobro < 0) {
+      return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vueltoCobro).toFixed(2)}`);
+    }
     setCobrandoLoading(true);
     try {
       const res = await fetch(`${API}/facturas/${cobrando.id}/cobrar`, {
@@ -1781,6 +1788,28 @@ export default function FacturaPage() {
               <option value="TRANSFERENCIA">🏦 Transferencia</option>
               <option value="CHEQUE">📄 Cheque</option>
             </select>
+
+            {cobroMetodo === "EFECTIVO" && (
+              <div style={vueltoBx}>
+                <label style={labelS}>💵 Monto recibido (RD$)</label>
+                <input type="number" value={montoRecibidoCobro}
+                  onChange={e => setMontoRecibidoCobro(e.target.value)}
+                  placeholder="0.00"
+                  style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a", marginBottom: 0 }} />
+                {Number(montoRecibidoCobro) > 0 && (
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8,
+                    textAlign: "center",
+                    background: vueltoCobro >= 0 ? "#dcfce7" : "#fee2e2",
+                    color:      vueltoCobro >= 0 ? "#166534" : "#dc2626",
+                    fontWeight: 800, fontSize: 20 }}>
+                    {vueltoCobro >= 0
+                      ? `Vuelto: RD$ ${vueltoCobro.toFixed(2)}`
+                      : `Faltan: RD$ ${Math.abs(vueltoCobro).toFixed(2)}`}
+                  </div>
+                )}
+              </div>
+            )}
+
             <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
               <button onClick={confirmarCobro} disabled={cobrandoLoading}
                 style={{ flex: 1, padding: 12, background: "#16a34a", color: "#fff",
