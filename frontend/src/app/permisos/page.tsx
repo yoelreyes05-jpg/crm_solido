@@ -13,7 +13,7 @@ import {
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria", "lavador"] as const;
+const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria", "lavador", "vendedor"] as const;
 type RolEditable = (typeof ROLES_EDITABLES)[number];
 
 const ROL_META: Record<string, { label: string; icon: string; color: string; bg: string; border: string; desc: string }> = {
@@ -23,6 +23,7 @@ const ROL_META: Record<string, { label: string; icon: string; color: string; bg:
   almacen:    { label: "Almacén",    icon: "📦", color: "#7c3aed", bg: "#f5f3ff", border: "#a78bfa", desc: "Inventario y suplidores" },
   cafeteria:  { label: "Cafetería",  icon: "☕", color: "#9f3a20", bg: "#fff7ed", border: "#fb923c", desc: "Módulo de cafetería" },
   lavador:    { label: "Lavador",    icon: "🚿", color: "#155e75", bg: "#ecfeff", border: "#67e8f9", desc: "Panel de lavados asignados" },
+  vendedor:   { label: "Vendedor",   icon: "🛒", color: "#166534", bg: "#f0fdf4", border: "#4ade80", desc: "Crea clientes y emite facturas de piezas — no cobra" },
 };
 
 const ACCION_META: { key: Accion; label: string; trackOn: string; thumbShadow: string }[] = [

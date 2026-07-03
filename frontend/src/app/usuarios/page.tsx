@@ -10,6 +10,7 @@ const ROLES = [
   { value: "almacen",    label: "📦 Almacén",            desc: "Inventario, Suplidores, Ventas" },
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },
   { value: "lavador",    label: "🚿 Lavador",            desc: "Solo su panel de lavados asignados" },
+  { value: "vendedor",   label: "🛒 Vendedor",           desc: "Crea clientes y emite facturas de piezas (no cobra)" },
 ];
 
 const PERMISOS = {
@@ -19,6 +20,7 @@ const PERMISOS = {
   almacen:    ["Inventario", "Suplidores", "Ventas"],
   cafeteria:  ["Cafetería"],
   lavador:    ["Mis Lavados"],
+  vendedor:   ["Clientes", "Facturación (emitir, sin cobrar)"],
 };
 
 export default function UsuariosPage() {

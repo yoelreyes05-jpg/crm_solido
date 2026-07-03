@@ -2508,7 +2508,9 @@ app.post("/facturas", async (req, res) => {
     vehiculo_id,
     vehiculo_info,
     diagnostico_id,
-    notas
+    notas,
+    pendiente_cobro,
+    usuario_nombre
   } = req.body;
 
   if (!items || items.length === 0)
@@ -2549,13 +2551,19 @@ app.post("/facturas", async (req, res) => {
       cotizacion_id_resuelta = cotRow?.id || null;
     }
 
+    // Facturas "pendientes de cobro": el vendedor emite/despacha la pieza,
+    // pero no recibe el dinero. La secretaria cobra después con
+    // POST /facturas/:id/cobrar. No aplica junto con CRÉDITO (que ya es
+    // su propio flujo de cuenta por cobrar con el cliente).
+    const esPendienteCobro = !!pendiente_cobro && (metodo_pago || "EFECTIVO").toUpperCase() !== "CREDITO";
+
     const { data: factura, error: errFac } = await supabase
       .from("facturas")
       .insert([{
         ncf,
         ncf_tipo: tipo,
         ncf_vence: fechaVence.toISOString().split("T")[0],
-        estado: "ACTIVA",
+        estado: esPendienteCobro ? "PENDIENTE_COBRO" : "ACTIVA",
         cliente_id: cliente_id || null,
         cliente_nombre: cliente_nombre || "Consumidor Final",
         cliente_rnc: cliente_rnc || null,
@@ -2569,6 +2577,7 @@ app.post("/facturas", async (req, res) => {
         total,
         metodo_pago: metodo_pago || "EFECTIVO",
         notas: notas || null,
+        creado_por: usuario_nombre || null,
         created_at: new Date()
       }])
       .select();
@@ -2627,6 +2636,9 @@ app.post("/facturas", async (req, res) => {
         estado:            "PENDIENTE",
         created_by:        "Sistema (Factura)",
       }]);
+    } else if (esPendienteCobro) {
+      // Emitida/despachada, pero el dinero aún no entró a caja.
+      // La secretaria la cobra con POST /facturas/:id/cobrar.
     } else {
       // Solo registrar en caja si el pago es inmediato
       await supabase.from("caja_movimientos").insert([{
@@ -2657,6 +2669,51 @@ app.get("/facturas/:id/items", async (req, res) => {
   res.json({ factura, items: items || [] });
 });
 
+// POST /facturas/:id/cobrar — la secretaria (u otro rol con permiso) cobra
+// una factura que quedó PENDIENTE_COBRO (emitida/despachada por el vendedor
+// sin recibir el dinero). Registra el ingreso en caja recién ahora.
+app.post("/facturas/:id/cobrar", async (req, res) => {
+  const { id } = req.params;
+  const facId = parseInt(id, 10);
+  const { metodo_pago, usuario_nombre } = req.body;
+
+  try {
+    const { data: fac } = await supabase.from("facturas").select("*").eq("id", facId).single();
+    if (!fac) return res.status(404).json({ error: "Factura no encontrada" });
+    if (fac.estado !== "PENDIENTE_COBRO") {
+      return res.status(400).json({ error: "Esta factura no está pendiente de cobro." });
+    }
+
+    const metodoFinal = metodo_pago || fac.metodo_pago || "EFECTIVO";
+
+    const { data: updated, error: errUpd } = await supabase
+      .from("facturas")
+      .update({
+        estado: "ACTIVA",
+        metodo_pago: metodoFinal,
+        cobrado_por: usuario_nombre || null,
+        fecha_cobro: new Date().toISOString(),
+      })
+      .eq("id", facId)
+      .select();
+    if (errUpd) return res.status(400).json({ error: errUpd.message });
+
+    await supabase.from("caja_movimientos").insert([{
+      tipo: "INGRESO",
+      concepto: `Factura ${fac.ncf} — ${fac.cliente_nombre || "Consumidor Final"}`,
+      monto: fac.total,
+      metodo_pago: metodoFinal,
+      factura_id: facId,
+      created_at: new Date()
+    }]);
+
+    res.json({ ok: true, factura: updated[0] });
+  } catch (err) {
+    console.error("Error cobrando factura:", err);
+    res.status(500).json({ error: err.message || "Error interno" });
+  }
+});
+
 app.patch("/facturas/:id", async (req, res) => {
   const { id } = req.params;
   const facId = parseInt(id, 10);
@@ -2669,14 +2726,19 @@ app.patch("/facturas/:id", async (req, res) => {
       if (!fac) return res.json({ error: "Factura no encontrada" });
       if (fac.estado === "CANCELADA") return res.json({ error: "La factura ya está cancelada" });
 
+      // Si estaba PENDIENTE_COBRO, nunca se registró en caja ni se cobró
+      // realmente — solo se despachó la pieza. No hay nada que revertir en caja.
+      const eraPendienteCobro = fac.estado === "PENDIENTE_COBRO";
+
       // 2. Marcar como CANCELADA
       const { data: updated, error: errUpd } = await supabase
         .from("facturas").update({ estado: "CANCELADA" }).eq("id", facId).select();
       if (errUpd) return res.json({ error: errUpd.message });
 
-      // 3. Revertir movimiento de caja (solo si no era CRÉDITO — los créditos no tocan caja)
+      // 3. Revertir movimiento de caja (solo si no era CRÉDITO ni PENDIENTE_COBRO —
+      // ninguno de esos dos llegó a tocar caja)
       const metodo = (fac.metodo_pago || "EFECTIVO").toUpperCase();
-      if (metodo !== "CREDITO") {
+      if (metodo !== "CREDITO" && !eraPendienteCobro) {
         await supabase.from("caja_movimientos").insert([{
           tipo:        "EGRESO",
           concepto:    `Cancelación Factura ${fac.ncf} — ${fac.cliente_nombre || "Consumidor Final"}`,

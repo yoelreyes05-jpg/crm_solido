@@ -44,7 +44,7 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "suplidores",      label: "Suplidores",             descripcion: "Proveedores y compras",                                grupo: "Almacén"   },
   // Finanzas
   { key: "ventas",          label: "Ventas POS",             descripcion: "Punto de venta de repuestos",                          grupo: "Finanzas"  },
-  { key: "facturacion",     label: "Facturación",            descripcion: "Facturas con NCF dominicano",                          grupo: "Finanzas"  },
+  { key: "facturacion",     label: "Facturación",            descripcion: "Facturas con NCF dominicano. \"Aprobar\" = puede cobrar (recibir el pago) las facturas pendientes de cobro", grupo: "Finanzas"  },
   { key: "contabilidad",    label: "Contabilidad / Caja",    descripcion: "Cuadre de caja y caja chica",                          grupo: "Finanzas"  },
   // Servicios
   { key: "cafeteria",       label: "Cafetería",              descripcion: "POS de cafetería",                                     grupo: "Servicios" },
@@ -65,6 +65,10 @@ const OPERACION: PermisoModulo = { ver: true,  crear: true,  editar: true,  apro
 const APROBADOR: PermisoModulo = { ver: true,  crear: false, editar: false, aprobar: true,  eliminar: false };
 const VER:       PermisoModulo = { ver: true,  crear: false, editar: false, aprobar: false, eliminar: false };
 const NADA:      PermisoModulo = { ver: false, crear: false, editar: false, aprobar: false, eliminar: false };
+// Igual que OPERACION, pero además puede "aprobar". En el módulo Facturación,
+// "aprobar" se usa como el permiso de COBRAR (recibir el pago) una factura
+// que quedó pendiente de cobro (ver rol `vendedor`).
+const OPERACION_COBRO: PermisoModulo = { ver: true, crear: true, editar: true, aprobar: true, eliminar: false };
 
 // ── Tipo del mapa de permisos por rol ────────────────────────────────────────
 export type PermisosRol    = Record<string, PermisoModulo>;
@@ -93,7 +97,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     inventario:      VER,
     suplidores:      NADA,
     ventas:          NADA,
-    facturacion:     OPERACION,
+    facturacion:     OPERACION_COBRO,
     contabilidad:    OPERACION,
     cafeteria:       NADA,
     carwash:         OPERACION,
@@ -215,6 +219,39 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+  },
+
+  // Vendedor — crea el cliente y emite/despacha la factura de una pieza,
+  // pero NO cobra. La secretaria cobra después desde "Por Cobrar" en
+  // Facturación. Ajustable desde /permisos.
+  vendedor: {
+    dashboard:       NADA,
+    recepcion:       NADA,
+    taller:          NADA,
+    diagnostico:     NADA,
+    reparacion:      NADA,
+    aprobacion:      NADA,
+    control_calidad: NADA,
+    entrega:         NADA,
+    clientes:        OPERACION,
+    vehiculos:       OPERACION,
+    ordenes:         NADA,
+    historial:       NADA,
+    fidelizacion:    NADA,
+    inventario:      VER,
+    suplidores:      NADA,
+    ventas:          NADA,
+    facturacion:     OPERACION,
+    contabilidad:    NADA,
+    cafeteria:       NADA,
+    carwash:         NADA,
+    mis_lavados:     NADA,
+    mantenimiento:   NADA,
+    inteligencia:    NADA,
+    usuarios:        NADA,
+    configuracion:   NADA,
+    permisos:        NADA,
+    capacitaciones:  NADA,
   },
 };
 

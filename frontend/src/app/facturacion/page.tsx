@@ -3,6 +3,7 @@ import { useEffect, useState, useRef } from "react";
 import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
+import { usePermisos } from "@/lib/usePermisos";
 
 // ─── DATOS EMPRESA ─────────────────────────────────────────────────────────
 // Los datos se cargan dinámicamente desde Configuración via useEmpresa().
@@ -57,6 +58,8 @@ function generarHTML(
     ? `<div style="background:#fefce8;border:2px solid #eab308;color:#854d0e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">📄 COTIZACIÓN — Válida por 15 días</div>`
     : factura.estado === "CANCELADA"
     ? `<div style="background:#fee2e2;border:2px solid #dc2626;color:#dc2626;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">⚠️ FACTURA CANCELADA</div>`
+    : factura.estado === "PENDIENTE_COBRO"
+    ? `<div style="background:#fef3c7;border:2px solid #d97706;color:#92400e;text-align:center;padding:12px;font-size:18px;font-weight:900;border-radius:8px;margin:16px 0;">🕒 PENDIENTE DE COBRO — Presentar en caja para pagar</div>`
     : "";
 
   // ✅ FIX EDGE/CHROME PRINT: botón manual + autoprint con delay robusto.
@@ -260,6 +263,11 @@ const NCF_REQUIERE_RNC = ["B01", "B14", "B15"];
 // ═══════════════════════════════════════════════════════════════════════════
 export default function FacturaPage() {
   const EMPRESA = useEmpresa(); // datos dinámicos desde Configuración
+  // "aprobar" en el módulo facturación = permiso de COBRAR (recibir el pago).
+  // Quien no lo tiene (ej. rol vendedor) solo puede emitir/despachar la
+  // factura; queda "pendiente de cobro" hasta que alguien con este permiso
+  // (ej. secretaria) la cobre desde la pestaña "Por Cobrar".
+  const { usuario, puedeAprobar: puedeCobrar } = usePermisos("facturacion");
   const [clientes, setClientes]         = useState<any[]>([]);
   const [vehiculos, setVehiculos]       = useState<any[]>([]);
   const [items, setItems]               = useState<any[]>([]);
@@ -311,6 +319,10 @@ export default function FacturaPage() {
   const [busCot, setBusCot]             = useState("");
   const [busCanceladas, setBusCanceladas] = useState("");
   const [convirtiendo, setConvirtiendo] = useState<number | null>(null);
+  const [busPendientes, setBusPendientes] = useState("");
+  const [cobrando, setCobrando]         = useState<any>(null);
+  const [cobroMetodo, setCobroMetodo]   = useState("EFECTIVO");
+  const [cobrandoLoading, setCobrandoLoading] = useState(false);
 
   // ── Carga inicial ────────────────────────────────────────────────────────
   const fetchData = async () => {
@@ -616,7 +628,7 @@ export default function FacturaPage() {
     if (NCF_REQUIERE_RNC.includes(ncfTipo) && !rncEfectivo) {
       return alert(`El tipo NCF ${ncfTipo} requiere RNC/Cédula del cliente. Por favor ingrésalo.`);
     }
-    if (method !== "MIXTO" && Number(montoRecibido) > 0 && vuelto < 0)
+    if (puedeCobrar && method !== "MIXTO" && Number(montoRecibido) > 0 && vuelto < 0)
       return alert(`Monto insuficiente. Faltan RD$ ${Math.abs(vuelto).toFixed(2)}`);
 
     setLoading(true);
@@ -650,7 +662,11 @@ export default function FacturaPage() {
         cliente_rnc:    rncEfectivo,
         vehiculo_id:    vehiculoId ? Number(vehiculoId) : null,
         vehiculo_info:  veh ? `${veh.marca} ${veh.modelo} · Placa: ${veh.placa}` : null,
-        diagnostico_id: diagCargado || null
+        diagnostico_id: diagCargado || null,
+        // Si este usuario no puede cobrar (ej. rol vendedor), la factura se
+        // despacha/emite pero queda pendiente de cobro para la secretaria.
+        pendiente_cobro: !puedeCobrar,
+        usuario_nombre:  usuario?.nombre || null
       };
 
       const res  = await fetch(`${API}/facturas`, {
@@ -709,7 +725,9 @@ export default function FacturaPage() {
   };
 
   const cancelarFactura = async (fac: any) => {
-    const msg = `¿Cancelar FAC-${String(fac.id).padStart(5,"0")} (${fac.ncf})?\n\nEsto revertirá:\n• El movimiento de caja asociado\n• El stock de los repuestos vendidos\n• La cuenta por cobrar (si aplica)\n\nEl NCF queda anulado — no se puede reutilizar.`;
+    const msg = fac.estado === "PENDIENTE_COBRO"
+      ? `¿Cancelar FAC-${String(fac.id).padStart(5,"0")} (${fac.ncf})?\n\nComo aún no se había cobrado, esto revertirá:\n• El stock de los repuestos despachados\n\nEl NCF queda anulado — no se puede reutilizar.`
+      : `¿Cancelar FAC-${String(fac.id).padStart(5,"0")} (${fac.ncf})?\n\nEsto revertirá:\n• El movimiento de caja asociado\n• El stock de los repuestos vendidos\n• La cuenta por cobrar (si aplica)\n\nEl NCF queda anulado — no se puede reutilizar.`;
     if (!confirm(msg)) return;
     const res = await fetch(`${API}/facturas/${fac.id}`, {
       method: "PATCH",
@@ -730,6 +748,29 @@ export default function FacturaPage() {
     fetchData();
   };
 
+  // ── Cobrar una factura pendiente de cobro ─────────────────────────────────
+  const abrirCobro = (f: any) => {
+    setCobrando(f);
+    setCobroMetodo(f.metodo_pago && f.metodo_pago !== "CREDITO" ? f.metodo_pago : "EFECTIVO");
+  };
+
+  const confirmarCobro = async () => {
+    if (!cobrando) return;
+    setCobrandoLoading(true);
+    try {
+      const res = await fetch(`${API}/facturas/${cobrando.id}/cobrar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ metodo_pago: cobroMetodo, usuario_nombre: usuario?.nombre || null }),
+      });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setCobrando(null);
+      fetchData();
+    } catch { alert("Error al cobrar la factura"); }
+    finally { setCobrandoLoading(false); }
+  };
+
   const guardarEdicion = async () => {
     if (!modalFac) return;
     await fetch(`${API}/facturas/${modalFac.id}`, {
@@ -742,10 +783,18 @@ export default function FacturaPage() {
   };
 
   const facturasFiltradas = facturas.filter(f =>
-    f.estado !== "CANCELADA" && (
+    f.estado !== "CANCELADA" && f.estado !== "PENDIENTE_COBRO" && (
       !busHistorial ||
       f.cliente_nombre?.toLowerCase().includes(busHistorial.toLowerCase()) ||
       f.ncf?.toLowerCase().includes(busHistorial.toLowerCase())
+    )
+  );
+
+  const facturasPendientesCobro = facturas.filter(f =>
+    f.estado === "PENDIENTE_COBRO" && (
+      !busPendientes ||
+      f.cliente_nombre?.toLowerCase().includes(busPendientes.toLowerCase()) ||
+      f.ncf?.toLowerCase().includes(busPendientes.toLowerCase())
     )
   );
 
@@ -766,14 +815,16 @@ export default function FacturaPage() {
       <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
         {[
           { key: "nueva",       label: "➕ Nueva Factura / Cotización" },
-          { key: "historial",   label: `📋 Facturas (${facturas.filter((f:any) => f.estado !== "CANCELADA").length})` },
+          { key: "pendientes",  label: `🕒 Por Cobrar (${facturas.filter((f:any) => f.estado === "PENDIENTE_COBRO").length})`, alerta: facturas.some((f:any) => f.estado === "PENDIENTE_COBRO") },
+          { key: "historial",   label: `📋 Facturas (${facturas.filter((f:any) => f.estado !== "CANCELADA" && f.estado !== "PENDIENTE_COBRO").length})` },
           { key: "cotizaciones",label: `📄 Cotizaciones (${cotizaciones.length})` },
           { key: "canceladas",  label: `🚫 Canceladas (${facturas.filter((f:any) => f.estado === "CANCELADA").length})` },
         ].map(t => (
           <button key={t.key} onClick={() => setTab(t.key)}
             style={{ ...tabBtn,
-              background: tab === t.key ? "#111827" : "#fff",
-              color:      tab === t.key ? "#fff"    : "#111" }}>
+              background: tab === t.key ? "#111827" : (t as any).alerta ? "#fef3c7" : "#fff",
+              color:      tab === t.key ? "#fff"    : (t as any).alerta ? "#92400e" : "#111",
+              borderColor: tab !== t.key && (t as any).alerta ? "#fde68a" : "#ddd" }}>
             {t.label}
           </button>
         ))}
@@ -1340,25 +1391,34 @@ export default function FacturaPage() {
               </div>
             </div>
 
-            {/* VUELTO */}
-            <div style={vueltoBx}>
-              <label style={labelS}>💵 Monto recibido (RD$)</label>
-              <input type="number" value={montoRecibido}
-                onChange={e => setMontoRecibido(e.target.value)}
-                placeholder="0.00"
-                style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a" }} />
-              {Number(montoRecibido) > 0 && (
-                <div style={{ marginTop: 10, padding: 10, borderRadius: 8,
-                  textAlign: "center",
-                  background: vuelto >= 0 ? "#dcfce7" : "#fee2e2",
-                  color:      vuelto >= 0 ? "#166534" : "#dc2626",
-                  fontWeight: 800, fontSize: 20 }}>
-                  {vuelto >= 0
-                    ? `Vuelto: RD$ ${vuelto.toFixed(2)}`
-                    : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
-                </div>
-              )}
-            </div>
+            {/* VUELTO — solo para quien cobra en el momento */}
+            {puedeCobrar ? (
+              <div style={vueltoBx}>
+                <label style={labelS}>💵 Monto recibido (RD$)</label>
+                <input type="number" value={montoRecibido}
+                  onChange={e => setMontoRecibido(e.target.value)}
+                  placeholder="0.00"
+                  style={{ ...input, fontSize: 18, fontWeight: 700, borderColor: "#fde68a" }} />
+                {Number(montoRecibido) > 0 && (
+                  <div style={{ marginTop: 10, padding: 10, borderRadius: 8,
+                    textAlign: "center",
+                    background: vuelto >= 0 ? "#dcfce7" : "#fee2e2",
+                    color:      vuelto >= 0 ? "#166534" : "#dc2626",
+                    fontWeight: 800, fontSize: 20 }}>
+                    {vuelto >= 0
+                      ? `Vuelto: RD$ ${vuelto.toFixed(2)}`
+                      : `Faltan: RD$ ${Math.abs(vuelto).toFixed(2)}`}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ marginTop: 12, padding: 12, borderRadius: 8,
+                background: "#fef3c7", border: "1px solid #fde68a", color: "#92400e",
+                fontSize: 13, textAlign: "center", fontWeight: 600 }}>
+                🕒 Esta factura quedará <b>pendiente de cobro</b>. La pieza se despacha ahora;
+                la secretaria recibirá el pago después.
+              </div>
+            )}
 
             {/* BOTONES */}
             <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
@@ -1369,9 +1429,9 @@ export default function FacturaPage() {
               <button onClick={generarFactura}
                 disabled={loading || carrito.length === 0}
                 style={{ ...btnFacturar,
-                  background: carrito.length === 0 ? "#aaa" : "#10b981",
+                  background: carrito.length === 0 ? "#aaa" : (puedeCobrar ? "#10b981" : "#d97706"),
                   marginTop: 0, flex: 2 }}>
-                {loading ? "Procesando..." : "🖨️ Facturar"}
+                {loading ? "Procesando..." : (puedeCobrar ? "🖨️ Facturar" : "📤 Emitir factura (pendiente de cobro)")}
               </button>
             </div>
 
@@ -1384,6 +1444,66 @@ export default function FacturaPage() {
                 🔁 Reimprimir FAC-{String(ultimaFactura.factura.id).padStart(5, "0")}
               </button>
             )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ POR COBRAR ══════════════ */}
+      {tab === "pendientes" && (
+        <div style={card}>
+          <div style={{ display: "flex", justifyContent: "space-between",
+            alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 12 }}>
+            <div>
+              <h2 style={cardTitle}>🕒 Facturas Pendientes de Cobro</h2>
+              <p style={{ color: "#92400e", fontSize: 13, marginTop: -8, marginBottom: 8 }}>
+                Piezas ya despachadas / facturas emitidas que todavía no se han cobrado en caja.
+              </p>
+            </div>
+            <input placeholder="Buscar por cliente o NCF..."
+              value={busPendientes}
+              onChange={e => setBusPendientes(e.target.value)}
+              style={{ ...input, width: 280, marginBottom: 0 }} />
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={tableStyle}>
+              <thead>
+                <tr>
+                  {["Factura","NCF","Cliente","Método sugerido","Total","Emitida por","Fecha","Acciones"]
+                    .map(h => <th key={h} style={th}>{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {facturasPendientesCobro.map((f: any) => (
+                  <tr key={f.id}>
+                    <td style={td}><b>FAC-{String(f.id).padStart(5,"0")}</b></td>
+                    <td style={{ ...td, fontSize: 11, fontFamily: "monospace" }}>{f.ncf}</td>
+                    <td style={td}>{f.cliente_nombre}</td>
+                    <td style={td}>{f.metodo_pago}</td>
+                    <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(f.total).toFixed(2)}</td>
+                    <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{f.creado_por || "—"}</td>
+                    <td style={{ ...td, fontSize: 11 }}>
+                      {f.created_at ? new Date(f.created_at).toLocaleString("es-DO", { day:"numeric", month:"numeric", year:"2-digit", hour:"2-digit", minute:"2-digit", timeZone:"America/Santo_Domingo" }) : "—"}
+                    </td>
+                    <td style={td}>
+                      <div style={{ display: "flex", gap: 4 }}>
+                        <button onClick={() => reimprimirFactura(f)} style={btnAcc("#111827")} title="Reimprimir">🖨️</button>
+                        <button onClick={() => cancelarFactura(f)} style={btnAcc("#f59e0b")} title="Cancelar (anula el despacho de la pieza)">⛔</button>
+                        {puedeCobrar && (
+                          <button onClick={() => abrirCobro(f)} style={btnAcc("#16a34a")} title="Cobrar">💰 Cobrar</button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {facturasPendientesCobro.length === 0 && (
+                  <tr>
+                    <td colSpan={8} style={{ textAlign: "center", color: "#888", padding: 32 }}>
+                      ✅ No hay facturas pendientes de cobro
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}
@@ -1642,6 +1762,38 @@ export default function FacturaPage() {
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ MODAL COBRAR ══════════════ */}
+      {cobrando && (
+        <div style={overlay}>
+          <div style={modal}>
+            <h2 style={{ marginBottom: 4 }}>💰 Cobrar FAC-{String(cobrando.id).padStart(5, "0")}</h2>
+            <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 16 }}>
+              {cobrando.cliente_nombre} · Total RD$ {Number(cobrando.total).toFixed(2)}
+            </p>
+            <label style={labelS}>Método de pago recibido</label>
+            <select value={cobroMetodo} onChange={e => setCobroMetodo(e.target.value)} style={input}>
+              <option value="EFECTIVO">💵 Efectivo</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+              <option value="CHEQUE">📄 Cheque</option>
+            </select>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={confirmarCobro} disabled={cobrandoLoading}
+                style={{ flex: 1, padding: 12, background: "#16a34a", color: "#fff",
+                  borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700,
+                  opacity: cobrandoLoading ? 0.6 : 1 }}>
+                {cobrandoLoading ? "Procesando..." : "✅ Confirmar cobro"}
+              </button>
+              <button onClick={() => setCobrando(null)}
+                style={{ flex: 1, padding: 12, background: "#eee", borderRadius: 8,
+                  border: "none", cursor: "pointer" }}>
+                Cerrar
+              </button>
+            </div>
           </div>
         </div>
       )}

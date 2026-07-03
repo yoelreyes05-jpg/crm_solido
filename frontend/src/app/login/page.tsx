@@ -34,6 +34,7 @@ export default function LoginPage() {
         almacen:    "/inventario",
         cafeteria:  "/cafeteria",
         lavador:    "/carwash/tecnico",
+        vendedor:   "/facturacion",
       };
       router.push(destinos[data.usuario.rol] || "/dashboard");
     } catch {
