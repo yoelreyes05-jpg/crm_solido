@@ -10,6 +10,7 @@ import {
   type PermisoModulo,
   type PermisosConfig,
 } from "@/lib/permisos";
+import { auditHeaders } from "@/lib/audit";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -218,7 +219,7 @@ export default function PermisosPage() {
     try {
       const r = await fetch(`${API}/permisos`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify(config),
       });
       if (r.ok) showToast("Permisos guardados correctamente", "ok");

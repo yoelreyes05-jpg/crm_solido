@@ -45,6 +45,7 @@ const MENU = [
   { href: "/usuarios",           icon: "👥", label: "Usuarios",             key: "usuarios"         },
   { href: "/configuracion",      icon: "⚙️", label: "Configuración",        key: "configuracion"    },
   { href: "/permisos",           icon: "🔐", label: "Permisos",             key: "permisos"         },
+  { href: "/auditoria",          icon: "🕵️", label: "Auditoría",            key: "auditoria"        },
   { href: "/asistente-correo",   icon: "✉️", label: "Asistente Correo",     key: "asistente-correo" },
 ];
 

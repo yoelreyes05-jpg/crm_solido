@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 
 import { API_URL as API } from "@/config";
+import { auditHeaders } from "@/lib/audit";
 
 const ROLES = [
   { value: "gerente",    label: "👑 Gerente",           desc: "Acceso total al sistema" },
@@ -46,7 +47,7 @@ export default function UsuariosPage() {
     try {
       const res = await fetch(`${API}/usuarios`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify(form)
       });
       const data = await res.json();
@@ -62,7 +63,7 @@ export default function UsuariosPage() {
     try {
       await fetch(`${API}/usuarios/${usuario.id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ activo: !usuario.activo })
       });
       fetchUsuarios();
@@ -73,7 +74,7 @@ export default function UsuariosPage() {
     try {
       await fetch(`${API}/usuarios/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ rol })
       });
       fetchUsuarios();
@@ -86,7 +87,7 @@ export default function UsuariosPage() {
     try {
       await fetch(`${API}/usuarios/${id}`, {
         method: "PATCH",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ password_hash: nueva })
       });
       alert("✅ Contraseña actualizada");
@@ -96,7 +97,7 @@ export default function UsuariosPage() {
   const eliminarUsuario = async (id, nombre) => {
     if (!confirm(`¿Eliminar al usuario "${nombre}"? Esta acción no se puede deshacer.`)) return;
     try {
-      await fetch(`${API}/usuarios/${id}`, { method: "DELETE" });
+      await fetch(`${API}/usuarios/${id}`, { method: "DELETE", headers: auditHeaders() });
       fetchUsuarios();
     } catch { alert("Error al eliminar"); }
   };

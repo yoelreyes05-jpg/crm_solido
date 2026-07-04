@@ -56,6 +56,7 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "usuarios",        label: "Usuarios",               descripcion: "Gestión de cuentas de usuario",                        grupo: "Admin"     },
   { key: "configuracion",   label: "Configuración",          descripcion: "Ajustes generales del sistema",                        grupo: "Admin"     },
   { key: "permisos",        label: "Permisos de Roles",      descripcion: "Gestión de acceso por rol",                            grupo: "Admin"     },
+  { key: "auditoria",       label: "Auditoría",              descripcion: "Registro de acciones sensibles (quién hizo qué y cuándo)", grupo: "Admin" },
   { key: "capacitaciones",  label: "Capacitaciones",         descripcion: "Cursos, alumnos, ingresos y tasas de deserción",       grupo: "Admin"     },
 ];
 

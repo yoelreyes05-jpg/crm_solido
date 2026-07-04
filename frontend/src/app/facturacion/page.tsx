@@ -4,6 +4,7 @@ import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 import { useEmpresa, getEmpresaSync } from "@/lib/empresa";
 import { usePermisos } from "@/lib/usePermisos";
+import { auditHeaders } from "@/lib/audit";
 
 // ─── DATOS EMPRESA ─────────────────────────────────────────────────────────
 // Los datos se cargan dinámicamente desde Configuración via useEmpresa().
@@ -732,7 +733,7 @@ export default function FacturaPage() {
     if (!confirm(msg)) return;
     const res = await fetch(`${API}/facturas/${fac.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auditHeaders() },
       body: JSON.stringify({ estado: "CANCELADA" })
     });
     const data = await res.json();
@@ -743,7 +744,7 @@ export default function FacturaPage() {
   const eliminarFactura = async (id: number, estado: string) => {
     if (estado !== "CANCELADA") return alert("Solo se pueden eliminar facturas ya CANCELADAS.\nCancela primero la factura.");
     if (!confirm(`¿Eliminar permanentemente el registro de FAC-${String(id).padStart(5,"0")}?\nEsta acción no se puede deshacer.`)) return;
-    const res = await fetch(`${API}/facturas/${id}`, { method: "DELETE" });
+    const res = await fetch(`${API}/facturas/${id}`, { method: "DELETE", headers: auditHeaders() });
     const data = await res.json();
     if (data.error) return alert("Error: " + data.error);
     fetchData();
@@ -767,7 +768,7 @@ export default function FacturaPage() {
     try {
       const res = await fetch(`${API}/facturas/${cobrando.id}/cobrar`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify({ metodo_pago: cobroMetodo, usuario_nombre: usuario?.nombre || null }),
       });
       const data = await res.json();
@@ -782,7 +783,7 @@ export default function FacturaPage() {
     if (!modalFac) return;
     await fetch(`${API}/facturas/${modalFac.id}`, {
       method: "PATCH",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...auditHeaders() },
       body: JSON.stringify({ metodo_pago: modalMethod, cliente_nombre: modalCliente })
     });
     setModalFac(null);

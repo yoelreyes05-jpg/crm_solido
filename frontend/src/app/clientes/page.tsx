@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 
 import { API_URL as API } from "@/config";
 import { usePermisos } from "@/lib/usePermisos";
+import { auditHeaders } from "@/lib/audit";
 
 export default function Clientes() {
   const router = useRouter();
@@ -67,7 +68,7 @@ export default function Clientes() {
   const eliminarCliente = async (id: number, nombre: string) => {
     if (!confirm(`¿Eliminar a "${nombre}"? Se eliminarán también sus vehículos registrados.`)) return;
     try {
-      const res = await fetch(`${API}/clientes/${id}`, { method: "DELETE" });
+      const res = await fetch(`${API}/clientes/${id}`, { method: "DELETE", headers: auditHeaders() });
       const data = await res.json();
       if (data.error) return alert("No se puede eliminar: " + data.error);
       obtenerClientes();

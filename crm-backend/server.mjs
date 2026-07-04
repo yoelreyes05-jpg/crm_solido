@@ -30,6 +30,89 @@ app.use(express.json({ limit: "10mb" }));
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
+// =====================================================
+// 🕵️ AUDITORÍA — log_acciones
+// =====================================================
+// Extrae el usuario que ejecuta la acción. Prioridad:
+// 1. Header "x-usuario" (JSON URI-encoded enviado por el frontend)
+// 2. Campos usuario_id / usuario_nombre en el body (patrón ya usado en órdenes)
+function usuarioDesdeReq(req) {
+  try {
+    const h = req.headers["x-usuario"];
+    if (h) {
+      const u = JSON.parse(decodeURIComponent(h));
+      return { id: u.id ?? null, nombre: u.nombre || "Sistema", rol: u.rol || null };
+    }
+  } catch {}
+  const b = req.body || {};
+  return { id: b.usuario_id ?? null, nombre: b.usuario_nombre || "Sistema", rol: null };
+}
+
+// Registra una acción en el log de auditoría. Fire-and-forget:
+// nunca bloquea ni rompe el endpoint si la tabla no existe todavía.
+function logAccion(req, { accion, modulo, registroId = null, descripcion = "", detalle = {} }) {
+  const u = usuarioDesdeReq(req);
+  supabase.from("log_acciones").insert([{
+    usuario_id:     u.id,
+    usuario_nombre: u.nombre,
+    usuario_rol:    u.rol,
+    accion,
+    modulo,
+    registro_id:    registroId != null ? String(registroId) : null,
+    descripcion,
+    detalle,
+    ip: (req.headers["x-forwarded-for"] || "").split(",")[0].trim() || req.ip || null,
+  }]).then(() => {}).catch(err => console.warn("⚠️ log_acciones (¿tabla existe?):", err.message));
+}
+
+// GET /auditoria — consulta del log con filtros
+// ?usuario=&modulo=&accion=&desde=YYYY-MM-DD&hasta=YYYY-MM-DD&buscar=&limit=&offset=
+app.get("/auditoria", async (req, res) => {
+  try {
+    const { usuario, modulo, accion, desde, hasta, buscar } = req.query;
+    const lim = Math.min(parseInt(req.query.limit, 10) || 100, 500);
+    const off = parseInt(req.query.offset, 10) || 0;
+
+    let q = supabase
+      .from("log_acciones")
+      .select("*", { count: "exact" })
+      .order("created_at", { ascending: false })
+      .range(off, off + lim - 1);
+
+    if (usuario) q = q.ilike("usuario_nombre", `%${usuario}%`);
+    if (modulo)  q = q.eq("modulo", modulo);
+    if (accion)  q = q.eq("accion", accion);
+    if (desde)   q = q.gte("created_at", desde);
+    if (hasta)   q = q.lte("created_at", `${hasta}T23:59:59`);
+    if (buscar)  q = q.ilike("descripcion", `%${buscar}%`);
+
+    const { data, error, count } = await q;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ total: count ?? 0, items: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// GET /auditoria/opciones — valores distintos para poblar los filtros
+app.get("/auditoria/opciones", async (req, res) => {
+  try {
+    const { data } = await supabase
+      .from("log_acciones")
+      .select("modulo, accion, usuario_nombre")
+      .order("id", { ascending: false })
+      .limit(2000);
+    const rows = data || [];
+    res.json({
+      modulos:  [...new Set(rows.map(r => r.modulo).filter(Boolean))].sort(),
+      acciones: [...new Set(rows.map(r => r.accion).filter(Boolean))].sort(),
+      usuarios: [...new Set(rows.map(r => r.usuario_nombre).filter(Boolean))].sort(),
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/", (req, res) => res.send("🔥 SÓLIDO AUTO SERVICIO — SISTEMA ACTIVO"));
 
 // ── DIAGNÓSTICO TEMPORAL ─────────────────────────────────────────────────────
@@ -119,8 +202,11 @@ app.patch("/clientes/:id", async (req, res) => {
 app.delete("/clientes/:id", async (req, res) => {
   const { id } = req.params;
   // Soft delete: marcar como inactivo preserva historial de órdenes y vehículos
+  const { data: cli } = await supabase.from("clientes").select("nombre").eq("id", id).single();
   const { error } = await supabase.from("clientes").update({ activo: false }).eq("id", id);
   if (error) return res.json({ error: error.message });
+  logAccion(req, { accion: "ELIMINAR", modulo: "clientes", registroId: id,
+    descripcion: `Archivó al cliente ${cli?.nombre || `#${id}`}` });
   res.json({ ok: true, archived: true });
 });
 
@@ -751,12 +837,15 @@ app.post("/vehiculos", async (req, res) => {
 app.delete("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
   // Intentar soft delete primero; si la columna activo no existe, hacer hard delete
+  const { data: veh } = await supabase.from("vehiculos").select("marca, modelo, placa").eq("id", id).single();
   const { error: softError } = await supabase.from("vehiculos").update({ activo: false }).eq("id", id);
   if (softError) {
     // La columna activo puede no existir — hacer delete físico como fallback
     const { error: hardError } = await supabase.from("vehiculos").delete().eq("id", id);
     if (hardError) return res.json({ error: hardError.message });
   }
+  logAccion(req, { accion: "ELIMINAR", modulo: "vehiculos", registroId: id,
+    descripcion: `Eliminó el vehículo ${veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : `#${id}`}` });
   res.json({ ok: true });
 });
 
@@ -1003,8 +1092,12 @@ app.patch("/inventario/:id", async (req, res) => {
 
 app.delete("/inventario/:id", async (req, res) => {
   const { id } = req.params;
+  const { data: item } = await supabase.from("inventario").select("name, code, stock").eq("id", id).single();
   const { error } = await supabase.from("inventario").delete().eq("id", id);
   if (error) return res.json({ error: error.message });
+  logAccion(req, { accion: "ELIMINAR", modulo: "inventario", registroId: id,
+    descripcion: `Eliminó del inventario ${item ? `${item.name} (${item.code})` : `#${id}`}`,
+    detalle: item || {} });
   res.json({ ok: true });
 });
 
@@ -2416,6 +2509,8 @@ app.post("/usuarios", async (req, res) => {
     .insert([{ nombre, email, password_hash, rol, activo: true }])
     .select("id, nombre, email, rol, activo");
   if (error) return res.json({ error: error.message });
+  logAccion(req, { accion: "CREAR", modulo: "usuarios", registroId: data[0].id,
+    descripcion: `Creó el usuario ${nombre} (${email}) con rol ${rol}` });
   res.json(data[0]);
 });
 
@@ -2427,13 +2522,20 @@ app.patch("/usuarios/:id", async (req, res) => {
     .eq("id", id)
     .select("id, nombre, email, rol, activo");
   if (error) return res.json({ error: error.message });
+  const cambios = Object.keys(req.body).filter(k => k !== "password_hash");
+  logAccion(req, { accion: "EDITAR", modulo: "usuarios", registroId: id,
+    descripcion: `Editó el usuario ${data[0]?.nombre || `#${id}`}${req.body.password_hash ? " (incluyó cambio de contraseña)" : ""}`,
+    detalle: { campos: cambios } });
   res.json(data[0]);
 });
 
 app.delete("/usuarios/:id", async (req, res) => {
   const { id } = req.params;
+  const { data: usr } = await supabase.from("usuarios").select("nombre, email, rol").eq("id", id).single();
   const { error } = await supabase.from("usuarios").delete().eq("id", id);
   if (error) return res.json({ error: error.message });
+  logAccion(req, { accion: "ELIMINAR", modulo: "usuarios", registroId: id,
+    descripcion: `Eliminó el usuario ${usr ? `${usr.nombre} (${usr.email}, ${usr.rol})` : `#${id}`}` });
   res.json({ ok: true });
 });
 
@@ -2457,6 +2559,11 @@ app.post("/auth/login", async (req, res) => {
     .then(() => {}).catch(() => {});
 
   const { password_hash, ...usuario } = data;
+  req.body.usuario_id = usuario.id;
+  req.body.usuario_nombre = usuario.nombre;
+  logAccion(req, { accion: "LOGIN", modulo: "sesion", registroId: usuario.id,
+    descripcion: `Inició sesión ${usuario.nombre} (${usuario.rol})`,
+    detalle: { email: usuario.email } });
   res.json({ ok: true, usuario });
 });
 
@@ -2707,6 +2814,9 @@ app.post("/facturas/:id/cobrar", async (req, res) => {
       created_at: new Date()
     }]);
 
+    logAccion(req, { accion: "COBRAR", modulo: "facturas", registroId: facId,
+      descripcion: `Cobró la factura ${fac.ncf} de ${fac.cliente_nombre || "Consumidor Final"} — RD$ ${Number(fac.total).toLocaleString("es-DO")} (${metodoFinal})`,
+      detalle: { ncf: fac.ncf, total: fac.total, metodo_pago: metodoFinal } });
     res.json({ ok: true, factura: updated[0] });
   } catch (err) {
     console.error("Error cobrando factura:", err);
@@ -2778,12 +2888,18 @@ app.patch("/facturas/:id", async (req, res) => {
         }
       }
 
+      logAccion(req, { accion: "ANULAR", modulo: "facturas", registroId: facId,
+        descripcion: `Anuló la factura ${fac.ncf} de ${fac.cliente_nombre || "Consumidor Final"} por RD$ ${Number(fac.total).toLocaleString("es-DO")}`,
+        detalle: { ncf: fac.ncf, total: fac.total, metodo_pago: fac.metodo_pago, estado_anterior: fac.estado } });
       return res.json(updated[0]);
     }
 
     // ── Actualización normal (método pago, cliente, notas, etc.) ─────────
     const { data, error } = await supabase.from("facturas").update(req.body).eq("id", facId).select();
     if (error) return res.json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "facturas", registroId: facId,
+      descripcion: `Editó la factura ${data[0]?.ncf || `#${facId}`}`,
+      detalle: { campos: Object.keys(req.body) } });
     res.json(data[0]);
   } catch (err) {
     console.error("Error en PATCH /facturas:", err);
@@ -2797,7 +2913,7 @@ app.delete("/facturas/:id", async (req, res) => {
   const { id } = req.params;
   const facId = parseInt(id, 10);
 
-  const { data: fac } = await supabase.from("facturas").select("estado").eq("id", facId).single();
+  const { data: fac } = await supabase.from("facturas").select("estado, ncf, cliente_nombre, total").eq("id", facId).single();
   if (!fac) return res.json({ error: "Factura no encontrada" });
   if (fac.estado !== "CANCELADA") {
     return res.json({ error: "Solo se pueden eliminar facturas ya CANCELADAS. Cancela primero." });
@@ -2806,6 +2922,9 @@ app.delete("/facturas/:id", async (req, res) => {
   await supabase.from("factura_items").delete().eq("factura_id", facId);
   const { error } = await supabase.from("facturas").delete().eq("id", facId);
   if (error) return res.json({ error: error.message });
+  logAccion(req, { accion: "ELIMINAR", modulo: "facturas", registroId: facId,
+    descripcion: `Eliminó definitivamente la factura cancelada ${fac.ncf} de ${fac.cliente_nombre || "Consumidor Final"}`,
+    detalle: { ncf: fac.ncf, total: fac.total } });
   res.json({ ok: true });
 });
 
@@ -2993,8 +3112,12 @@ app.post("/api/contabilidad/caja-chica", async (req, res) => {
 app.delete("/api/contabilidad/caja-chica/:id", async (req, res) => {
   try {
     const { id } = req.params;
+    const { data: mov } = await supabase.from("caja_chica").select("concepto, monto, tipo").eq("id", id).single();
     const { error } = await supabase.from("caja_chica").delete().eq("id", id);
     if (error) return res.status(500).json({ error: error.message });
+    logAccion(req, { accion: "ELIMINAR", modulo: "caja_chica", registroId: id,
+      descripcion: `Eliminó movimiento de caja chica${mov ? `: ${mov.concepto} (RD$ ${Number(mov.monto).toLocaleString("es-DO")})` : ` #${id}`}`,
+      detalle: mov || {} });
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -7304,6 +7427,9 @@ app.post("/permisos", async (req, res) => {
         { onConflict: "clave" }
       );
     if (error) return res.status(500).json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "permisos",
+      descripcion: "Modificó la configuración de permisos por rol",
+      detalle: { roles: Object.keys(config) } });
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -8845,12 +8971,17 @@ app.post("/api/nomina/:id/pagar", async (req, res) => {
   if (nomina.estado !== "BORRADOR") return res.status(400).json({ error: "Esta nómina no está en borrador" });
   const { error } = await supabase.from("nominas").update({ estado: "PAGADA", pagada_at: new Date() }).eq("id", nomina.id);
   if (error) return res.status(500).json({ error: error.message });
+  logAccion(req, { accion: "PAGAR", modulo: "nomina", registroId: nomina.id,
+    descripcion: `Pagó la nómina #${nomina.id}${nomina.periodo ? ` (${nomina.periodo})` : ""}`,
+    detalle: { total: nomina.total ?? null } });
   res.json({ ok: true });
 });
 
 app.post("/api/nomina/:id/anular", async (req, res) => {
   const { error } = await supabase.from("nominas").update({ estado: "ANULADA" }).eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  logAccion(req, { accion: "ANULAR", modulo: "nomina", registroId: req.params.id,
+    descripcion: `Anuló la nómina #${req.params.id}` });
   res.json({ ok: true });
 });
 
@@ -8861,6 +8992,8 @@ app.delete("/api/nomina/:id", async (req, res) => {
   await supabase.from("nomina_detalle").delete().eq("nomina_id", req.params.id);
   const { error } = await supabase.from("nominas").delete().eq("id", req.params.id);
   if (error) return res.status(500).json({ error: error.message });
+  logAccion(req, { accion: "ELIMINAR", modulo: "nomina", registroId: req.params.id,
+    descripcion: `Eliminó el borrador de nómina #${req.params.id}` });
   res.json({ ok: true });
 });
 
