@@ -96,6 +96,7 @@ const MODULOS: Modulo[] = [
     items: [
       { href: "/configuracion", icon: "⚙️", label: "Configuración", key: "configuracion", iconBg: "linear-gradient(145deg,#111827,#374151)", iconShadow: "0 4px 12px rgba(55,65,81,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/permisos",      icon: "🔐", label: "Permisos",       key: "permisos",      iconBg: "linear-gradient(145deg,#3b0764,#7c3aed)", iconShadow: "0 4px 12px rgba(124,58,237,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/auditoria",     icon: "🕵️", label: "Auditoría",      key: "auditoria",     iconBg: "linear-gradient(145deg,#7f1d1d,#dc2626)", iconShadow: "0 4px 12px rgba(220,38,38,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
     ],
   },
 ];
