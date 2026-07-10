@@ -7998,6 +7998,28 @@ const IA_TOOLS = [
       parameters: { type: "object", properties: {}, required: [] },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "resumen_membresias",
+      description: "Resumen del programa de PLANES/MEMBRESÍAS (Lavado, Básico, Premium, VIP): miembros activos, ingreso recurrente mensual (MRR), ingresos del mes y total histórico, inscripciones del mes, membresías por vencer en 5 días y vencidas recientes con teléfono del cliente. Úsalo para '¿cuántos miembros tenemos?', '¿cuánto generan las membresías?', '¿quién está por renovar/vencido?'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "membresia_cliente",
+      description: "Estado de la membresía/plan de UN cliente por su nombre: qué plan tiene, si está activa, fecha de renovación, lavados y diagnósticos restantes del mes, descuentos que le aplican, multiplicador de puntos y vehículos cubiertos por el plan. Úsalo para '¿qué plan tiene Juan?', '¿cuántos lavados le quedan a X?', '¿el vehículo de X está cubierto?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          cliente_nombre: { type: "string", description: "Nombre parcial o completo del cliente" },
+        },
+        required: ["cliente_nombre"],
+      },
+    },
+  },
 ];
 
 async function ejecutarHerramientaIA(nombre, args) {
@@ -8427,6 +8449,93 @@ async function ejecutarHerramientaIA(nombre, args) {
         };
       }
 
+      case "resumen_membresias": {
+        const hoy = hoyPlanRD();
+        const inicioMes = hoy.slice(0, 8) + "01";
+        const lim = new Date(`${hoy}T12:00:00Z`); lim.setUTCDate(lim.getUTCDate() + 5);
+        const hasta5d = lim.toISOString().slice(0, 10);
+        const [activasQ, pagosQ, porVencerQ, vencidasQ] = await Promise.all([
+          supabase.from("plan_membresias")
+            .select("id, ciclo, cliente_id, plan_catalogo(nombre, precio_mensual, precio_anual)")
+            .eq("estado", "ACTIVA").gte("fecha_renovacion", hoy),
+          supabase.from("plan_pagos").select("monto, created_at, concepto"),
+          supabase.from("plan_membresias")
+            .select("id, cliente_id, fecha_renovacion, plan_catalogo(nombre)")
+            .eq("estado", "ACTIVA").gte("fecha_renovacion", hoy).lte("fecha_renovacion", hasta5d),
+          supabase.from("plan_membresias")
+            .select("id, cliente_id, fecha_renovacion, plan_catalogo(nombre)")
+            .eq("estado", "VENCIDA").order("fecha_renovacion", { ascending: false }).limit(10),
+        ]);
+        const activas = activasQ.data || [];
+        const mrr = activas.reduce((a, m) => {
+          const p = m.plan_catalogo || {};
+          return a + (m.ciclo === "ANUAL" ? Number(p.precio_anual || 0) / 12 : Number(p.precio_mensual || 0));
+        }, 0);
+        const pagos = pagosQ.data || [];
+        const ingresosMes = pagos.filter(p => String(p.created_at) >= `${inicioMes}T00:00:00`).reduce((a, p) => a + Number(p.monto), 0);
+        const ingresosTotal = pagos.reduce((a, p) => a + Number(p.monto), 0);
+        // Conteo de miembros por plan
+        const porPlan = {};
+        for (const m of activas) {
+          const n = m.plan_catalogo?.nombre || "Sin plan";
+          porPlan[n] = (porPlan[n] || 0) + 1;
+        }
+        const cliIds = [...(porVencerQ.data || []), ...(vencidasQ.data || [])].map(m => m.cliente_id);
+        const cliMap = await mapaClientes(cliIds);
+        const conCli = (arr) => (arr || []).map(m => ({
+          cliente: cliMap[m.cliente_id]?.nombre || `Cliente #${m.cliente_id}`,
+          telefono: cliMap[m.cliente_id]?.telefono || "",
+          plan: m.plan_catalogo?.nombre || "—",
+          fecha_renovacion: m.fecha_renovacion,
+        }));
+        return {
+          miembros_activos: activas.length,
+          miembros_por_plan: porPlan,
+          ingreso_recurrente_mensual_RD: mrr.toFixed(2),
+          ingresos_membresias_mes_RD: ingresosMes.toFixed(2),
+          ingresos_membresias_total_RD: ingresosTotal.toFixed(2),
+          por_vencer_5_dias: conCli(porVencerQ.data),
+          vencidas_recientes: conCli(vencidasQ.data),
+        };
+      }
+
+      case "membresia_cliente": {
+        const { data: clis } = await supabase.from("clientes")
+          .select("id, nombre, telefono").ilike("nombre", `%${args.cliente_nombre}%`).limit(5);
+        if (!clis || clis.length === 0) return { error: `No se encontró ningún cliente con nombre "${args.cliente_nombre}"` };
+        const resultados = [];
+        for (const cli of clis) {
+          const ben = await beneficiosCliente(cli.id);
+          if (!ben) {
+            resultados.push({ cliente: cli.nombre, telefono: cli.telefono, membresia: "NO tiene membresía activa" });
+            continue;
+          }
+          // Vehículos cubiertos con su descripción
+          let vehiculosCubiertos = [];
+          if (ben.vehiculos.length) {
+            const { data: vehs } = await supabase.from("vehiculos").select("*").in("id", ben.vehiculos);
+            vehiculosCubiertos = (vehs || []).map(v => [v.marca, v.modelo, v.placa].filter(Boolean).join(" "));
+          }
+          resultados.push({
+            cliente: cli.nombre,
+            telefono: cli.telefono,
+            plan: `${ben.plan.emoji || ""} ${ben.plan.nombre}`.trim(),
+            estado: ben.membresia.estado,
+            ciclo: ben.membresia.ciclo,
+            renueva_el: ben.membresia.fecha_renovacion,
+            lavados_restantes_mes: ben.beneficios.lavados_mes === undefined ? "no incluye"
+              : ben.uso.lavados_disponibles < 0 ? "ilimitados" : ben.uso.lavados_disponibles,
+            diagnosticos_restantes_mes: ben.beneficios.diagnosticos_mes === undefined ? "no incluye"
+              : ben.uso.diagnosticos_disponibles < 0 ? "ilimitados" : ben.uso.diagnosticos_disponibles,
+            descuento_servicios: `${ben.beneficios.desc_servicios || 0}%`,
+            descuento_repuestos: `${ben.beneficios.desc_repuestos || 0}%`,
+            multiplicador_puntos: `x${ben.beneficios.multiplicador_puntos || 1}`,
+            vehiculos_cubiertos: vehiculosCubiertos.length ? vehiculosCubiertos : ["Ninguno amarrado todavía (se amarra en el primer lavado)"],
+          });
+        }
+        return { resultados };
+      }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -8460,10 +8569,14 @@ HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
 - contabilidad_resumen: facturación del mes, cuentas por cobrar/pagar
 - resumen_carwash: estado del Car Wash / lavado (vehículos en lavado, listos, entregados hoy, técnico asignado) e ingreso del car wash del día. Úsalo para "¿cómo va el car wash?", "¿qué vehículos están en lavado?".
 - ventas_por_canal: ventas/ingresos de HOY por canal — cafetería (POS), cursos (capacitaciones) y car wash — más el total del día. Úsalo para "¿cuánto vendimos hoy?", "ventas de cafetería/cursos/car wash".
+- resumen_membresias: programa de PLANES/MEMBRESÍAS — miembros activos por plan, ingreso recurrente mensual (MRR), ingresos del mes e histórico, por vencer en 5 días y vencidas con teléfono. Úsalo para "¿cuántos miembros hay?", "¿cuánto generan las membresías?", "¿quién debe renovar?".
+- membresia_cliente: plan de UN cliente por nombre — plan, estado, fecha de renovación, lavados/diagnósticos restantes del mes, descuentos, multiplicador de puntos y vehículos cubiertos. Úsalo para "¿qué plan tiene X?", "¿cuántos lavados le quedan a X?".
 
 CONTEXTO DE MÓDULOS (novedades):
 - El taller ahora tiene un carril rápido de CAR WASH (lavado de vehículos) con estados EN_LAVADO → LISTO → ENTREGADO. El lavado lo registra recepción, lo marca LISTO el técnico de lavado (rol "lavador") y recepción lo cobra/entrega. No se entrega sin factura.
 - También se venden CURSOS (capacitaciones) y productos de CAFETERÍA (POS). Para ingresos del día por canal usa ventas_por_canal.
+- PLANES/MEMBRESÍAS: existen 4 planes — 🚿 Lavado (lavados mensuales), 🔵 Básico (1 lavado + 1 diagnóstico + 5% servicios), 🟣 Premium (2 lavados, diagnósticos ilimitados, 10% servicios, 5% repuestos, puntos x2) y 👑 VIP (todo ilimitado, 15% servicios, 10% repuestos, puntos x3, prioridad). La membresía se amarra al cliente Y a vehículos específicos (límite por plan: Básico/Lavado 1, Premium 2, VIP 3). Si el miembro trae un vehículo no amarrado, el lavado se cobra normal. Los beneficios se aplican AUTOMÁTICO: el lavado cubierto sale en RD$ 0, el descuento aparece como línea en la factura, y los puntos se multiplican. Las membresías vencen solas si no se renuevan; la renovación se cobra y entra a caja. Todo se gestiona en el módulo /planes.
+- El rol "vendedor" emite facturas sin cobrar (quedan PENDIENTE_COBRO y la secretaria las cobra). Hay módulo de AUDITORÍA (log de acciones sensibles) y rol nuevo para cada módulo independiente.
 
 REGLAS:
 1. SIEMPRE usa una herramienta — nunca respondas de memoria.
