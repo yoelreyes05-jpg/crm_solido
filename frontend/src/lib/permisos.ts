@@ -39,6 +39,7 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "ordenes",         label: "Órdenes de Trabajo",     descripcion: "Listado completo de órdenes",                          grupo: "Clientes"  },
   { key: "historial",       label: "Historial Vehículos",    descripcion: "Historial permanente por vehículo",                    grupo: "Clientes"  },
   { key: "fidelizacion",    label: "Fidelización",           descripcion: "Programa de puntos Club Sólido (multicanal)",          grupo: "Clientes"  },
+  { key: "planes",          label: "Planes / Membresías",    descripcion: "Planes Lavado, Básico, Premium y VIP — beneficios automáticos en todo el CRM", grupo: "Clientes" },
   // Almacén
   { key: "inventario",      label: "Inventario",             descripcion: "Piezas y materiales en stock",                         grupo: "Almacén"   },
   { key: "suplidores",      label: "Suplidores",             descripcion: "Proveedores y compras",                                grupo: "Almacén"   },
@@ -96,6 +97,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     ordenes:         OPERACION,
     historial:       VER,
     fidelizacion:    OPERACION,
+    planes:          OPERACION,
     inventario:      VER,
     suplidores:      NADA,
     ventas:          NADA,

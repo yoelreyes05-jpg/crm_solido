@@ -2626,11 +2626,31 @@ app.post("/facturas", async (req, res) => {
   try {
     let subtotal = 0;
     let itbis = 0;
+    let baseServicios = 0;
+    let baseRepuestos = 0;
     for (const item of items) {
       const linea = Number(item.precio_unitario) * Number(item.cantidad);
       subtotal += linea;
       if (item.itbis_aplica) itbis += linea * 0.18;
+      if ((item.tipo || "repuesto") === "repuesto") baseRepuestos += linea;
+      else baseServicios += linea;
     }
+
+    // 💎 PLANES: descuento automático según la membresía activa del cliente
+    let descuentoPlan = 0;
+    let descuentoPlanNombre = null;
+    if (cliente_id) {
+      const benPlan = await beneficiosCliente(cliente_id);
+      if (benPlan) {
+        const dS = Number(benPlan.beneficios.desc_servicios || 0);
+        const dR = Number(benPlan.beneficios.desc_repuestos || 0);
+        descuentoPlan = +((baseServicios * dS / 100) + (baseRepuestos * dR / 100)).toFixed(2);
+        if (descuentoPlan > 0) descuentoPlanNombre = benPlan.plan.nombre;
+        else descuentoPlan = 0;
+      }
+    }
+
+    subtotal = +(subtotal - descuentoPlan).toFixed(2);
     const total = subtotal + itbis;
 
     const tipo = ncf_tipo || "B02";
@@ -2721,6 +2741,20 @@ app.post("/facturas", async (req, res) => {
           }]);
         }
       }
+    }
+
+    // 💎 PLANES: línea de descuento visible en la factura (auditable)
+    if (descuentoPlan > 0) {
+      await supabase.from("factura_items").insert([{
+        factura_id: facturaId,
+        tipo: "descuento",
+        descripcion: `Descuento ${descuentoPlanNombre} (membresía)`,
+        cantidad: 1,
+        precio_unitario: -descuentoPlan,
+        itbis_aplica: false,
+        subtotal: -descuentoPlan,
+        inventario_id: null,
+      }]);
     }
 
     if (diagnostico_id) {
@@ -6875,6 +6909,17 @@ app.post("/carwash", async (req, res) => {
       const { data: s } = await supabase.from("carwash_servicios").select("nombre, precio").eq("id", servicio_id).maybeSingle();
       if (s) { if (!nombre) nombre = s.nombre; if (monto === null) monto = Number(s.precio); }
     }
+
+    // 💎 PLANES: si el cliente tiene membresía con lavados disponibles,
+    // el lavado queda cubierto por el plan (total 0) y se registra el consumo.
+    let planCobertura = null;
+    const ben = await beneficiosCliente(Number(cliente_id));
+    if (ben && ben.uso.lavados_disponibles !== 0 && ben.beneficios.lavados_mes !== undefined) {
+      planCobertura = ben;
+      monto = 0;
+      nombre = `${nombre || "Car wash"} — Cubierto por ${ben.plan.nombre}`;
+    }
+
     const payload = {
       cliente_id:  Number(cliente_id),
       vehiculo_id: Number(vehiculo_id),
@@ -6894,6 +6939,19 @@ app.post("/carwash", async (req, res) => {
       orden_id: orden.id, estado_anterior: null, estado_nuevo: "EN_LAVADO",
       usuario_nombre: usuario_nombre || "Recepción", motivo: "Lavado registrado", metadata: {},
     }]).then(() => {}).catch(() => {});
+
+    // 💎 PLANES: registrar consumo del lavado cubierto
+    if (planCobertura) {
+      await registrarConsumoPlan(
+        planCobertura.membresia.id, cliente_id, "lavado", orden.id,
+        `Lavado ${numeroOrden} cubierto por ${planCobertura.plan.nombre}`,
+        usuario_nombre || "Recepción"
+      );
+      orden.cubierto_por_plan = planCobertura.plan.nombre;
+      orden.lavados_restantes = planCobertura.uso.lavados_disponibles < 0
+        ? "ilimitado"
+        : planCobertura.uso.lavados_disponibles - 1;
+    }
     res.json(orden);
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -6955,8 +7013,14 @@ async function acumularPuntos(clienteId, monto, origen, refId = null, descripcio
     const cfg = await getFidelizacionConfig();
     if (!cfg.activo) return null;
     const rdPorPunto = Number(cfg.rd_por_punto) || 100;
-    const puntos = Math.floor(Number(monto) / rdPorPunto);
+    let puntos = Math.floor(Number(monto) / rdPorPunto);
     if (puntos <= 0) return null;
+    // 💎 PLANES: multiplicador de puntos según membresía (x2 Premium, x3 VIP)
+    try {
+      const benPts = await beneficiosCliente(clienteId);
+      const mult = Number(benPts?.beneficios?.multiplicador_puntos || 1);
+      if (mult > 1) puntos = puntos * mult;
+    } catch {}
     await supabase.from("puntos_movimientos").insert([{
       cliente_id: clienteId, puntos, tipo: "GANADO", origen,
       ref_id: refId, descripcion: descripcion || `Puntos por ${origen}`,
@@ -9271,6 +9335,337 @@ function mountContabilidadModulo(base, T) {
     } catch (err) { res.status(500).json({ error: err.message }); }
   });
 }
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 💎 PLANES / MEMBRESÍAS — Lavado · Básico · Premium · VIP
+// Tablas: plan_catalogo, plan_beneficios, plan_membresias, plan_consumos, plan_pagos
+// Se conecta automático con Car Wash, Facturación, Fidelización y Caja.
+// ══════════════════════════════════════════════════════════════════════════════
+
+const hoyPlanRD = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Santo_Domingo" });
+
+// ─── Núcleo: beneficios activos de un cliente ────────────────────────────────
+// Devuelve null si no tiene membresía activa. Auto-expira las vencidas.
+async function beneficiosCliente(clienteId) {
+  try {
+    if (!clienteId) return null;
+    const hoy = hoyPlanRD();
+    const { data: memb } = await supabase.from("plan_membresias")
+      .select("*, plan_catalogo(*)")
+      .eq("cliente_id", Number(clienteId)).eq("estado", "ACTIVA")
+      .order("id", { ascending: false }).limit(1).maybeSingle();
+    if (!memb) return null;
+    // Auto-expiración: si pasó la fecha de renovación, se apaga sola
+    if (memb.fecha_renovacion < hoy) {
+      await supabase.from("plan_membresias")
+        .update({ estado: "VENCIDA", updated_at: new Date().toISOString() }).eq("id", memb.id);
+      return null;
+    }
+    const { data: bens } = await supabase.from("plan_beneficios")
+      .select("tipo, valor").eq("plan_id", memb.plan_id);
+    const b = {};
+    for (const x of (bens || [])) b[x.tipo] = Number(x.valor);
+    // Consumos del mes calendario actual (RD)
+    const inicioMes = hoy.slice(0, 8) + "01";
+    const { data: cons } = await supabase.from("plan_consumos")
+      .select("tipo").eq("membresia_id", memb.id).gte("created_at", `${inicioMes}T00:00:00`);
+    const usados = {};
+    for (const c of (cons || [])) usados[c.tipo] = (usados[c.tipo] || 0) + 1;
+    // -1 = ilimitado; undefined = el plan no incluye ese beneficio
+    const disp = (limite, u) => limite === undefined ? 0 : (limite < 0 ? -1 : Math.max(0, limite - u));
+    return {
+      membresia: { id: memb.id, estado: memb.estado, ciclo: memb.ciclo, fecha_inicio: memb.fecha_inicio, fecha_renovacion: memb.fecha_renovacion },
+      plan: memb.plan_catalogo,
+      beneficios: b,
+      uso: {
+        lavados_usados:           usados.lavado || 0,
+        lavados_disponibles:      disp(b.lavados_mes, usados.lavado || 0),
+        diagnosticos_usados:      usados.diagnostico || 0,
+        diagnosticos_disponibles: disp(b.diagnosticos_mes, usados.diagnostico || 0),
+      },
+    };
+  } catch (e) { console.error("beneficiosCliente:", e.message); return null; }
+}
+
+// Registra el uso de un beneficio (lavado, diagnostico). Best-effort.
+async function registrarConsumoPlan(membresiaId, clienteId, tipo, referenciaId = null, descripcion = null, usuario = "Sistema") {
+  try {
+    await supabase.from("plan_consumos").insert([{
+      membresia_id: membresiaId, cliente_id: Number(clienteId), tipo,
+      referencia_id: referenciaId, descripcion: descripcion || null, usuario,
+    }]);
+  } catch (e) { console.error("registrarConsumoPlan:", e.message); }
+}
+
+// Nombres/teléfonos de clientes para listas (sin depender de FK)
+async function mapaClientes(ids) {
+  const unicos = [...new Set(ids.filter(Boolean).map(Number))];
+  if (!unicos.length) return {};
+  const { data } = await supabase.from("clientes").select("id, nombre, telefono").in("id", unicos);
+  const m = {};
+  for (const c of (data || [])) m[c.id] = c;
+  return m;
+}
+
+// ─── Catálogo de planes ──────────────────────────────────────────────────────
+app.get("/planes", async (req, res) => {
+  try {
+    const { data: planes, error } = await supabase.from("plan_catalogo")
+      .select("*, plan_beneficios(id, tipo, valor)")
+      .or("activo.is.null,activo.eq.true")
+      .order("orden");
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(planes || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/planes", async (req, res) => {
+  try {
+    const { nombre, emoji, color, descripcion, precio_mensual, precio_anual, orden } = req.body;
+    if (!nombre || precio_mensual === undefined)
+      return res.status(400).json({ error: "Nombre y precio mensual son requeridos" });
+    const { data, error } = await supabase.from("plan_catalogo").insert([{
+      nombre, emoji: emoji || "⭐", color: color || "#3b82f6", descripcion: descripcion || null,
+      precio_mensual: Number(precio_mensual), precio_anual: Number(precio_anual || 0),
+      orden: Number(orden || 0), activo: true,
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/planes/:id", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("plan_catalogo")
+      .update(req.body).eq("id", req.params.id).select();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/planes/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("plan_catalogo")
+      .update({ activo: false }).eq("id", req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Reemplaza TODOS los beneficios de un plan: body = { beneficios: [{tipo, valor}] }
+app.post("/planes/:id/beneficios", async (req, res) => {
+  try {
+    const planId = Number(req.params.id);
+    const lista = Array.isArray(req.body.beneficios) ? req.body.beneficios : [];
+    await supabase.from("plan_beneficios").delete().eq("plan_id", planId);
+    if (lista.length) {
+      const filas = lista
+        .filter(x => x.tipo)
+        .map(x => ({ plan_id: planId, tipo: String(x.tipo), valor: Number(x.valor || 0) }));
+      const { error } = await supabase.from("plan_beneficios").insert(filas);
+      if (error) return res.status(400).json({ error: error.message });
+    }
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Membresías ──────────────────────────────────────────────────────────────
+app.get("/planes/membresias", async (req, res) => {
+  try {
+    const hoy = hoyPlanRD();
+    // Auto-expirar activas vencidas
+    await supabase.from("plan_membresias")
+      .update({ estado: "VENCIDA", updated_at: new Date().toISOString() })
+      .eq("estado", "ACTIVA").lt("fecha_renovacion", hoy);
+    const { data, error } = await supabase.from("plan_membresias")
+      .select("*, plan_catalogo(id, nombre, emoji, color, precio_mensual, precio_anual)")
+      .order("id", { ascending: false }).limit(500);
+    if (error) return res.status(500).json({ error: error.message });
+    const cliMap = await mapaClientes((data || []).map(m => m.cliente_id));
+    res.json((data || []).map(m => ({
+      ...m,
+      cliente: cliMap[m.cliente_id] || { id: m.cliente_id, nombre: `Cliente #${m.cliente_id}`, telefono: null },
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Inscribir: crea membresía ACTIVA + registra pago + ingreso en caja
+app.post("/planes/membresias", async (req, res) => {
+  try {
+    const { cliente_id, plan_id, ciclo, metodo_pago, usuario, notas } = req.body;
+    if (!cliente_id || !plan_id)
+      return res.status(400).json({ error: "cliente_id y plan_id son requeridos" });
+    const { data: plan } = await supabase.from("plan_catalogo").select("*").eq("id", plan_id).maybeSingle();
+    if (!plan) return res.status(404).json({ error: "Plan no encontrado" });
+    // Un cliente solo puede tener una membresía activa
+    const existente = await beneficiosCliente(cliente_id);
+    if (existente) return res.status(400).json({ error: `El cliente ya tiene ${existente.plan.nombre} activo hasta ${existente.membresia.fecha_renovacion}` });
+
+    const esAnual = String(ciclo || "MENSUAL").toUpperCase() === "ANUAL";
+    const monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+    const inicio = hoyPlanRD();
+    const renov = new Date(`${inicio}T12:00:00Z`);
+    if (esAnual) renov.setUTCFullYear(renov.getUTCFullYear() + 1);
+    else renov.setUTCMonth(renov.getUTCMonth() + 1);
+
+    const { data: memb, error } = await supabase.from("plan_membresias").insert([{
+      cliente_id: Number(cliente_id), plan_id: Number(plan_id), estado: "ACTIVA",
+      ciclo: esAnual ? "ANUAL" : "MENSUAL",
+      fecha_inicio: inicio, fecha_renovacion: renov.toISOString().slice(0, 10),
+      notas: notas || null, created_by: usuario || "Sistema",
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Pago + caja (ingreso recurrente visible en contabilidad)
+    if (monto > 0) {
+      await supabase.from("plan_pagos").insert([{
+        membresia_id: memb[0].id, cliente_id: Number(cliente_id), monto,
+        metodo: metodo_pago || "EFECTIVO",
+        concepto: `Inscripción ${plan.nombre} (${esAnual ? "anual" : "mensual"})`,
+        usuario: usuario || "Sistema",
+      }]);
+      await supabase.from("caja_movimientos").insert([{
+        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — inscripción`,
+        monto, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
+      }]).then(() => {}).catch(() => {});
+    }
+    logAccion(req, { accion: "CREAR", modulo: "planes", registroId: memb[0].id,
+      descripcion: `Inscribió al cliente #${cliente_id} en ${plan.nombre} (${esAnual ? "anual" : "mensual"})` });
+    res.json(memb[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Renovar: extiende la fecha y registra el pago
+app.post("/planes/membresias/:id/renovar", async (req, res) => {
+  try {
+    const { metodo_pago, usuario } = req.body;
+    const { data: memb } = await supabase.from("plan_membresias")
+      .select("*, plan_catalogo(*)").eq("id", req.params.id).maybeSingle();
+    if (!memb) return res.status(404).json({ error: "Membresía no encontrada" });
+    const plan = memb.plan_catalogo;
+    const esAnual = memb.ciclo === "ANUAL";
+    const monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+    // Extiende desde la fecha mayor entre hoy y la renovación actual
+    const hoy = hoyPlanRD();
+    const base = memb.fecha_renovacion > hoy ? memb.fecha_renovacion : hoy;
+    const nueva = new Date(`${base}T12:00:00Z`);
+    if (esAnual) nueva.setUTCFullYear(nueva.getUTCFullYear() + 1);
+    else nueva.setUTCMonth(nueva.getUTCMonth() + 1);
+
+    const { data, error } = await supabase.from("plan_membresias").update({
+      estado: "ACTIVA", fecha_renovacion: nueva.toISOString().slice(0, 10),
+      updated_at: new Date().toISOString(),
+    }).eq("id", memb.id).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    if (monto > 0) {
+      await supabase.from("plan_pagos").insert([{
+        membresia_id: memb.id, cliente_id: memb.cliente_id, monto,
+        metodo: metodo_pago || "EFECTIVO",
+        concepto: `Renovación ${plan.nombre} (${esAnual ? "anual" : "mensual"})`,
+        usuario: usuario || "Sistema",
+      }]);
+      await supabase.from("caja_movimientos").insert([{
+        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — renovación`,
+        monto, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
+      }]).then(() => {}).catch(() => {});
+    }
+    logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: memb.id,
+      descripcion: `Renovó ${plan.nombre} del cliente #${memb.cliente_id} hasta ${nueva.toISOString().slice(0, 10)}` });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/planes/membresias/:id/cancelar", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("plan_membresias")
+      .update({ estado: "CANCELADA", updated_at: new Date().toISOString() })
+      .eq("id", req.params.id).select();
+    if (error) return res.status(400).json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: req.params.id,
+      descripcion: `Canceló la membresía #${req.params.id}` });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Beneficios de un cliente (badge en recepción/carwash/facturación) ──────
+app.get("/planes/beneficios/:clienteId", async (req, res) => {
+  const ben = await beneficiosCliente(req.params.clienteId);
+  res.json(ben || { plan: null });
+});
+
+// Consumir un beneficio manualmente (ej. diagnóstico cubierto por plan)
+app.post("/planes/consumir", async (req, res) => {
+  try {
+    const { cliente_id, tipo, referencia_id, descripcion, usuario } = req.body;
+    if (!cliente_id || !tipo) return res.status(400).json({ error: "cliente_id y tipo son requeridos" });
+    const ben = await beneficiosCliente(cliente_id);
+    if (!ben) return res.status(400).json({ error: "El cliente no tiene membresía activa" });
+    const disponibles = tipo === "lavado" ? ben.uso.lavados_disponibles : ben.uso.diagnosticos_disponibles;
+    if (disponibles === 0) return res.status(400).json({ error: `No le quedan ${tipo}s disponibles este mes` });
+    await registrarConsumoPlan(ben.membresia.id, cliente_id, tipo, referencia_id || null, descripcion, usuario || "Sistema");
+    res.json({ ok: true, plan: ben.plan.nombre, restantes: disponibles < 0 ? "ilimitado" : disponibles - 1 });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Consumos y pagos (reportes) ─────────────────────────────────────────────
+app.get("/planes/consumos", async (req, res) => {
+  try {
+    const desde = req.query.desde || "2000-01-01";
+    const hasta = req.query.hasta || "2100-01-01";
+    const { data, error } = await supabase.from("plan_consumos")
+      .select("*, plan_membresias(plan_catalogo(nombre, emoji))")
+      .gte("created_at", `${desde}T00:00:00`).lte("created_at", `${hasta}T23:59:59`)
+      .order("created_at", { ascending: false }).limit(500);
+    if (error) return res.status(500).json({ error: error.message });
+    const cliMap = await mapaClientes((data || []).map(c => c.cliente_id));
+    res.json((data || []).map(c => ({
+      ...c,
+      cliente: cliMap[c.cliente_id] || { nombre: `Cliente #${c.cliente_id}` },
+      plan_nombre: c.plan_membresias?.plan_catalogo?.nombre || "—",
+    })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.get("/planes/pagos", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("plan_pagos")
+      .select("*").order("created_at", { ascending: false }).limit(500);
+    if (error) return res.status(500).json({ error: error.message });
+    const cliMap = await mapaClientes((data || []).map(p => p.cliente_id));
+    const total = (data || []).reduce((a, p) => a + Number(p.monto), 0);
+    res.json({
+      pagos: (data || []).map(p => ({ ...p, cliente: cliMap[p.cliente_id] || { nombre: `Cliente #${p.cliente_id}` } })),
+      total,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Alertas: renovaciones próximas (≤5 días) y vencidas recientes ───────────
+app.get("/planes/alertas", async (req, res) => {
+  try {
+    const hoy = hoyPlanRD();
+    const limite = new Date(`${hoy}T12:00:00Z`);
+    limite.setUTCDate(limite.getUTCDate() + 5);
+    const hasta = limite.toISOString().slice(0, 10);
+    const [porVencer, vencidas] = await Promise.all([
+      supabase.from("plan_membresias")
+        .select("*, plan_catalogo(nombre, emoji, precio_mensual, precio_anual)")
+        .eq("estado", "ACTIVA").gte("fecha_renovacion", hoy).lte("fecha_renovacion", hasta)
+        .order("fecha_renovacion"),
+      supabase.from("plan_membresias")
+        .select("*, plan_catalogo(nombre, emoji, precio_mensual, precio_anual)")
+        .eq("estado", "VENCIDA")
+        .order("fecha_renovacion", { ascending: false }).limit(30),
+    ]);
+    const todas = [...(porVencer.data || []), ...(vencidas.data || [])];
+    const cliMap = await mapaClientes(todas.map(m => m.cliente_id));
+    const conCliente = (arr) => (arr || []).map(m => ({
+      ...m, cliente: cliMap[m.cliente_id] || { nombre: `Cliente #${m.cliente_id}`, telefono: null },
+    }));
+    res.json({ por_vencer: conCliente(porVencer.data), vencidas: conCliente(vencidas.data) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ══════════════════════════════════════════════════════════════════════════════
 // 🌺 ALOHA PERFUME STORE — MÓDULO TOTALMENTE INDEPENDIENTE
