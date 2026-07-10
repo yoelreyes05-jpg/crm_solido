@@ -7,7 +7,7 @@
  *   const { puede, puedeVer, puedeCrear, puedeEditar, puedeEliminar } = usePermisos("clientes");
  */
 import { useEffect, useState } from "react";
-import { PERMISOS_DEFAULT, type PermisosConfig, type Accion } from "@/lib/permisos";
+import { PERMISOS_DEFAULT, mergePermisos, type PermisosConfig, type Accion } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -21,7 +21,8 @@ async function fetchConfig(): Promise<void> {
     .then(r => r.ok ? r.json() : null)
     .then((data: PermisosConfig | null) => {
       if (data && typeof data === "object" && Object.keys(data).length > 0) {
-        _cache = data;
+        // merge sobre defaults: roles/módulos nuevos (ej. aloha) siempre existen
+        _cache = mergePermisos(data);
       }
     })
     .catch(() => {})

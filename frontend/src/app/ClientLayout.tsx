@@ -6,7 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import BusquedaGlobal from "@/components/BusquedaGlobal";
 import AsistenteIA from "@/components/AsistenteIA";
-import { PERMISOS_DEFAULT, type PermisosConfig } from "@/lib/permisos";
+import { PERMISOS_DEFAULT, mergePermisos, type PermisosConfig } from "@/lib/permisos";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
@@ -39,6 +39,7 @@ const MENU = [
   { href: "/contabilidad",       icon: "💰", label: "Contabilidad",         key: "contabilidad"     },
   // ── Servicios ────────────────────────────────────────────────────────────
   { href: "/cafeteria",          icon: "☕", label: "Cafetería",            key: "cafeteria"        },
+  { href: "/aloha",              icon: "🌺", label: "Aloha Perfumes",       key: "aloha"            },
   // ── Administración ───────────────────────────────────────────────────────
   { href: "/mantenimiento",      icon: "🔩", label: "Mantenimiento",        key: "mantenimiento"    },
   { href: "/inteligencia",       icon: "🔮", label: "Inteligencia",         key: "inteligencia"     },
@@ -80,7 +81,8 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (data && typeof data === "object" && Object.keys(data).length > 0) {
-          setPermisosConfig(data);
+          // merge sobre defaults: roles/módulos nuevos (ej. aloha) siempre existen
+          setPermisosConfig(mergePermisos(data));
         }
         // Si el backend no tiene config guardada, permisosConfig queda null
         // y el filtro usará PERMISOS_DEFAULT automáticamente

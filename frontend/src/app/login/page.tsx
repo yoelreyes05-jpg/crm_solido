@@ -35,6 +35,7 @@ export default function LoginPage() {
         cafeteria:  "/cafeteria",
         lavador:    "/carwash/tecnico",
         vendedor:   "/facturacion",
+        aloha:      "/aloha",
       };
       router.push(destinos[data.usuario.rol] || "/dashboard");
     } catch {

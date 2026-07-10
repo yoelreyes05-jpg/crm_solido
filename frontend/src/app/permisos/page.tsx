@@ -14,7 +14,7 @@ import { auditHeaders } from "@/lib/audit";
 
 const API = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8080";
 
-const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria", "lavador", "vendedor"] as const;
+const ROLES_EDITABLES = ["secretaria", "tecnico", "almacen", "cafeteria", "lavador", "vendedor", "aloha"] as const;
 type RolEditable = (typeof ROLES_EDITABLES)[number];
 
 const ROL_META: Record<string, { label: string; icon: string; color: string; bg: string; border: string; desc: string }> = {
@@ -25,6 +25,7 @@ const ROL_META: Record<string, { label: string; icon: string; color: string; bg:
   cafeteria:  { label: "Cafetería",  icon: "☕", color: "#9f3a20", bg: "#fff7ed", border: "#fb923c", desc: "Módulo de cafetería" },
   lavador:    { label: "Lavador",    icon: "🚿", color: "#155e75", bg: "#ecfeff", border: "#67e8f9", desc: "Panel de lavados asignados" },
   vendedor:   { label: "Vendedor",   icon: "🛒", color: "#166534", bg: "#f0fdf4", border: "#4ade80", desc: "Crea clientes y emite facturas de piezas — no cobra" },
+  aloha:      { label: "Aloha",      icon: "🌺", color: "#9d174d", bg: "#fdf2f8", border: "#f9a8d4", desc: "ALOHA Perfume Store — módulo independiente" },
 };
 
 const ACCION_META: { key: Accion; label: string; trackOn: string; thumbShadow: string }[] = [

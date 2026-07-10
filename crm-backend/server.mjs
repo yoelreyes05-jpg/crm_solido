@@ -9272,6 +9272,200 @@ function mountContabilidadModulo(base, T) {
   });
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// 🌺 ALOHA PERFUME STORE — MÓDULO TOTALMENTE INDEPENDIENTE
+// Tel: 829-393-3673 · Tablas propias con prefijo aloha_ (migracion_v18_aloha.sql)
+// No toca ventas, inventario ni contabilidad del taller.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ─── PRODUCTOS / INVENTARIO ──────────────────────────────────────────────────
+app.get("/aloha/productos", async (req, res) => {
+  const { data, error } = await supabase
+    .from("aloha_productos")
+    .select("*")
+    .or("activo.is.null,activo.eq.true")
+    .order("nombre");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/aloha/productos", async (req, res) => {
+  const { nombre, precio, costo, stock, categoria, marca, descripcion, imagen } = req.body;
+  if (!nombre || precio === undefined)
+    return res.status(400).json({ error: "Nombre y precio son requeridos" });
+  const { data, error } = await supabase.from("aloha_productos")
+    .insert([{
+      nombre, precio: Number(precio), costo: Number(costo || 0),
+      stock: Number(stock || 0), categoria: categoria || "Perfume",
+      marca: marca || null, descripcion: descripcion || null,
+      imagen: imagen || null, activo: true,
+    }]).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.put("/aloha/productos/:id", async (req, res) => {
+  const { id } = req.params;
+  const { nombre, precio, costo, stock, categoria, marca, descripcion } = req.body;
+  const { data, error } = await supabase.from("aloha_productos")
+    .update({
+      nombre, precio: Number(precio), costo: Number(costo || 0),
+      stock: Number(stock || 0), categoria, marca: marca || null,
+      descripcion: descripcion || null,
+    }).eq("id", id).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// PATCH — actualización parcial (ej. solo la imagen)
+app.patch("/aloha/productos/:id", async (req, res) => {
+  const { data, error } = await supabase.from("aloha_productos")
+    .update(req.body).eq("id", req.params.id).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+// DELETE — soft delete (aloha_detalle tiene FK a esta tabla)
+app.delete("/aloha/productos/:id", async (req, res) => {
+  const { error } = await supabase.from("aloha_productos")
+    .update({ activo: false }).eq("id", req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ─── CLIENTES ────────────────────────────────────────────────────────────────
+app.get("/aloha/clientes", async (req, res) => {
+  const { data, error } = await supabase
+    .from("aloha_clientes").select("*")
+    .or("activo.is.null,activo.eq.true")
+    .order("nombre");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+app.post("/aloha/clientes", async (req, res) => {
+  const { nombre, telefono, email, direccion, notas } = req.body;
+  if (!nombre) return res.status(400).json({ error: "El nombre es requerido" });
+  const { data, error } = await supabase.from("aloha_clientes")
+    .insert([{ nombre, telefono: telefono || null, email: email || null, direccion: direccion || null, notas: notas || null, activo: true }])
+    .select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.put("/aloha/clientes/:id", async (req, res) => {
+  const { nombre, telefono, email, direccion, notas } = req.body;
+  const { data, error } = await supabase.from("aloha_clientes")
+    .update({ nombre, telefono: telefono || null, email: email || null, direccion: direccion || null, notas: notas || null })
+    .eq("id", req.params.id).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data[0]);
+});
+
+app.delete("/aloha/clientes/:id", async (req, res) => {
+  const { error } = await supabase.from("aloha_clientes")
+    .update({ activo: false }).eq("id", req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// GET /aloha/clientes/:id/historial — facturas de un cliente
+app.get("/aloha/clientes/:id/historial", async (req, res) => {
+  const { data, error } = await supabase
+    .from("aloha_ventas")
+    .select("*, aloha_detalle(id, cantidad, precio, aloha_productos(id, nombre))")
+    .eq("cliente_id", req.params.id)
+    .order("created_at", { ascending: false });
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data || []);
+});
+
+// ─── VENTA / FACTURACIÓN ─────────────────────────────────────────────────────
+// Numeración propia ALH-00000001 (sin NCF). ITBIS opcional por factura.
+app.post("/aloha/venta", async (req, res) => {
+  try {
+    const {
+      items, cliente_id, cliente_nombre, metodo_pago,
+      aplica_itbis, monto_efectivo, monto_tarjeta, monto_transferencia, usuario,
+    } = req.body;
+    if (!Array.isArray(items) || items.length === 0)
+      return res.status(400).json({ error: "La factura no tiene artículos" });
+
+    // Validar stock disponible
+    for (const item of items) {
+      const { data: prod } = await supabase.from("aloha_productos")
+        .select("id, nombre, stock").eq("id", item.id).single();
+      if (!prod) return res.status(400).json({ error: `Producto #${item.id} no existe` });
+      if (Number(prod.stock) < Number(item.qty))
+        return res.status(400).json({ error: `Stock insuficiente de "${prod.nombre}" (quedan ${prod.stock})` });
+    }
+
+    const subtotal = items.reduce((a, i) => a + Number(i.precio) * Number(i.qty), 0);
+    const itbis = aplica_itbis ? +(subtotal * 0.18).toFixed(2) : 0;
+    const total = +(subtotal + itbis).toFixed(2);
+
+    const esMixto = String(metodo_pago || "").toUpperCase() === "MIXTO";
+    const { data: venta, error } = await supabase.from("aloha_ventas").insert([{
+      cliente_id: cliente_id || null,
+      cliente_nombre: cliente_nombre || "Cliente genérico",
+      subtotal, itbis, aplica_itbis: !!aplica_itbis, total,
+      metodo_pago: metodo_pago || "EFECTIVO",
+      monto_efectivo:      esMixto ? Number(monto_efectivo || 0)      : 0,
+      monto_tarjeta:       esMixto ? Number(monto_tarjeta || 0)       : 0,
+      monto_transferencia: esMixto ? Number(monto_transferencia || 0) : 0,
+      usuario: usuario || "Sistema",
+      created_at: new Date(),
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Número de factura a partir del id: ALH-00000001
+    const numero = "ALH-" + String(venta[0].id).padStart(8, "0");
+    await supabase.from("aloha_ventas").update({ numero }).eq("id", venta[0].id);
+
+    // Detalle + descuento de stock
+    for (const item of items) {
+      await supabase.from("aloha_detalle").insert([{
+        venta_id: venta[0].id, producto_id: item.id,
+        cantidad: item.qty, precio: item.precio,
+      }]);
+      const { data: prod } = await supabase.from("aloha_productos").select("stock").eq("id", item.id).single();
+      if (prod) await supabase.from("aloha_productos").update({ stock: prod.stock - item.qty }).eq("id", item.id);
+    }
+    res.json({ ...venta[0], numero });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /aloha/ventas?limit=N — lista simple (dashboards / cuadre)
+app.get("/aloha/ventas", async (req, res) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 200, 1000);
+    const { data, error } = await supabase
+      .from("aloha_ventas").select("*")
+      .order("created_at", { ascending: false }).limit(limit);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /aloha/historial?desde=YYYY-MM-DD&hasta=YYYY-MM-DD&page=1 — facturas con detalle
+app.get("/aloha/historial", async (req, res) => {
+  try {
+    const desde = req.query.desde || "2000-01-01";
+    const hasta = req.query.hasta || "2100-01-01";
+    const page = Math.max(1, Number(req.query.page) || 1);
+    const porPagina = 50;
+    const { data, error, count } = await supabase
+      .from("aloha_ventas")
+      .select(`*, aloha_detalle(id, cantidad, precio, aloha_productos(id, nombre))`, { count: "exact" })
+      .gte("created_at", `${desde}T00:00:00`)
+      .lte("created_at", `${hasta}T23:59:59`)
+      .order("created_at", { ascending: false })
+      .range((page - 1) * porPagina, page * porPagina - 1);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json({ ventas: data || [], total: count || 0, pagina: page, por_pagina: porPagina });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // Montar los dos módulos contables independientes
 mountContabilidadModulo("/cafeteria/contabilidad", {
   cajaChica: "cafeteria_caja_chica",
@@ -9285,6 +9479,14 @@ mountContabilidadModulo("/capacitacion/contabilidad", {
   cxc: "capacitacion_cuentas_cobrar", pagosCxc: "capacitacion_pagos_cobrar",
   cxp: "capacitacion_cuentas_pagar",  pagosCxp: "capacitacion_pagos_pagar",
   cuadre: "capacitacion_cuadre_caja",
+});
+// 🌺 Contabilidad independiente de ALOHA Perfume Store
+mountContabilidadModulo("/aloha/contabilidad", {
+  cajaChica: "aloha_caja_chica",
+  cxc: "aloha_cuentas_cobrar", pagosCxc: "aloha_pagos_cobrar",
+  cxp: "aloha_cuentas_pagar",  pagosCxp: "aloha_pagos_pagar",
+  cuadre: "aloha_cuadre_caja",
+  ventas: "aloha_ventas",
 });
 
 // ══════════════════════════════════════════════════════════════════════════════

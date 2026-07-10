@@ -12,6 +12,7 @@ const ROLES = [
   { value: "cafeteria",  label: "☕ Cafetería",          desc: "Solo módulo de Cafetería" },
   { value: "lavador",    label: "🚿 Lavador",            desc: "Solo su panel de lavados asignados" },
   { value: "vendedor",   label: "🛒 Vendedor",           desc: "Crea clientes y emite facturas de piezas (no cobra)" },
+  { value: "aloha",      label: "🌺 Aloha",              desc: "Solo módulo ALOHA Perfume Store (POS, clientes, inventario y contabilidad propios)" },
 ];
 
 const PERMISOS = {
@@ -22,6 +23,7 @@ const PERMISOS = {
   cafeteria:  ["Cafetería"],
   lavador:    ["Mis Lavados"],
   vendedor:   ["Clientes", "Facturación (emitir, sin cobrar)"],
+  aloha:      ["Aloha Perfumes"],
 };
 
 export default function UsuariosPage() {
