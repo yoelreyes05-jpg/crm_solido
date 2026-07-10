@@ -85,6 +85,12 @@ const MODULOS: Modulo[] = [
     ],
   },
   {
+    id: "aloha", label: "Aloha Perfumes", icon: "🌺", color: "#ec4899",
+    items: [
+      { href: "/aloha", icon: "🌺", label: "Aloha POS", key: "aloha", iconBg: "linear-gradient(145deg,#9d174d,#ec4899)", iconShadow: "0 4px 12px rgba(236,72,153,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+    ],
+  },
+  {
     id: "capacitaciones", label: "Capacitaciones", icon: "🎓", color: "#7c3aed",
     items: [
       { href: "/capacitaciones",             icon: "🎓", label: "Capacitaciones", key: "capacitaciones", iconBg: "linear-gradient(145deg,#4c1d95,#7c3aed)", iconShadow: "0 4px 12px rgba(124,58,237,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },

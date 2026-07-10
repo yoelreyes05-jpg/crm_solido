@@ -8,6 +8,28 @@
 -- ============================================================
 
 -- ============================================================
+--  ROL 'aloha' EN LA TABLA usuarios
+--  La tabla usuarios tiene un CHECK en la columna rol; sin esto,
+--  crear un usuario con rol 'aloha' falla con:
+--    violates check constraint "usuarios_rol_check"
+-- ============================================================
+ALTER TABLE usuarios DROP CONSTRAINT IF EXISTS usuarios_rol_check;
+
+ALTER TABLE usuarios
+  ADD CONSTRAINT usuarios_rol_check
+  CHECK (rol IN (
+    'gerente',
+    'admin',
+    'secretaria',
+    'tecnico',
+    'almacen',
+    'cafeteria',
+    'lavador',
+    'vendedor',
+    'aloha'
+  ));
+
+-- ============================================================
 --  CLIENTES DE ALOHA
 -- ============================================================
 CREATE TABLE IF NOT EXISTS aloha_clientes (
