@@ -6910,14 +6910,19 @@ app.post("/carwash", async (req, res) => {
       if (s) { if (!nombre) nombre = s.nombre; if (monto === null) monto = Number(s.precio); }
     }
 
-    // 💎 PLANES: si el cliente tiene membresía con lavados disponibles,
-    // el lavado queda cubierto por el plan (total 0) y se registra el consumo.
+    // 💎 PLANES: si el cliente tiene membresía con lavados disponibles Y el
+    // vehículo está amarrado a la membresía (o hay cupo para amarrarlo),
+    // el lavado queda cubierto (total 0) y se registra el consumo.
+    // Vehículo no registrado en el plan → se cobra normal.
     let planCobertura = null;
     const ben = await beneficiosCliente(Number(cliente_id));
     if (ben && ben.uso.lavados_disponibles !== 0 && ben.beneficios.lavados_mes !== undefined) {
-      planCobertura = ben;
-      monto = 0;
-      nombre = `${nombre || "Car wash"} — Cubierto por ${ben.plan.nombre}`;
+      const cubierto = await vehiculoCubiertoPlan(ben, Number(vehiculo_id));
+      if (cubierto) {
+        planCobertura = ben;
+        monto = 0;
+        nombre = `${nombre || "Car wash"} — Cubierto por ${ben.plan.nombre}`;
+      }
     }
 
     const payload = {
@@ -9365,6 +9370,10 @@ async function beneficiosCliente(clienteId) {
       .select("tipo, valor").eq("plan_id", memb.plan_id);
     const b = {};
     for (const x of (bens || [])) b[x.tipo] = Number(x.valor);
+    // Vehículos amarrados a la membresía (los únicos que cubre el plan)
+    const { data: vehs } = await supabase.from("plan_membresia_vehiculos")
+      .select("vehiculo_id").eq("membresia_id", memb.id);
+    const vehiculos = (vehs || []).map(v => Number(v.vehiculo_id));
     // Consumos del mes calendario actual (RD)
     const inicioMes = hoy.slice(0, 8) + "01";
     const { data: cons } = await supabase.from("plan_consumos")
@@ -9377,6 +9386,7 @@ async function beneficiosCliente(clienteId) {
       membresia: { id: memb.id, estado: memb.estado, ciclo: memb.ciclo, fecha_inicio: memb.fecha_inicio, fecha_renovacion: memb.fecha_renovacion },
       plan: memb.plan_catalogo,
       beneficios: b,
+      vehiculos,
       uso: {
         lavados_usados:           usados.lavado || 0,
         lavados_disponibles:      disp(b.lavados_mes, usados.lavado || 0),
@@ -9385,6 +9395,29 @@ async function beneficiosCliente(clienteId) {
       },
     };
   } catch (e) { console.error("beneficiosCliente:", e.message); return null; }
+}
+
+// ¿La membresía cubre este vehículo? Reglas:
+//  - vehiculos_max = -1  → cualquier vehículo (ilimitado)
+//  - vehículo ya amarrado → sí
+//  - quedan cupos (amarrados < vehiculos_max) → se amarra automático la 1ra vez
+//  - si no → NO cubierto (se cobra normal)
+//  - sin 'vehiculos_max' configurado → límite 1 por defecto
+async function vehiculoCubiertoPlan(ben, vehiculoId) {
+  try {
+    if (!ben || !vehiculoId) return false;
+    const vmax = ben.beneficios.vehiculos_max !== undefined ? Number(ben.beneficios.vehiculos_max) : 1;
+    if (vmax < 0) return true;
+    const vid = Number(vehiculoId);
+    if (ben.vehiculos.includes(vid)) return true;
+    if (ben.vehiculos.length < vmax) {
+      await supabase.from("plan_membresia_vehiculos")
+        .insert([{ membresia_id: ben.membresia.id, vehiculo_id: vid }]);
+      ben.vehiculos.push(vid);
+      return true;
+    }
+    return false;
+  } catch (e) { console.error("vehiculoCubiertoPlan:", e.message); return false; }
 }
 
 // Registra el uso de un beneficio (lavado, diagnostico). Best-effort.
@@ -9482,9 +9515,30 @@ app.get("/planes/membresias", async (req, res) => {
       .order("id", { ascending: false }).limit(500);
     if (error) return res.status(500).json({ error: error.message });
     const cliMap = await mapaClientes((data || []).map(m => m.cliente_id));
+    // Vehículos amarrados a cada membresía (con marca/modelo/placa)
+    const membIds = (data || []).map(m => m.id);
+    const vehPorMemb = {};
+    if (membIds.length) {
+      const { data: amarres } = await supabase.from("plan_membresia_vehiculos")
+        .select("membresia_id, vehiculo_id").in("membresia_id", membIds);
+      const vehIds = [...new Set((amarres || []).map(a => a.vehiculo_id))];
+      let vehMap = {};
+      if (vehIds.length) {
+        const { data: vehs } = await supabase.from("vehiculos").select("*").in("id", vehIds);
+        for (const v of (vehs || [])) vehMap[v.id] = v;
+      }
+      for (const a of (amarres || [])) {
+        if (!vehPorMemb[a.membresia_id]) vehPorMemb[a.membresia_id] = [];
+        const v = vehMap[a.vehiculo_id];
+        vehPorMemb[a.membresia_id].push(v
+          ? { id: v.id, marca: v.marca || "", modelo: v.modelo || "", placa: v.placa || v.matricula || "" }
+          : { id: a.vehiculo_id, marca: "", modelo: `Vehículo #${a.vehiculo_id}`, placa: "" });
+      }
+    }
     res.json((data || []).map(m => ({
       ...m,
       cliente: cliMap[m.cliente_id] || { id: m.cliente_id, nombre: `Cliente #${m.cliente_id}`, telefono: null },
+      vehiculos: vehPorMemb[m.id] || [],
     })));
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -9492,7 +9546,7 @@ app.get("/planes/membresias", async (req, res) => {
 // Inscribir: crea membresía ACTIVA + registra pago + ingreso en caja
 app.post("/planes/membresias", async (req, res) => {
   try {
-    const { cliente_id, plan_id, ciclo, metodo_pago, usuario, notas } = req.body;
+    const { cliente_id, plan_id, ciclo, metodo_pago, usuario, notas, vehiculo_ids } = req.body;
     if (!cliente_id || !plan_id)
       return res.status(400).json({ error: "cliente_id y plan_id son requeridos" });
     const { data: plan } = await supabase.from("plan_catalogo").select("*").eq("id", plan_id).maybeSingle();
@@ -9500,6 +9554,13 @@ app.post("/planes/membresias", async (req, res) => {
     // Un cliente solo puede tener una membresía activa
     const existente = await beneficiosCliente(cliente_id);
     if (existente) return res.status(400).json({ error: `El cliente ya tiene ${existente.plan.nombre} activo hasta ${existente.membresia.fecha_renovacion}` });
+    // Validar límite de vehículos del plan
+    const vehIds = [...new Set((Array.isArray(vehiculo_ids) ? vehiculo_ids : []).map(Number).filter(Boolean))];
+    const { data: benMax } = await supabase.from("plan_beneficios")
+      .select("valor").eq("plan_id", plan_id).eq("tipo", "vehiculos_max").maybeSingle();
+    const vmax = benMax ? Number(benMax.valor) : 1;
+    if (vmax >= 0 && vehIds.length > vmax)
+      return res.status(400).json({ error: `${plan.nombre} cubre máximo ${vmax} vehículo(s); seleccionaste ${vehIds.length}` });
 
     const esAnual = String(ciclo || "MENSUAL").toUpperCase() === "ANUAL";
     const monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
@@ -9515,6 +9576,13 @@ app.post("/planes/membresias", async (req, res) => {
       notas: notas || null, created_by: usuario || "Sistema",
     }]).select();
     if (error) return res.status(400).json({ error: error.message });
+
+    // Amarrar los vehículos seleccionados a la membresía
+    if (vehIds.length) {
+      await supabase.from("plan_membresia_vehiculos")
+        .insert(vehIds.map(v => ({ membresia_id: memb[0].id, vehiculo_id: v })))
+        .then(() => {}).catch(() => {});
+    }
 
     // Pago + caja (ingreso recurrente visible en contabilidad)
     if (monto > 0) {
@@ -9585,6 +9653,45 @@ app.post("/planes/membresias/:id/cancelar", async (req, res) => {
     logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: req.params.id,
       descripcion: `Canceló la membresía #${req.params.id}` });
     res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Vehículos de una membresía (amarrar / desamarrar) ──────────────────────
+app.post("/planes/membresias/:id/vehiculos", async (req, res) => {
+  try {
+    const membId = Number(req.params.id);
+    const vid = Number(req.body.vehiculo_id);
+    if (!vid) return res.status(400).json({ error: "vehiculo_id es requerido" });
+    const { data: memb } = await supabase.from("plan_membresias")
+      .select("id, plan_id").eq("id", membId).maybeSingle();
+    if (!memb) return res.status(404).json({ error: "Membresía no encontrada" });
+    // Validar límite del plan
+    const { data: benMax } = await supabase.from("plan_beneficios")
+      .select("valor").eq("plan_id", memb.plan_id).eq("tipo", "vehiculos_max").maybeSingle();
+    const vmax = benMax ? Number(benMax.valor) : 1;
+    const { data: actuales } = await supabase.from("plan_membresia_vehiculos")
+      .select("vehiculo_id").eq("membresia_id", membId);
+    if ((actuales || []).some(a => Number(a.vehiculo_id) === vid))
+      return res.status(400).json({ error: "Ese vehículo ya está en la membresía" });
+    if (vmax >= 0 && (actuales || []).length >= vmax)
+      return res.status(400).json({ error: `El plan cubre máximo ${vmax} vehículo(s). Quita uno primero.` });
+    const { error } = await supabase.from("plan_membresia_vehiculos")
+      .insert([{ membresia_id: membId, vehiculo_id: vid }]);
+    if (error) return res.status(400).json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: membId,
+      descripcion: `Amarró el vehículo #${vid} a la membresía #${membId}` });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.delete("/planes/membresias/:id/vehiculos/:vehiculoId", async (req, res) => {
+  try {
+    const { error } = await supabase.from("plan_membresia_vehiculos")
+      .delete().eq("membresia_id", req.params.id).eq("vehiculo_id", req.params.vehiculoId);
+    if (error) return res.status(400).json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: req.params.id,
+      descripcion: `Quitó el vehículo #${req.params.vehiculoId} de la membresía #${req.params.id}` });
+    res.json({ ok: true });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

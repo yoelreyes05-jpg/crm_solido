@@ -24,6 +24,7 @@ const BENEFICIO_TIPOS: { tipo: string; label: string; hint: string }[] = [
   { tipo: "desc_repuestos",       label: "% desc. en repuestos",   hint: "0 a 100" },
   { tipo: "multiplicador_puntos", label: "Multiplicador de puntos", hint: "1, 2 o 3" },
   { tipo: "prioridad",            label: "Prioridad en taller",    hint: "1 = sí, 0 = no" },
+  { tipo: "vehiculos_max",        label: "Vehículos cubiertos",    hint: "-1 = ilimitados; sin configurar = 1" },
 ];
 
 const beneficioLabel = (tipo: string) => BENEFICIO_TIPOS.find(b => b.tipo === tipo)?.label || tipo;
@@ -32,7 +33,15 @@ const valorLabel = (tipo: string, valor: number) => {
   if (tipo === "desc_servicios" || tipo === "desc_repuestos") return `${valor}%`;
   if (tipo === "multiplicador_puntos") return `x${valor}`;
   if (tipo === "prioridad") return valor ? "Sí" : "No";
+  if (tipo === "vehiculos_max") return valor < 0 ? "Ilimitados" : String(valor);
   return String(valor);
+};
+
+// Etiqueta corta de un vehículo
+const vehLabel = (v: any) => {
+  const nombre = `${v.marca || ""} ${v.modelo || ""}`.trim();
+  const partes = [nombre, v.placa].filter(Boolean);
+  return partes.length ? partes.join(" · ") : `Vehículo #${v.id}`;
 };
 
 const ESTADO_COLOR: Record<string, { bg: string; color: string }> = {
@@ -263,42 +272,88 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
   const [membresias, setMembresias] = useState<any[]>([]);
   const [planes, setPlanes] = useState<any[]>([]);
   const [clientes, setClientes] = useState<any[]>([]);
+  const [vehiculos, setVehiculos] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState("TODAS");
   const [form, setForm] = useState({ cliente_id: "", plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
+  const [vehSel, setVehSel] = useState<number[]>([]);
   const [buscaCliente, setBuscaCliente] = useState("");
   const [guardando, setGuardando] = useState(false);
+  const [gestVeh, setGestVeh] = useState<any>(null); // membresía cuyo modal de vehículos está abierto
 
   const cargar = async () => {
     try {
-      const [m, p, c] = await Promise.all([
+      const [m, p, c, v] = await Promise.all([
         fetch(`${API}/planes/membresias`).then(r => r.json()),
         fetch(`${API}/planes`).then(r => r.json()),
         fetch(`${API}/clientes`).then(r => r.json()),
+        fetch(`${API}/vehiculos`).then(r => r.json()),
       ]);
       setMembresias(Array.isArray(m) ? m : []);
       setPlanes(Array.isArray(p) ? p : []);
       setClientes(Array.isArray(c) ? c : []);
+      setVehiculos(Array.isArray(v) ? v : []);
     } catch { /* */ }
   };
   useEffect(() => { cargar(); }, []);
 
+  // Límite de vehículos del plan seleccionado (sin configurar = 1)
+  const vmaxDe = (planId: any) => {
+    const p = planes.find(x => String(x.id) === String(planId));
+    const b = (p?.plan_beneficios || []).find((x: any) => x.tipo === "vehiculos_max");
+    return b !== undefined ? Number(b.valor) : 1;
+  };
+  const vmaxForm = vmaxDe(form.plan_id);
+  const vehiculosDelCliente = form.cliente_id
+    ? vehiculos.filter((v: any) => String(v.cliente_id) === String(form.cliente_id))
+    : [];
+
+  const toggleVeh = (id: number) => {
+    if (vehSel.includes(id)) return setVehSel(vehSel.filter(x => x !== id));
+    if (vmaxForm >= 0 && vehSel.length >= vmaxForm)
+      return alert(`Este plan cubre máximo ${vmaxForm} vehículo(s)`);
+    setVehSel([...vehSel, id]);
+  };
+
   const inscribir = async () => {
     if (!form.cliente_id || !form.plan_id) return alert("Selecciona cliente y plan");
+    if (vehiculosDelCliente.length > 0 && vehSel.length === 0 &&
+        !confirm("No seleccionaste vehículos. El primer vehículo que traiga quedará amarrado automáticamente al plan. ¿Continuar?")) return;
     setGuardando(true);
     try {
       const r = await fetch(`${API}/planes/membresias`, {
         method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
-        body: JSON.stringify({ ...form, usuario: usuario?.nombre || "Sistema" }),
+        body: JSON.stringify({ ...form, vehiculo_ids: vehSel, usuario: usuario?.nombre || "Sistema" }),
       });
       const d = await r.json();
       if (d.error) return alert("Error: " + d.error);
       alert("✅ Membresía activada");
       setForm({ cliente_id: "", plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
+      setVehSel([]);
       setBuscaCliente("");
       cargar();
     } catch { alert("Error de conexión"); }
     finally { setGuardando(false); }
+  };
+
+  const quitarVehiculo = async (m: any, vid: number) => {
+    if (!confirm("¿Quitar este vehículo de la membresía?")) return;
+    const r = await fetch(`${API}/planes/membresias/${m.id}/vehiculos/${vid}`, { method: "DELETE", headers: auditHeaders() });
+    const d = await r.json();
+    if (d.error) return alert("Error: " + d.error);
+    cargar();
+    setGestVeh(null);
+  };
+
+  const agregarVehiculo = async (m: any, vid: number) => {
+    const r = await fetch(`${API}/planes/membresias/${m.id}/vehiculos`, {
+      method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
+      body: JSON.stringify({ vehiculo_id: vid }),
+    });
+    const d = await r.json();
+    if (d.error) return alert("Error: " + d.error);
+    cargar();
+    setGestVeh(null);
   };
 
   const renovar = async (m: any) => {
@@ -353,7 +408,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
-            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Ciclo</th>
+            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Vehículos</th><th style={S.th}>Ciclo</th>
             <th style={S.th}>Renueva</th><th style={S.th}>Estado</th><th style={S.th}></th>
           </tr></thead>
           <tbody>
@@ -370,22 +425,66 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                       {m.plan_catalogo?.emoji} {m.plan_catalogo?.nombre}
                     </span>
                   </td>
+                  <td style={S.td}>
+                    {(m.vehiculos || []).map((v: any) => (
+                      <div key={v.id} style={{ fontSize: 11, color: "#334155" }}>🚗 {vehLabel(v)}</div>
+                    ))}
+                    {(m.vehiculos || []).length === 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>— se amarra al 1er uso</span>}
+                  </td>
                   <td style={S.td}>{m.ciclo === "ANUAL" ? "Anual" : "Mensual"}</td>
                   <td style={S.td}>{fmtFecha(m.fecha_renovacion)}</td>
                   <td style={S.td}>
                     <span style={{ background: ec.bg, color: ec.color, padding: "3px 10px", borderRadius: 20, fontWeight: 800, fontSize: 11 }}>{m.estado}</span>
                   </td>
                   <td style={{ ...S.td, whiteSpace: "nowrap" }}>
+                    {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => setGestVeh(m)} style={S.btnGhost}>🚗</button>}{" "}
                     {puedeEditar && m.estado !== "CANCELADA" && <button onClick={() => renovar(m)} style={S.btnGhost}>🔄 Renovar</button>}{" "}
                     {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => cancelar(m)} style={{ ...S.btnGhost, color: "#ef4444" }}>✕</button>}
                   </td>
                 </tr>
               );
             })}
-            {visibles.length === 0 && <tr><td style={S.td} colSpan={6}>Sin membresías.</td></tr>}
+            {visibles.length === 0 && <tr><td style={S.td} colSpan={7}>Sin membresías.</td></tr>}
           </tbody>
         </table>
       </div>
+
+      {/* Modal gestión de vehículos de una membresía */}
+      {gestVeh && (
+        <div onClick={() => setGestVeh(null)} style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
+          <div onClick={e => e.stopPropagation()} style={{ ...S.card, width: 460, margin: 0, maxHeight: "80vh", overflowY: "auto" }}>
+            <h3 style={{ fontWeight: 800, color: "#111827" }}>
+              🚗 Vehículos — {gestVeh.cliente?.nombre} ({gestVeh.plan_catalogo?.emoji} {gestVeh.plan_catalogo?.nombre})
+            </h3>
+            <p style={{ fontSize: 12, color: "#64748b", marginBottom: 10 }}>
+              Cubre máximo {vmaxDe(gestVeh.plan_id) < 0 ? "ilimitados" : vmaxDe(gestVeh.plan_id)} vehículo(s). Solo los vehículos amarrados reciben los lavados del plan.
+            </p>
+            <div style={{ marginBottom: 12 }}>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 6 }}>AMARRADOS</div>
+              {(gestVeh.vehiculos || []).map((v: any) => (
+                <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #eef2f7" }}>
+                  <span style={{ flex: 1, fontSize: 13 }}>🚗 {vehLabel(v)}</span>
+                  <button onClick={() => quitarVehiculo(gestVeh, v.id)} style={{ ...S.btnGhost, color: "#ef4444" }}>Quitar</button>
+                </div>
+              ))}
+              {(gestVeh.vehiculos || []).length === 0 && <div style={{ fontSize: 12, color: "#94a3b8" }}>Ninguno todavía.</div>}
+            </div>
+            <div>
+              <div style={{ fontSize: 12, fontWeight: 700, color: "#64748b", marginBottom: 6 }}>OTROS VEHÍCULOS DEL CLIENTE</div>
+              {vehiculos
+                .filter((v: any) => String(v.cliente_id) === String(gestVeh.cliente_id))
+                .filter((v: any) => !(gestVeh.vehiculos || []).some((x: any) => Number(x.id) === Number(v.id)))
+                .map((v: any) => (
+                  <div key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, padding: "7px 0", borderBottom: "1px solid #eef2f7" }}>
+                    <span style={{ flex: 1, fontSize: 13 }}>🚗 {vehLabel(v)}</span>
+                    <button onClick={() => agregarVehiculo(gestVeh, v.id)} style={S.btnGhost}>➕ Amarrar</button>
+                  </div>
+                ))}
+            </div>
+            <button onClick={() => setGestVeh(null)} style={{ ...S.btnGhost, marginTop: 12 }}>Cerrar</button>
+          </div>
+        </div>
+      )}
 
       <div style={S.card}>
         <h3 style={{ color: "#111827", fontWeight: 800, marginBottom: 12 }}>➕ Inscribir miembro</h3>
@@ -394,7 +493,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         {form.cliente_id ? (
           <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, background: "#eef2ff", borderRadius: 9, padding: "8px 12px" }}>
             <b style={{ flex: 1, fontSize: 13 }}>{clientes.find((c: any) => String(c.id) === String(form.cliente_id))?.nombre || `Cliente #${form.cliente_id}`}</b>
-            <button onClick={() => setForm({ ...form, cliente_id: "" })} style={{ ...S.btnGhost, padding: "3px 8px" }}>✕</button>
+            <button onClick={() => { setForm({ ...form, cliente_id: "" }); setVehSel([]); }} style={{ ...S.btnGhost, padding: "3px 8px" }}>✕</button>
           </div>
         ) : (
           <div style={{ position: "relative", marginBottom: 8 }}>
@@ -402,7 +501,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
             {clientesFiltrados.length > 0 && (
               <div style={{ position: "absolute", top: "100%", left: 0, right: 0, background: "#fff", border: "1px solid #e2e8f0", borderRadius: 9, zIndex: 20, maxHeight: 220, overflowY: "auto", boxShadow: "0 8px 20px rgba(0,0,0,0.08)" }}>
                 {clientesFiltrados.map((c: any) => (
-                  <div key={c.id} onClick={() => { setForm({ ...form, cliente_id: String(c.id) }); setBuscaCliente(""); }}
+                  <div key={c.id} onClick={() => { setForm({ ...form, cliente_id: String(c.id) }); setVehSel([]); setBuscaCliente(""); }}
                     style={{ padding: "8px 12px", cursor: "pointer", fontSize: 13, borderBottom: "1px solid #f1f5f9" }}>
                     <b>{c.nombre}</b>{c.telefono && <span style={{ color: "#94a3b8" }}> — {c.telefono}</span>}
                   </div>
@@ -413,7 +512,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         )}
 
         <label style={S.label}>Plan *</label>
-        <select value={form.plan_id} onChange={e => setForm({ ...form, plan_id: e.target.value })} style={{ ...S.input, marginBottom: 8 }}>
+        <select value={form.plan_id} onChange={e => { setForm({ ...form, plan_id: e.target.value }); setVehSel([]); }} style={{ ...S.input, marginBottom: 8 }}>
           <option value="">Seleccionar plan…</option>
           {planes.map(p => (
             <option key={p.id} value={p.id}>
@@ -421,6 +520,27 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
             </option>
           ))}
         </select>
+
+        {/* Vehículos cubiertos */}
+        {form.cliente_id && form.plan_id && (
+          <div style={{ marginBottom: 8 }}>
+            <label style={S.label}>
+              Vehículos cubiertos ({vehSel.length}/{vmaxForm < 0 ? "∞" : vmaxForm})
+            </label>
+            {vehiculosDelCliente.length === 0 && (
+              <div style={{ fontSize: 12, color: "#94a3b8", background: "#f8fafc", borderRadius: 9, padding: "8px 12px" }}>
+                El cliente no tiene vehículos registrados. El primero que traiga quedará amarrado automáticamente.
+              </div>
+            )}
+            {vehiculosDelCliente.map((v: any) => (
+              <label key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "5px 0", cursor: "pointer", color: "#111827" }}>
+                <input type="checkbox" checked={vehSel.includes(Number(v.id))} onChange={() => toggleVeh(Number(v.id))}
+                  style={{ width: 16, height: 16, accentColor: "#6366f1" }} />
+                🚗 {vehLabel(v)}
+              </label>
+            ))}
+          </div>
+        )}
 
         <label style={S.label}>Ciclo</label>
         <select value={form.ciclo} onChange={e => setForm({ ...form, ciclo: e.target.value })} style={{ ...S.input, marginBottom: 8 }}>
