@@ -93,6 +93,7 @@ export default function Dashboard() {
   const [stats,   setStats]   = useState<any>(null);
   const [ordenes, setOrdenes] = useState<any[]>([]);
   const [kpisGerente, setKpisGerente] = useState<any>(null);
+  const [planesResumen, setPlanesResumen] = useState<any>(null);
   const [vinHoy,  setVinHoy]  = useState(0);
   const [cafeHoy, setCafeHoy] = useState<number|null>(null);
   const [oper,    setOper]    = useState<any>(null);
@@ -148,6 +149,14 @@ export default function Dashboard() {
       } catch { setCafeHoy(null); }
 
       if (kRes) setKpisGerente(await kRes.json());
+
+      // 💎 Membresías: ganancias e inscripciones (solo gerente)
+      if (esGerente) {
+        try {
+          const pr = await fetch(`${API}/planes/resumen`).then(r => r.json());
+          if (pr && !pr.error) setPlanesResumen(pr);
+        } catch { /* módulo de planes sin migrar aún */ }
+      }
     } catch {}
     setLoading(false);
   }, [esGerente]);
@@ -353,6 +362,48 @@ export default function Dashboard() {
               </div>
             ))}
           </div>
+
+          {/* 💎 Membresías — ganancias e inscripciones */}
+          {planesResumen && (
+            <div style={{ display:"grid", gridTemplateColumns:"repeat(4,1fr)", gap:14, marginBottom:20 }}>
+              {[
+                {
+                  label: "💎 Miembros Activos",
+                  valor: String(planesResumen.miembros_activos || 0),
+                  color: "#6366f1",
+                  sub: `${planesResumen.inscripciones_mes || 0} inscripciones este mes`,
+                },
+                {
+                  label: "🔁 Ingreso Recurrente",
+                  valor: `$${(planesResumen.mrr || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`,
+                  color: "#8b5cf6",
+                  sub: "MRR mensual de membresías",
+                },
+                {
+                  label: "💳 Membresías — Mes",
+                  valor: `$${(planesResumen.ingresos_mes || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`,
+                  color: "#10b981",
+                  sub: "cobrado este mes (inscripciones + renovaciones)",
+                },
+                {
+                  label: "🏆 Membresías — Total",
+                  valor: `$${(planesResumen.ingresos_total || 0).toLocaleString("es-DO", { minimumFractionDigits:2, maximumFractionDigits:2 })}`,
+                  color: "#f59e0b",
+                  sub: "histórico de planes",
+                },
+              ].map(k => (
+                <div key={k.label} style={{
+                  background:"#fff", borderRadius:14, padding:"18px 16px",
+                  boxShadow:"0 2px 12px rgba(0,0,0,0.06)",
+                  borderTop:`4px solid ${k.color}`,
+                }}>
+                  <div style={{ fontSize:12, color:"#888", marginBottom:4, fontWeight:600 }}>{k.label}</div>
+                  <div style={{ fontSize:26, fontWeight:900, color:"#111", marginBottom:4 }}>{k.valor}</div>
+                  <div style={{ fontSize:11, color:"#aaa" }}>{k.sub}</div>
+                </div>
+              ))}
+            </div>
+          )}
 
           {/* Gráficas */}
           <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:16 }}>

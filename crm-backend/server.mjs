@@ -2639,6 +2639,7 @@ app.post("/facturas", async (req, res) => {
     // 💎 PLANES: descuento automático según la membresía activa del cliente
     let descuentoPlan = 0;
     let descuentoPlanNombre = null;
+    let notaPlan = null;
     if (cliente_id) {
       const benPlan = await beneficiosCliente(cliente_id);
       if (benPlan) {
@@ -2647,6 +2648,17 @@ app.post("/facturas", async (req, res) => {
         descuentoPlan = +((baseServicios * dS / 100) + (baseRepuestos * dR / 100)).toFixed(2);
         if (descuentoPlan > 0) descuentoPlanNombre = benPlan.plan.nombre;
         else descuentoPlan = 0;
+        // Estado del plan visible en la factura (lo que le queda este mes)
+        const partes = [];
+        if (benPlan.beneficios.lavados_mes !== undefined) {
+          const r = benPlan.uso.lavados_disponibles;
+          partes.push(r < 0 ? "lavados ilimitados" : `${r} lavado(s) restante(s)`);
+        }
+        if (benPlan.beneficios.diagnosticos_mes !== undefined) {
+          const r = benPlan.uso.diagnosticos_disponibles;
+          partes.push(r < 0 ? "diagnósticos ilimitados" : `${r} diagnóstico(s) restante(s)`);
+        }
+        notaPlan = `💎 ${benPlan.plan.nombre}${partes.length ? `: ${partes.join(" · ")} este mes` : ""} · renueva el ${benPlan.membresia.fecha_renovacion}`;
       }
     }
 
@@ -2703,7 +2715,7 @@ app.post("/facturas", async (req, res) => {
         itbis,
         total,
         metodo_pago: metodo_pago || "EFECTIVO",
-        notas: notas || null,
+        notas: [notas, notaPlan].filter(Boolean).join("\n") || null,
         creado_por: usuario_nombre || null,
         created_at: new Date()
       }])
@@ -7158,6 +7170,15 @@ app.post("/carwash/:id/facturar", async (req, res) => {
     }
 
     const vehInfo = veh ? [veh.marca, veh.modelo, veh.placa].filter(Boolean).join(" ") : null;
+
+    // 💎 PLANES: mostrar en la factura cuántos lavados le quedan al miembro este mes
+    let notasFactura = `Lavado: ${orden.descripcion || ""}`;
+    const benFac = await beneficiosCliente(orden.cliente_id);
+    if (benFac && benFac.beneficios.lavados_mes !== undefined) {
+      const rest = benFac.uso.lavados_disponibles;
+      notasFactura += `\n💎 ${benFac.plan.nombre}: ${rest < 0 ? "lavados ilimitados" : `le quedan ${rest} lavado(s)`} este mes · renueva el ${benFac.membresia.fecha_renovacion}`;
+    }
+
     const { data: factura, error } = await supabase.from("facturas").insert([{
       ncf, ncf_tipo: tipo, ncf_vence: fechaVence.toISOString().split("T")[0], estado: "ACTIVA",
       cliente_id: orden.cliente_id, cliente_nombre: cli?.nombre || "Consumidor Final",
@@ -7165,7 +7186,7 @@ app.post("/carwash/:id/facturar", async (req, res) => {
       vehiculo_id: orden.vehiculo_id, vehiculo_info: vehInfo,
       orden_id: Number(id), diagnostico_id: null,
       subtotal, itbis, total, metodo_pago: metodo_pago || "EFECTIVO",
-      notas: `Lavado: ${orden.descripcion || ""}`, creado_por: usuario_nombre || "Recepción", created_at: new Date(),
+      notas: notasFactura, creado_por: usuario_nombre || "Recepción", created_at: new Date(),
     }]).select().single();
     if (error) return res.status(400).json({ error: error.message });
     // 🎁 Fidelización: acumular puntos del lavado (si el programa está activo)
@@ -9535,11 +9556,79 @@ app.get("/planes/membresias", async (req, res) => {
           : { id: a.vehiculo_id, marca: "", modelo: `Vehículo #${a.vehiculo_id}`, placa: "" });
       }
     }
+    // Restantes del mes por membresía activa (lavados / diagnósticos)
+    const planIds = [...new Set((data || []).map(m => m.plan_id).filter(Boolean))];
+    const bensPorPlan = {};
+    if (planIds.length) {
+      const { data: bens } = await supabase.from("plan_beneficios")
+        .select("plan_id, tipo, valor").in("plan_id", planIds);
+      for (const b of (bens || [])) {
+        if (!bensPorPlan[b.plan_id]) bensPorPlan[b.plan_id] = {};
+        bensPorPlan[b.plan_id][b.tipo] = Number(b.valor);
+      }
+    }
+    const inicioMes = hoy.slice(0, 8) + "01";
+    const consPorMemb = {};
+    if (membIds.length) {
+      const { data: cons } = await supabase.from("plan_consumos")
+        .select("membresia_id, tipo").in("membresia_id", membIds)
+        .gte("created_at", `${inicioMes}T00:00:00`);
+      for (const c of (cons || [])) {
+        if (!consPorMemb[c.membresia_id]) consPorMemb[c.membresia_id] = {};
+        consPorMemb[c.membresia_id][c.tipo] = (consPorMemb[c.membresia_id][c.tipo] || 0) + 1;
+      }
+    }
+    const restantesDe = (m) => {
+      if (m.estado !== "ACTIVA") return null;
+      const b = bensPorPlan[m.plan_id] || {};
+      const u = consPorMemb[m.id] || {};
+      const disp = (lim, usado) => lim === undefined ? null : (lim < 0 ? -1 : Math.max(0, lim - usado));
+      return {
+        lavados:      disp(b.lavados_mes, u.lavado || 0),
+        lavados_usados: u.lavado || 0,
+        diagnosticos: disp(b.diagnosticos_mes, u.diagnostico || 0),
+        diagnosticos_usados: u.diagnostico || 0,
+      };
+    };
     res.json((data || []).map(m => ({
       ...m,
       cliente: cliMap[m.cliente_id] || { id: m.cliente_id, nombre: `Cliente #${m.cliente_id}`, telefono: null },
       vehiculos: vehPorMemb[m.id] || [],
+      restantes: restantesDe(m),
     })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Resumen para el dashboard (ganancias de membresías) ─────────────────────
+app.get("/planes/resumen", async (req, res) => {
+  try {
+    const hoy = hoyPlanRD();
+    const inicioMes = hoy.slice(0, 8) + "01";
+    const [activasQ, pagosQ, nuevasQ] = await Promise.all([
+      supabase.from("plan_membresias")
+        .select("id, ciclo, plan_catalogo(precio_mensual, precio_anual)")
+        .eq("estado", "ACTIVA").gte("fecha_renovacion", hoy),
+      supabase.from("plan_pagos").select("monto, created_at"),
+      supabase.from("plan_membresias").select("id", { count: "exact", head: true })
+        .gte("created_at", `${inicioMes}T00:00:00`),
+    ]);
+    const activas = activasQ.data || [];
+    const mrr = activas.reduce((a, m) => {
+      const p = m.plan_catalogo || {};
+      return a + (m.ciclo === "ANUAL" ? Number(p.precio_anual || 0) / 12 : Number(p.precio_mensual || 0));
+    }, 0);
+    const pagos = pagosQ.data || [];
+    const ingresos_total = pagos.reduce((a, p) => a + Number(p.monto), 0);
+    const ingresos_mes = pagos
+      .filter(p => String(p.created_at) >= `${inicioMes}T00:00:00`)
+      .reduce((a, p) => a + Number(p.monto), 0);
+    res.json({
+      miembros_activos: activas.length,
+      mrr: +mrr.toFixed(2),
+      ingresos_mes: +ingresos_mes.toFixed(2),
+      ingresos_total: +ingresos_total.toFixed(2),
+      inscripciones_mes: nuevasQ.count || 0,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

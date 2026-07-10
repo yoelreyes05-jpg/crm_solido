@@ -408,7 +408,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
-            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Vehículos</th><th style={S.th}>Ciclo</th>
+            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Restantes (mes)</th><th style={S.th}>Vehículos</th><th style={S.th}>Ciclo</th>
             <th style={S.th}>Renueva</th><th style={S.th}>Estado</th><th style={S.th}></th>
           </tr></thead>
           <tbody>
@@ -424,6 +424,23 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                     <span style={{ background: `${m.plan_catalogo?.color || "#3b82f6"}22`, color: m.plan_catalogo?.color || "#3b82f6", padding: "3px 10px", borderRadius: 20, fontWeight: 800, fontSize: 12 }}>
                       {m.plan_catalogo?.emoji} {m.plan_catalogo?.nombre}
                     </span>
+                  </td>
+                  <td style={S.td}>
+                    {m.restantes ? (
+                      <>
+                        {m.restantes.lavados !== null && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: m.restantes.lavados === 0 ? "#ef4444" : "#0ea5e9" }}>
+                            🚿 {m.restantes.lavados < 0 ? "Ilimitados" : `${m.restantes.lavados} de ${m.restantes.lavados + m.restantes.lavados_usados}`}
+                          </div>
+                        )}
+                        {m.restantes.diagnosticos !== null && (
+                          <div style={{ fontSize: 12, fontWeight: 700, color: m.restantes.diagnosticos === 0 ? "#ef4444" : "#8b5cf6" }}>
+                            🔍 {m.restantes.diagnosticos < 0 ? "Ilimitados" : `${m.restantes.diagnosticos} de ${m.restantes.diagnosticos + m.restantes.diagnosticos_usados}`}
+                          </div>
+                        )}
+                        {m.restantes.lavados === null && m.restantes.diagnosticos === null && <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>}
+                      </>
+                    ) : <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>}
                   </td>
                   <td style={S.td}>
                     {(m.vehiculos || []).map((v: any) => (
@@ -444,7 +461,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                 </tr>
               );
             })}
-            {visibles.length === 0 && <tr><td style={S.td} colSpan={7}>Sin membresías.</td></tr>}
+            {visibles.length === 0 && <tr><td style={S.td} colSpan={8}>Sin membresías.</td></tr>}
           </tbody>
         </table>
       </div>
