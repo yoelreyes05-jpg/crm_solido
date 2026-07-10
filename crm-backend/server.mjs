@@ -23,7 +23,7 @@ app.use(cors({
     cb(new Error(`CORS: origen no permitido → ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization"],
+  allowedHeaders: ["Content-Type", "Authorization", "x-usuario"],
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));

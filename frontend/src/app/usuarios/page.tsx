@@ -52,13 +52,16 @@ export default function UsuariosPage() {
         headers: { "Content-Type": "application/json", ...auditHeaders() },
         body: JSON.stringify(form)
       });
-      const data = await res.json();
+      const texto = await res.text();
+      let data;
+      try { data = JSON.parse(texto); }
+      catch { return alert(`Error al crear usuario (HTTP ${res.status}): ${texto.slice(0, 200) || "respuesta vacía"}`); }
       if (data.error) return alert(data.error);
       alert(`✅ Usuario "${form.nombre}" creado correctamente`);
       setForm({ nombre: "", email: "", password_hash: "", rol: "secretaria" });
       setTab("lista");
       fetchUsuarios();
-    } catch { alert("Error al crear usuario"); }
+    } catch (e) { alert(`Error al crear usuario: ${e instanceof Error ? e.message : "fallo de conexión"}`); }
   };
 
   const toggleActivo = async (usuario) => {
