@@ -10194,6 +10194,379 @@ mountContabilidadModulo("/aloha/contabilidad", {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 📅 CITAS — agenda del taller (migracion_v21)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Enriquece citas con datos de cliente y vehículo
+async function enriquecerCitas(citas) {
+  if (!citas || citas.length === 0) return [];
+  const clienteIds  = [...new Set(citas.map(c => c.cliente_id).filter(Boolean))];
+  const vehiculoIds = [...new Set(citas.map(c => c.vehiculo_id).filter(Boolean))];
+  const [{ data: clientes }, { data: vehiculos }] = await Promise.all([
+    clienteIds.length  ? supabase.from("clientes").select("id, nombre, telefono").in("id", clienteIds)   : Promise.resolve({ data: [] }),
+    vehiculoIds.length ? supabase.from("vehiculos").select("id, marca, modelo, placa").in("id", vehiculoIds) : Promise.resolve({ data: [] }),
+  ]);
+  return citas.map(c => {
+    const cli = clientes?.find(x => x.id === c.cliente_id);
+    const veh = vehiculos?.find(x => x.id === c.vehiculo_id);
+    return {
+      ...c,
+      cliente_nombre:   cli?.nombre || "Sin cliente",
+      cliente_telefono: cli?.telefono || "",
+      vehiculo_info:    veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "",
+      vehiculo_placa:   veh?.placa || "",
+    };
+  });
+}
+
+// GET /citas?desde=&hasta=&estado=&cliente_id=
+app.get("/citas", async (req, res) => {
+  try {
+    const { desde, hasta, estado, cliente_id } = req.query;
+    let q = supabase.from("citas_taller").select("*")
+      .order("fecha", { ascending: true })
+      .order("hora",  { ascending: true });
+    if (desde)      q = q.gte("fecha", desde);
+    if (hasta)      q = q.lte("fecha", hasta);
+    if (estado)     q = q.eq("estado", estado);
+    if (cliente_id) q = q.eq("cliente_id", cliente_id);
+    const { data, error } = await q;
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(await enriquecerCitas(data || []));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /citas/proximas?dias=2 — pendientes/confirmadas de hoy a N días (para recordatorios)
+app.get("/citas/proximas", async (req, res) => {
+  try {
+    const dias = Math.min(parseInt(req.query.dias, 10) || 2, 30);
+    const hoy = new Date().toISOString().slice(0, 10);
+    const lim = new Date(); lim.setDate(lim.getDate() + dias);
+    const { data, error } = await supabase.from("citas_taller").select("*")
+      .in("estado", ["PENDIENTE", "CONFIRMADA"])
+      .gte("fecha", hoy)
+      .lte("fecha", lim.toISOString().slice(0, 10))
+      .order("fecha", { ascending: true }).order("hora", { ascending: true });
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(await enriquecerCitas(data || []));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /citas/stats — KPIs de la agenda
+app.get("/citas/stats", async (req, res) => {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+    const man = new Date(); man.setDate(man.getDate() + 1);
+    const en7 = new Date(); en7.setDate(en7.getDate() + 7);
+    const { data } = await supabase.from("citas_taller").select("fecha, estado")
+      .gte("fecha", hoy).lte("fecha", en7.toISOString().slice(0, 10));
+    const citas = (data || []).filter(c => !["CANCELADA"].includes(c.estado));
+    res.json({
+      hoy:        citas.filter(c => c.fecha === hoy).length,
+      manana:     citas.filter(c => c.fecha === man.toISOString().slice(0, 10)).length,
+      semana:     citas.length,
+      pendientes: citas.filter(c => c.estado === "PENDIENTE").length,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /citas — crear cita (y registrarla en la memoria del cliente)
+app.post("/citas", async (req, res) => {
+  try {
+    const { cliente_id, vehiculo_id, mantenimiento_id, fecha, hora,
+            tipo_servicio, descripcion, origen, notas } = req.body;
+    if (!fecha) return res.status(400).json({ error: "La fecha es requerida" });
+    const { data, error } = await supabase.from("citas_taller").insert([{
+      cliente_id:       cliente_id || null,
+      vehiculo_id:      vehiculo_id || null,
+      mantenimiento_id: mantenimiento_id || null,
+      fecha,
+      hora:             hora || "09:00",
+      tipo_servicio:    tipo_servicio || null,
+      descripcion:      descripcion || null,
+      origen:           origen || "CRM",
+      notas:            notas || null,
+      estado: "PENDIENTE",
+    }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Memoria: registrar la interacción en la ficha del cliente
+    if (cliente_id) {
+      const u = usuarioDesdeReq(req);
+      supabase.from("cliente_interacciones").insert([{
+        cliente_id, vehiculo_id: vehiculo_id || null, tipo: "SISTEMA",
+        descripcion: `Cita agendada para ${fecha} ${hora || "09:00"} — ${descripcion || tipo_servicio || "servicio"}`,
+        referencia: `cita:${data.id}`, usuario_nombre: u.nombre,
+      }]).then(() => {}).catch(() => {});
+    }
+    logAccion(req, { accion: "CREAR", modulo: "citas", registroId: data.id,
+      descripcion: `Agendó cita #${data.id} para ${fecha}` });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /citas/:id — cambiar estado, fecha, hora, etc.
+app.patch("/citas/:id", async (req, res) => {
+  try {
+    const updates = { ...req.body, updated_at: new Date().toISOString() };
+    delete updates.id;
+    const { data, error } = await supabase.from("citas_taller")
+      .update(updates).eq("id", req.params.id).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    if (req.body.estado && data.cliente_id) {
+      const u = usuarioDesdeReq(req);
+      supabase.from("cliente_interacciones").insert([{
+        cliente_id: data.cliente_id, vehiculo_id: data.vehiculo_id, tipo: "SISTEMA",
+        descripcion: `Cita #${data.id} → ${req.body.estado}`,
+        referencia: `cita:${data.id}`, usuario_nombre: u.nombre,
+      }]).then(() => {}).catch(() => {});
+    }
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /citas/:id
+app.delete("/citas/:id", async (req, res) => {
+  try {
+    const { error } = await supabase.from("citas_taller").delete().eq("id", req.params.id);
+    if (error) return res.status(400).json({ error: error.message });
+    logAccion(req, { accion: "ELIMINAR", modulo: "citas", registroId: req.params.id,
+      descripcion: `Eliminó la cita #${req.params.id}` });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 🧠 FICHA 360 — memoria del cliente (interacciones + notas)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /clientes/:id/interacciones
+app.get("/clientes/:id/interacciones", async (req, res) => {
+  try {
+    const { data, error } = await supabase.from("cliente_interacciones")
+      .select("*").eq("cliente_id", req.params.id)
+      .order("created_at", { ascending: false }).limit(200);
+    if (error) return res.status(500).json({ error: error.message });
+    res.json(data || []);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /clientes/:id/interacciones — registrar contacto manual (nota, llamada, whatsapp…)
+app.post("/clientes/:id/interacciones", async (req, res) => {
+  try {
+    const { tipo, descripcion, vehiculo_id, referencia } = req.body;
+    const u = usuarioDesdeReq(req);
+    const { data, error } = await supabase.from("cliente_interacciones").insert([{
+      cliente_id:  Number(req.params.id),
+      vehiculo_id: vehiculo_id || null,
+      tipo:        tipo || "NOTA",
+      descripcion: descripcion || "",
+      referencia:  referencia || null,
+      usuario_nombre: u.nombre,
+    }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// PATCH /clientes/:id/memoria — notas y preferencia de contacto
+app.patch("/clientes/:id/memoria", async (req, res) => {
+  try {
+    const campos = {};
+    if (req.body.notas !== undefined)                campos.notas = req.body.notas;
+    if (req.body.preferencia_contacto !== undefined) campos.preferencia_contacto = req.body.preferencia_contacto;
+    const { data, error } = await supabase.from("clientes")
+      .update(campos).eq("id", req.params.id).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+    res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /clientes/:id/ficha — TODO el cliente en una sola llamada (ficha 360)
+app.get("/clientes/:id/ficha", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const [
+      { data: cliente }, { data: vehiculos }, { data: ordenes },
+      { data: facturas }, { data: diagnosticos }, { data: citas },
+      { data: interacciones },
+    ] = await Promise.all([
+      supabase.from("clientes").select("*").eq("id", id).single(),
+      supabase.from("vehiculos").select("*").eq("cliente_id", id),
+      supabase.from("ordenes_trabajo").select("*").eq("cliente_id", id).order("created_at", { ascending: false }),
+      supabase.from("facturas").select("*").eq("cliente_id", id).order("created_at", { ascending: false }),
+      supabase.from("diagnosticos").select("*").eq("cliente_id", id).order("created_at", { ascending: false }),
+      supabase.from("citas_taller").select("*").eq("cliente_id", id).order("fecha", { ascending: false }),
+      supabase.from("cliente_interacciones").select("*").eq("cliente_id", id).order("created_at", { ascending: false }).limit(100),
+    ]);
+
+    // Mantenimientos pendientes de sus vehículos
+    const vIds = (vehiculos || []).map(v => v.id);
+    const { data: mantenimientos } = vIds.length
+      ? await supabase.from("mantenimiento_preventivo").select("*")
+          .in("vehiculo_id", vIds).eq("estado", "ACTIVO").order("proximo_fecha", { ascending: true })
+      : { data: [] };
+
+    // KPIs de la relación con el cliente
+    const totalGastado = (facturas || []).reduce((s, f) => s + (Number(f.total) || 0), 0);
+    const fechas = (ordenes || []).map(o => o.created_at).filter(Boolean).sort();
+    const ultimaVisita  = fechas.length ? fechas[fechas.length - 1] : null;
+    const clienteDesde  = cliente?.created_at || (fechas.length ? fechas[0] : null);
+
+    // Enriquecer total de órdenes con su factura (mismo patrón del historial)
+    const facturasByOrden = {};
+    (facturas || []).forEach(f => { if (f.orden_id) facturasByOrden[f.orden_id] = f; });
+    const ordenesConTotal = (ordenes || []).map(o => ({
+      ...o, total: Number(o.total) || Number(facturasByOrden[o.id]?.total) || 0,
+    }));
+
+    res.json({
+      cliente, vehiculos: vehiculos || [], ordenes: ordenesConTotal,
+      facturas: facturas || [], diagnosticos: diagnosticos || [],
+      citas: citas || [], interacciones: interacciones || [],
+      mantenimientos: mantenimientos || [],
+      kpis: {
+        total_gastado: totalGastado,
+        visitas: (ordenes || []).length,
+        ultima_visita: ultimaVisita,
+        cliente_desde: clienteDesde,
+        vehiculos: (vehiculos || []).length,
+        citas_pendientes: (citas || []).filter(c => ["PENDIENTE", "CONFIRMADA"].includes(c.estado)).length,
+      },
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
+// 💬 RECORDATORIOS — centro de comunicación (WhatsApp con un clic)
+// ══════════════════════════════════════════════════════════════════════════════
+
+// GET /recordatorios — todo lo que hay que comunicar hoy, en un solo payload
+app.get("/recordatorios", async (req, res) => {
+  try {
+    const hoy = new Date();
+    const hoyS = hoy.toISOString().slice(0, 10);
+    const en7 = new Date(); en7.setDate(en7.getDate() + 7);
+    const hace7 = new Date(); hace7.setDate(hace7.getDate() - 7);
+
+    // 1) Mantenimientos vencidos o por vencer (7 días), no notificados
+    const { data: mants } = await supabase.from("mantenimiento_preventivo").select("*")
+      .eq("estado", "ACTIVO")
+      .lte("proximo_fecha", en7.toISOString().slice(0, 10))
+      .order("proximo_fecha", { ascending: true });
+
+    // 2) Citas de las próximas 48 h sin recordatorio enviado
+    const en2 = new Date(); en2.setDate(en2.getDate() + 2);
+    const { data: citas } = await supabase.from("citas_taller").select("*")
+      .in("estado", ["PENDIENTE", "CONFIRMADA"])
+      .gte("fecha", hoyS).lte("fecha", en2.toISOString().slice(0, 10))
+      .order("fecha", { ascending: true });
+
+    // 3) Seguimiento post-servicio: órdenes entregadas en los últimos 7 días
+    // Intenta con fecha_entrega; si la columna no existe, cae a created_at
+    let entregadas = [];
+    const rEnt = await supabase.from("ordenes_trabajo").select("*")
+      .eq("estado", "ENTREGADO")
+      .gte("fecha_entrega", hace7.toISOString())
+      .order("fecha_entrega", { ascending: false }).limit(50);
+    if (!rEnt.error) {
+      entregadas = rEnt.data || [];
+    } else {
+      const rAlt = await supabase.from("ordenes_trabajo").select("*")
+        .eq("estado", "ENTREGADO")
+        .gte("created_at", hace7.toISOString())
+        .order("created_at", { ascending: false }).limit(50);
+      entregadas = rAlt.data || [];
+    }
+
+    // Referencias ya contactadas (para no repetir seguimientos)
+    const refs = [
+      ...(entregadas || []).map(o => `seguimiento:${o.id}`),
+    ];
+    const { data: yaEnviados } = refs.length
+      ? await supabase.from("cliente_interacciones").select("referencia").in("referencia", refs)
+      : { data: [] };
+    const refsEnviadas = new Set((yaEnviados || []).map(r => r.referencia));
+
+    // Enriquecer con cliente y vehículo
+    const cliIds = [...new Set([
+      ...(mants || []).map(m => m.cliente_id),
+      ...(citas || []).map(c => c.cliente_id),
+      ...(entregadas || []).map(o => o.cliente_id),
+    ].filter(Boolean))];
+    const vehIds = [...new Set([
+      ...(mants || []).map(m => m.vehiculo_id),
+      ...(citas || []).map(c => c.vehiculo_id),
+      ...(entregadas || []).map(o => o.vehiculo_id),
+    ].filter(Boolean))];
+
+    const [{ data: clientes }, { data: vehiculos }] = await Promise.all([
+      cliIds.length ? supabase.from("clientes").select("id, nombre, telefono, preferencia_contacto").in("id", cliIds) : Promise.resolve({ data: [] }),
+      vehIds.length ? supabase.from("vehiculos").select("id, marca, modelo, placa").in("id", vehIds) : Promise.resolve({ data: [] }),
+    ]);
+    const cli = id => clientes?.find(c => c.id === id);
+    const veh = id => vehiculos?.find(v => v.id === id);
+    const vInfo = v => v ? `${v.marca} ${v.modelo} (${v.placa})` : "";
+
+    res.json({
+      mantenimientos: (mants || []).map(m => {
+        const c = cli(m.cliente_id), v = veh(m.vehiculo_id);
+        const dias = m.proximo_fecha ? Math.ceil((new Date(m.proximo_fecha) - hoy) / 86400000) : null;
+        return { ...m, cliente_nombre: c?.nombre || "Sin cliente", cliente_telefono: c?.telefono || "",
+                 vehiculo_info: vInfo(v), dias_restantes: dias,
+                 semaforo: dias !== null && dias < 0 ? "rojo" : "amarillo" };
+      }),
+      citas: (citas || []).map(ci => {
+        const c = cli(ci.cliente_id), v = veh(ci.vehiculo_id);
+        return { ...ci, cliente_nombre: c?.nombre || "Sin cliente", cliente_telefono: c?.telefono || "",
+                 vehiculo_info: vInfo(v) };
+      }),
+      seguimientos: (entregadas || [])
+        .filter(o => !refsEnviadas.has(`seguimiento:${o.id}`))
+        .map(o => {
+          const c = cli(o.cliente_id), v = veh(o.vehiculo_id);
+          return { id: o.id, orden_id: o.id, cliente_id: o.cliente_id, vehiculo_id: o.vehiculo_id,
+                   cliente_nombre: c?.nombre || "Sin cliente", cliente_telefono: c?.telefono || "",
+                   vehiculo_info: vInfo(v), descripcion: o.descripcion || "",
+                   entregado_el: o.fecha_entrega || o.created_at };
+        }),
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /recordatorios/enviado — registrar que se envió el WhatsApp (memoria + no repetir)
+// body: { tipo: 'mantenimiento'|'cita'|'seguimiento', id, cliente_id, vehiculo_id, mensaje }
+app.post("/recordatorios/enviado", async (req, res) => {
+  try {
+    const { tipo, id, cliente_id, vehiculo_id, mensaje } = req.body;
+    if (!tipo || !id) return res.status(400).json({ error: "tipo e id son requeridos" });
+    const u = usuarioDesdeReq(req);
+
+    if (tipo === "mantenimiento") {
+      await supabase.from("mantenimiento_preventivo")
+        .update({ notificado: true, updated_at: new Date().toISOString() }).eq("id", id);
+    } else if (tipo === "cita") {
+      await supabase.from("citas_taller")
+        .update({ recordatorio_enviado: true, updated_at: new Date().toISOString() }).eq("id", id);
+    }
+
+    if (cliente_id) {
+      const refPrefix = tipo === "seguimiento" ? "seguimiento" : (tipo === "cita" ? "recordatorio-cita" : "recordatorio-mant");
+      await supabase.from("cliente_interacciones").insert([{
+        cliente_id, vehiculo_id: vehiculo_id || null, tipo: "WHATSAPP",
+        descripcion: mensaje ? `WhatsApp enviado: "${String(mensaje).slice(0, 300)}"` : `WhatsApp de ${tipo} enviado`,
+        referencia: tipo === "seguimiento" ? `seguimiento:${id}` : `${refPrefix}:${id}`,
+        usuario_nombre: u.nombre,
+      }]);
+    }
+    logAccion(req, { accion: "NOTIFICAR", modulo: "recordatorios", registroId: id,
+      descripcion: `Envió WhatsApp de ${tipo} #${id}` });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
 // ══════════════════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 4000;

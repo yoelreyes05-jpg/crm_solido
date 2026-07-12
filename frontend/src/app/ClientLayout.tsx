@@ -27,6 +27,8 @@ const MENU = [
   { href: "/aprobacion",         icon: "✅", label: "Aprobaciones",         key: "aprobacion"       },
   // ── Clientes ─────────────────────────────────────────────────────────────
   { href: "/clientes",           icon: "👤", label: "Clientes",             key: "clientes"         },
+  { href: "/citas",              icon: "📅", label: "Citas",                key: "citas"            },
+  { href: "/recordatorios",      icon: "💬", label: "Recordatorios",        key: "recordatorios"    },
   { href: "/vehiculos",          icon: "🚙", label: "Vehículos",            key: "vehiculos"        },
   { href: "/ordenes",            icon: "📋", label: "Órdenes",              key: "ordenes"          },
   { href: "/historial-vehiculo", icon: "📜", label: "Historial Vehículos",  key: "historial"        },

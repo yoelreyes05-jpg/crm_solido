@@ -144,8 +144,8 @@ export default function Clientes() {
                           </button>
                         )}
                         <button onClick={() => router.push(`/clientes/${c.id}/historial`)}
-                          style={btnAccion("#3b82f6")} title="Ver historial">
-                          📋 Historial
+                          style={btnAccion("#3b82f6")} title="Ficha 360 — historial, citas, notas e interacciones">
+                          👤 Ficha 360
                         </button>
                         {puedeEliminar && (
                           <button onClick={() => eliminarCliente(c.id, c.nombre)}
