@@ -246,6 +246,55 @@ app.get("/clientes/:id/vehiculos", async (req, res) => {
   }
 });
 
+// POST /clientes/:id/vehiculos — alta de vehículo inline desde la ficha del cliente
+// Normaliza la placa, valida que no esté duplicada y registra en auditoría.
+app.post("/clientes/:id/vehiculos", async (req, res) => {
+  try {
+    const clienteId = Number(req.params.id);
+    const { placa, marca, modelo, ano, color, vin, motor, combustible, vin_data } = req.body;
+    if (!placa || !marca) return res.status(400).json({ error: "Placa y marca son obligatorias" });
+
+    const placaNorm = String(placa).trim().toUpperCase();
+
+    // Placa única (ignorando vehículos archivados)
+    const { data: existentes } = await supabase
+      .from("vehiculos")
+      .select("id, cliente_id, marca, modelo, activo")
+      .eq("placa", placaNorm)
+      .limit(5);
+    const existente = (existentes || []).find(v => v.activo !== false);
+    if (existente) {
+      const { data: dueno } = await supabase.from("clientes")
+        .select("nombre").eq("id", existente.cliente_id).maybeSingle();
+      return res.status(409).json({
+        error: `Esa placa ya está registrada: ${existente.marca} ${existente.modelo || ""}${dueno ? ` de ${dueno.nombre}` : ""}`.trim(),
+        vehiculo_id: existente.id,
+        cliente_id: existente.cliente_id,
+      });
+    }
+
+    const { data, error } = await supabase.from("vehiculos").insert([{
+      cliente_id: clienteId,
+      placa:      placaNorm,
+      marca,
+      modelo:      modelo || null,
+      ano:         ano ? Number(ano) : null,
+      color:       color || null,
+      vin:         vin || null,
+      motor:       motor || null,
+      combustible: combustible || null,
+      vin_data:    vin_data || null,
+    }]).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    logAccion(req, { accion: "CREAR", modulo: "vehiculos", registroId: data[0].id,
+      descripcion: `Agregó el vehículo ${marca} ${modelo || ""} (${placaNorm}) desde la ficha del cliente #${clienteId}` });
+    res.status(201).json(data[0]);
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // =====================================================
 // 🚗 VEHÍCULOS
 // =====================================================
@@ -7453,25 +7502,56 @@ app.get("/dgii/rnc/:rnc", async (req, res) => {
 // =====================================================
 // 🔍 BÚSQUEDA GLOBAL
 // =====================================================
-app.get("/buscar", async (req, res) => {
+// Omnibox: nombre | placa | teléfono | RNC/cédula | email | # de orden
+// Si el usuario escribe el teléfono con guiones (809-555-1234) igual lo encuentra.
+async function busquedaGlobalHandler(req, res) {
   try {
-    const { q } = req.query;
-    if (!q || q.trim().length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
-    const term = `%${q.trim()}%`;
+    const q = String(req.query.q || "").trim();
+    if (q.length < 2) return res.json({ clientes: [], vehiculos: [], ordenes: [] });
+    const term = `%${q}%`;
+    const soloDigitos = q.replace(/\D/g, "");
+    const termTel = soloDigitos.length >= 3 ? `%${soloDigitos}%` : term;
+
     const [cliRes, vehRes, ordRes] = await Promise.all([
-      supabase.from("clientes").select("id, nombre, telefono, email, cedula_rnc").or(`nombre.ilike.${term},telefono.ilike.${term},email.ilike.${term},cedula_rnc.ilike.${term}`).limit(5),
-      supabase.from("vehiculos").select("id, placa, marca, modelo, ano, color").or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`).limit(5),
-      supabase.from("ordenes_trabajo").select("id, numero_orden, estado, created_at").or(`numero_orden.ilike.${term}`).limit(5),
+      supabase.from("clientes").select("id, nombre, telefono, email, cedula_rnc, activo")
+        .or(`nombre.ilike.${term},telefono.ilike.${termTel},email.ilike.${term},cedula_rnc.ilike.${termTel}`)
+        .limit(5),
+      supabase.from("vehiculos").select("id, placa, marca, modelo, ano, color, cliente_id, activo")
+        .or(`placa.ilike.${term},marca.ilike.${term},modelo.ilike.${term}`)
+        .limit(5),
+      supabase.from("ordenes_trabajo").select("id, numero_orden, estado, created_at, cliente_id")
+        .or(`numero_orden.ilike.${term}`)
+        .limit(5),
     ]);
+
+    // Enriquecer vehículos y órdenes con el nombre del cliente
+    const cliIds = [...new Set([
+      ...(vehRes.data || []).map(v => v.cliente_id),
+      ...(ordRes.data || []).map(o => o.cliente_id),
+    ].filter(Boolean))];
+    let cliMap = {};
+    if (cliIds.length) {
+      const { data: clis } = await supabase.from("clientes").select("id, nombre, telefono").in("id", cliIds);
+      (clis || []).forEach(c => { cliMap[c.id] = c; });
+    }
+
     res.json({
-      clientes:  cliRes.data  || [],
-      vehiculos: vehRes.data  || [],
-      ordenes:   ordRes.data  || [],
+      clientes: (cliRes.data || []).filter(c => c.activo !== false).map(c => ({ ...c, cedula: c.cedula_rnc })),
+      vehiculos: (vehRes.data || []).filter(v => v.activo !== false).map(v => ({
+        ...v,
+        cliente_nombre:   cliMap[v.cliente_id]?.nombre   || null,
+        cliente_telefono: cliMap[v.cliente_id]?.telefono || null,
+      })),
+      ordenes: (ordRes.data || []).map(o => ({
+        ...o, cliente_nombre: cliMap[o.cliente_id]?.nombre || "",
+      })),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
-});
+}
+app.get("/buscar", busquedaGlobalHandler);
+app.get("/busqueda", busquedaGlobalHandler); // alias — BusquedaGlobal.tsx llama a esta ruta
 
 // =====================================================
 // ⚙️ CONFIGURACIÓN DEL SISTEMA
@@ -10421,8 +10501,62 @@ app.get("/clientes/:id/ficha", async (req, res) => {
       ...o, total: Number(o.total) || Number(facturasByOrden[o.id]?.total) || 0,
     }));
 
+    // 🚗 Último servicio y total de órdenes por vehículo (las órdenes ya vienen DESC)
+    const ordenesPorVehiculo = {};
+    ordenesConTotal.forEach(o => {
+      if (!o.vehiculo_id) return;
+      if (!ordenesPorVehiculo[o.vehiculo_id]) ordenesPorVehiculo[o.vehiculo_id] = [];
+      ordenesPorVehiculo[o.vehiculo_id].push(o);
+    });
+    const vehiculosConResumen = (vehiculos || [])
+      .filter(v => v.activo !== false)
+      .map(v => {
+        const ovs = ordenesPorVehiculo[v.id] || [];
+        return {
+          ...v,
+          ultimo_servicio: ovs[0]
+            ? { id: ovs[0].id, descripcion: ovs[0].descripcion, estado: ovs[0].estado, created_at: ovs[0].created_at }
+            : null,
+          total_ordenes: ovs.length,
+        };
+      });
+
+    // 💰 Facturas pendientes de cobro (badge en la cabecera de la ficha)
+    const pendientes = (facturas || []).filter(f => f.estado === "PENDIENTE_COBRO");
+    const facturas_pendientes = {
+      cantidad: pendientes.length,
+      total: pendientes.reduce((s, f) => s + (Number(f.total) || 0), 0),
+    };
+
+    // 💎 Membresía del cliente: activa (con beneficios del mes) o la última vencida/cancelada
+    let membresia = null;
+    const ben = await beneficiosCliente(id);
+    if (ben) {
+      membresia = {
+        ...ben.membresia,
+        plan: ben.plan,
+        beneficios: ben.beneficios,
+        uso: ben.uso,
+        vehiculo_ids: ben.vehiculos,
+      };
+    } else {
+      const { data: ult } = await supabase.from("plan_membresias")
+        .select("*, plan_catalogo(*)")
+        .eq("cliente_id", Number(id))
+        .in("estado", ["VENCIDA", "CANCELADA"])
+        .order("id", { ascending: false }).limit(1).maybeSingle();
+      if (ult) {
+        membresia = {
+          id: ult.id, estado: ult.estado, ciclo: ult.ciclo,
+          fecha_inicio: ult.fecha_inicio, fecha_renovacion: ult.fecha_renovacion,
+          plan: ult.plan_catalogo, beneficios: null, uso: null, vehiculo_ids: [],
+        };
+      }
+    }
+
     res.json({
-      cliente, vehiculos: vehiculos || [], ordenes: ordenesConTotal,
+      cliente, vehiculos: vehiculosConResumen, ordenes: ordenesConTotal,
+      membresia, facturas_pendientes,
       facturas: facturas || [], diagnosticos: diagnosticos || [],
       citas: citas || [], interacciones: interacciones || [],
       mantenimientos: mantenimientos || [],

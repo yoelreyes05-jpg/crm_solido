@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { auditHeaders } from "@/lib/audit";
 
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
@@ -41,6 +42,10 @@ export default function FichaCliente() {
   // Nueva interacción manual
   const [nuevaInt, setNuevaInt] = useState({ tipo: "NOTA", descripcion: "" });
 
+  // Modales de la ficha unificada
+  const [modalVehiculo, setModalVehiculo] = useState(false);
+  const [modalMembresia, setModalMembresia] = useState<false | "nueva" | "renovar">(false);
+
   const cargar = useCallback(() => {
     fetch(`${API}/clientes/${id}/ficha`)
       .then(r => r.json())
@@ -57,6 +62,8 @@ export default function FichaCliente() {
   if (!data) return <div style={{ padding: 40, textAlign: "center" }}>Cargando ficha del cliente...</div>;
 
   const { cliente, vehiculos, ordenes, facturas, diagnosticos, citas, interacciones, mantenimientos, kpis } = data;
+  const membresia = data.membresia || null;
+  const factPend = data.facturas_pendientes || { cantidad: 0, total: 0 };
 
   const guardarMemoria = async () => {
     await fetch(`${API}/clientes/${id}/memoria`, {
@@ -109,6 +116,14 @@ export default function FichaCliente() {
             📞 {cliente?.telefono || "Sin teléfono"} &nbsp;|&nbsp; ✉️ {cliente?.email || "Sin email"}
             {kpis?.cliente_desde && <> &nbsp;|&nbsp; 🤝 Cliente desde {fmtFecha(kpis.cliente_desde)}</>}
           </p>
+          {factPend.cantidad > 0 && (
+            <span
+              onClick={() => setTab("facturas")}
+              style={{ display: "inline-block", marginTop: 4, background: "#fef3c7", color: "#92400e", padding: "4px 12px", borderRadius: 20, fontSize: 12, fontWeight: 700, cursor: "pointer" }}
+              title="Ver facturas">
+              💰 {factPend.cantidad} factura(s) pendiente(s) de cobro · {fmt(factPend.total)}
+            </span>
+          )}
           <div style={{ display: "flex", gap: 10, marginTop: 10, flexWrap: "wrap" }}>
             {cliente?.telefono && (
               <button onClick={whatsappDirecto} style={{ background: "#25d366", color: "#fff", border: "none", padding: "7px 16px", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
@@ -161,6 +176,13 @@ export default function FichaCliente() {
           </p>
         )}
       </div>
+
+      {/* 💎 MEMBRESÍA — estados: activa / sin membresía / vencida */}
+      <WidgetMembresia
+        membresia={membresia}
+        onHacerMiembro={() => setModalMembresia("nueva")}
+        onRenovar={() => setModalMembresia("renovar")}
+      />
 
       {/* TABS */}
       <div style={{ display: "flex", gap: 8, marginBottom: 20, flexWrap: "wrap" }}>
@@ -248,21 +270,44 @@ export default function FichaCliente() {
 
         {/* ── VEHÍCULOS ── */}
         {tab === "vehiculos" && (
-          vehiculos.length === 0 ? <p style={empty}>Sin vehículos registrados</p> :
-          <table style={table}>
-            <thead><tr>{["Marca", "Modelo", "Año", "Placa", "Color"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
-            <tbody>
-              {vehiculos.map((v: any) => (
-                <tr key={v.id}>
-                  <td style={td}>{v.marca}</td>
-                  <td style={td}>{v.modelo}</td>
-                  <td style={td}>{v.ano}</td>
-                  <td style={td}><span style={{ background: "#1e3a5f", color: "#fff", padding: "3px 10px", borderRadius: 6, fontWeight: 700, fontSize: 13 }}>{v.placa}</span></td>
-                  <td style={td}>{v.color || "—"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <>
+            <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 12 }}>
+              <button onClick={() => setModalVehiculo(true)}
+                style={{ padding: "8px 16px", background: "#111827", color: "#fff", border: "none", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+                ➕ Agregar vehículo
+              </button>
+            </div>
+            {vehiculos.length === 0 ? (
+              <p style={empty}>
+                Este cliente no tiene vehículos.{" "}
+                <button onClick={() => setModalVehiculo(true)}
+                  style={{ background: "none", border: "none", color: "#3b82f6", fontWeight: 700, cursor: "pointer", fontSize: 13 }}>
+                  Agregar el primero
+                </button>
+              </p>
+            ) : (
+            <table style={table}>
+              <thead><tr>{["Marca", "Modelo", "Año", "Placa", "Color", "Último servicio", "Órdenes"].map(h => <th key={h} style={th}>{h}</th>)}</tr></thead>
+              <tbody>
+                {vehiculos.map((v: any) => (
+                  <tr key={v.id}>
+                    <td style={td}>{v.marca}</td>
+                    <td style={td}>{v.modelo}</td>
+                    <td style={td}>{v.ano}</td>
+                    <td style={td}><span style={{ background: "#1e3a5f", color: "#fff", padding: "3px 10px", borderRadius: 6, fontWeight: 700, fontSize: 13 }}>{v.placa}</span></td>
+                    <td style={td}>{v.color || "—"}</td>
+                    <td style={{ ...td, fontSize: 12 }}>
+                      {v.ultimo_servicio
+                        ? <>{fmtFecha(v.ultimo_servicio.created_at)} <span style={{ color: "#888" }}>· {v.ultimo_servicio.descripcion || v.ultimo_servicio.estado}</span></>
+                        : <span style={{ color: "#aaa" }}>Sin servicios</span>}
+                    </td>
+                    <td style={{ ...td, fontWeight: 700, textAlign: "center" }}>{v.total_ordenes ?? 0}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            )}
+          </>
         )}
 
         {/* ── FACTURAS ── */}
@@ -347,9 +392,391 @@ export default function FichaCliente() {
           </>
         )}
       </div>
+
+      {/* ── MODALES ── */}
+      {modalVehiculo && (
+        <ModalVehiculoInline
+          clienteId={String(id)}
+          onCerrar={() => setModalVehiculo(false)}
+          onCreado={() => { setModalVehiculo(false); cargar(); }}
+        />
+      )}
+      {modalMembresia && (
+        <ModalMembresia
+          clienteId={String(id)}
+          modo={modalMembresia}
+          membresia={membresia}
+          vehiculos={vehiculos}
+          onCerrar={() => setModalMembresia(false)}
+          onLista={() => { setModalMembresia(false); cargar(); }}
+        />
+      )}
     </div>
   );
 }
+
+// ────────────────────────────────────────────────────────────────
+// 💎 Widget de membresía — A: activa · B: sin membresía · C: vencida
+// ────────────────────────────────────────────────────────────────
+function WidgetMembresia({ membresia, onHacerMiembro, onRenovar }: {
+  membresia: any; onHacerMiembro: () => void; onRenovar: () => void;
+}) {
+  // B — sin membresía
+  if (!membresia) {
+    return (
+      <div style={{ ...wmCard, borderLeft: "5px solid #3b82f6", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>💎 Membresía</h3>
+          <p style={{ margin: "4px 0 0", fontSize: 13, color: "#888" }}>Este cliente no es miembro todavía.</p>
+        </div>
+        <button onClick={onHacerMiembro}
+          style={{ padding: "10px 22px", background: "linear-gradient(90deg,#2563eb,#7c3aed)", color: "#fff", border: "none", borderRadius: 9, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+          💎 Hacer miembro
+        </button>
+      </div>
+    );
+  }
+
+  const plan = membresia.plan || {};
+
+  // C — vencida o cancelada
+  if (membresia.estado !== "ACTIVA") {
+    return (
+      <div style={{ ...wmCard, borderLeft: "5px solid #9ca3af", background: "#f9fafb", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+        <div>
+          <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0, color: "#6b7280" }}>
+            {plan.emoji || "💎"} {plan.nombre || "Membresía"} — {membresia.estado === "CANCELADA" ? "cancelada" : "vencida"}
+          </h3>
+          <p style={{ margin: "4px 0 0", fontSize: 12, color: "#9ca3af" }}>
+            Venció el {membresia.fecha_renovacion ? new Date(membresia.fecha_renovacion + "T12:00:00").toLocaleDateString("es-DO") : "—"}
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={onRenovar}
+            style={{ padding: "9px 20px", background: "#fff", color: "#2563eb", border: "2px solid #2563eb", borderRadius: 9, fontWeight: 800, fontSize: 13, cursor: "pointer" }}>
+            🔄 Renovar
+          </button>
+          <button onClick={onHacerMiembro}
+            style={{ padding: "9px 20px", background: "#f1f5f9", color: "#374151", border: "1px solid #e2e8f0", borderRadius: 9, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
+            Cambiar plan
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // A — activa
+  const uso = membresia.uso || {};
+  const ben = membresia.beneficios || {};
+  const restante = (disp: number) => disp < 0 ? "ilimitados" : `${disp} disponible(s)`;
+  return (
+    <div style={{ ...wmCard, borderLeft: `5px solid ${plan.color || "#10b981"}` }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+        <h3 style={{ fontSize: 15, fontWeight: 700, margin: 0 }}>
+          {plan.emoji || "💎"} {plan.nombre}
+          <span style={{ marginLeft: 10, background: "#dcfce7", color: "#16a34a", padding: "3px 10px", borderRadius: 20, fontSize: 11, fontWeight: 800 }}>ACTIVA</span>
+          <span style={{ marginLeft: 8, fontSize: 11, color: "#888", fontWeight: 600 }}>({membresia.ciclo === "ANUAL" ? "anual" : "mensual"})</span>
+        </h3>
+        <span style={{ fontSize: 12, color: "#888" }}>
+          Renueva el {membresia.fecha_renovacion ? new Date(membresia.fecha_renovacion + "T12:00:00").toLocaleDateString("es-DO") : "—"}
+        </span>
+      </div>
+      <div style={{ display: "flex", gap: 18, marginTop: 10, flexWrap: "wrap", fontSize: 13 }}>
+        {ben.lavados_mes !== undefined && (
+          <span>🚿 Lavados: <b>{restante(uso.lavados_disponibles)}</b> este mes</span>
+        )}
+        {ben.diagnosticos_mes !== undefined && (
+          <span>🔍 Diagnósticos: <b>{restante(uso.diagnosticos_disponibles)}</b> este mes</span>
+        )}
+        {Number(ben.desc_servicios) > 0 && <span>🔧 {ben.desc_servicios}% desc. servicios</span>}
+        {Number(ben.desc_repuestos) > 0 && <span>⚙️ {ben.desc_repuestos}% desc. repuestos</span>}
+        <span style={{ color: "#888" }}>🚗 {(membresia.vehiculo_ids || []).length} vehículo(s) amarrado(s)</span>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 🚗 Modal: agregar vehículo inline (con decodificación de VIN)
+// ────────────────────────────────────────────────────────────────
+function ModalVehiculoInline({ clienteId, onCerrar, onCreado }: {
+  clienteId: string; onCerrar: () => void; onCreado: () => void;
+}) {
+  const [form, setForm] = useState({ placa: "", marca: "", modelo: "", ano: "", color: "", vin: "" });
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+  const [decodificando, setDecodificando] = useState(false);
+
+  const set = (k: string) => (e: any) => setForm(f => ({ ...f, [k]: e.target.value }));
+
+  const decodificarVin = async () => {
+    const vin = form.vin.trim().toUpperCase();
+    if (vin.length !== 17) return setError("El VIN debe tener 17 caracteres");
+    setDecodificando(true); setError("");
+    try {
+      const r = await fetch(`${API}/vin/${vin}`);
+      const d = await r.json();
+      if (d.error) return setError(d.error);
+      setForm(f => ({
+        ...f, vin,
+        marca:  d.marca  || f.marca,
+        modelo: d.modelo || f.modelo,
+        ano:    d.ano ? String(d.ano) : f.ano,
+      }));
+    } catch { setError("No se pudo decodificar el VIN"); }
+    finally { setDecodificando(false); }
+  };
+
+  const guardar = async () => {
+    setGuardando(true); setError("");
+    try {
+      const r = await fetch(`${API}/clientes/${clienteId}/vehiculos`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
+        body: JSON.stringify({ ...form, ano: Number(form.ano) || null, vin: form.vin || null }),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) return setError(d.error || "Error creando el vehículo");
+      onCreado();
+    } catch { setError("Error de conexión"); }
+    finally { setGuardando(false); }
+  };
+
+  return (
+    <div style={mOverlay} onClick={onCerrar}>
+      <div style={mModal} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800 }}>🚗 Agregar vehículo</h2>
+          <button onClick={onCerrar} style={mCerrar}>×</button>
+        </div>
+
+        <label style={mLabel}>Placa *</label>
+        <input value={form.placa} onChange={set("placa")} placeholder="A123456" style={mInput} />
+
+        <label style={mLabel}>VIN (opcional — 17 caracteres)</label>
+        <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+          <input value={form.vin} onChange={set("vin")} placeholder="1HGCM82633A004352"
+            style={{ ...mInput, marginBottom: 0, flex: 1, fontFamily: "monospace" }} />
+          <button onClick={decodificarVin} disabled={decodificando}
+            style={{ padding: "0 14px", background: "#f1f5f9", border: "1px solid #e2e8f0", borderRadius: 8, cursor: "pointer", fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+            {decodificando ? "..." : "🔎 Decodificar"}
+          </button>
+        </div>
+
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+          <div>
+            <label style={mLabel}>Marca *</label>
+            <input value={form.marca} onChange={set("marca")} placeholder="Toyota" style={mInput} />
+          </div>
+          <div>
+            <label style={mLabel}>Modelo</label>
+            <input value={form.modelo} onChange={set("modelo")} placeholder="Corolla" style={mInput} />
+          </div>
+          <div>
+            <label style={mLabel}>Año</label>
+            <input value={form.ano} onChange={set("ano")} placeholder="2020" style={mInput} />
+          </div>
+          <div>
+            <label style={mLabel}>Color</label>
+            <input value={form.color} onChange={set("color")} placeholder="Gris" style={mInput} />
+          </div>
+        </div>
+
+        {error && <p style={{ color: "#dc2626", fontSize: 13, margin: "4px 0 10px" }}>{error}</p>}
+        <button onClick={guardar} disabled={guardando || !form.placa.trim() || !form.marca.trim()}
+          style={{ ...mBtnPrimario, opacity: guardando || !form.placa.trim() || !form.marca.trim() ? 0.5 : 1 }}>
+          {guardando ? "Guardando…" : "💾 Guardar vehículo"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// ────────────────────────────────────────────────────────────────
+// 💎 Modal: hacer miembro / renovar (plan → vehículos → pago)
+// Reutiliza POST /planes/membresias y /planes/membresias/:id/renovar
+// ────────────────────────────────────────────────────────────────
+function ModalMembresia({ clienteId, modo, membresia, vehiculos, onCerrar, onLista }: {
+  clienteId: string; modo: "nueva" | "renovar"; membresia: any;
+  vehiculos: any[]; onCerrar: () => void; onLista: () => void;
+}) {
+  const [planes, setPlanes] = useState<any[]>([]);
+  const [plan, setPlan] = useState<any>(null);
+  const [ciclo, setCiclo] = useState<"MENSUAL" | "ANUAL">("MENSUAL");
+  const [seleccion, setSeleccion] = useState<number[]>([]);
+  const [metodoPago, setMetodoPago] = useState("EFECTIVO");
+  const [error, setError] = useState("");
+  const [guardando, setGuardando] = useState(false);
+
+  const esRenovar = modo === "renovar" && membresia?.id;
+
+  useEffect(() => {
+    if (esRenovar) return;
+    fetch(`${API}/planes`).then(r => r.json()).then(d => setPlanes(Array.isArray(d) ? d : [])).catch(() => {});
+  }, [esRenovar]);
+
+  const benDe = (p: any): Record<string, number> => {
+    const m: Record<string, number> = {};
+    (p?.plan_beneficios || []).forEach((b: any) => { m[b.tipo] = Number(b.valor); });
+    return m;
+  };
+  const vmaxDe = (p: any) => {
+    const b = benDe(p);
+    return b.vehiculos_max !== undefined ? b.vehiculos_max : 1;
+  };
+
+  const toggleVehiculo = (vid: number) => {
+    setSeleccion(s => {
+      if (s.includes(vid)) return s.filter(x => x !== vid);
+      const vmax = plan ? vmaxDe(plan) : 1;
+      if (vmax >= 0 && s.length >= vmax) return s; // respeta el límite del plan
+      return [...s, vid];
+    });
+  };
+
+  const usuarioNombre = () => {
+    try { return JSON.parse(localStorage.getItem("usuario") || "null")?.nombre || "Sistema"; }
+    catch { return "Sistema"; }
+  };
+
+  const confirmar = async () => {
+    setGuardando(true); setError("");
+    try {
+      const url = esRenovar
+        ? `${API}/planes/membresias/${membresia.id}/renovar`
+        : `${API}/planes/membresias`;
+      const body = esRenovar
+        ? { metodo_pago: metodoPago, usuario: usuarioNombre() }
+        : { cliente_id: Number(clienteId), plan_id: plan.id, ciclo, metodo_pago: metodoPago, vehiculo_ids: seleccion, usuario: usuarioNombre() };
+      const r = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
+        body: JSON.stringify(body),
+      });
+      const d = await r.json();
+      if (!r.ok || d.error) return setError(d.error || "Error procesando la membresía");
+      onLista();
+    } catch { setError("Error de conexión"); }
+    finally { setGuardando(false); }
+  };
+
+  const precio = (p: any) => ciclo === "ANUAL" ? Number(p?.precio_anual || 0) : Number(p?.precio_mensual || 0);
+  const planRenovar = esRenovar ? membresia.plan : null;
+  const montoRenovar = esRenovar
+    ? (membresia.ciclo === "ANUAL" ? Number(planRenovar?.precio_anual || 0) : Number(planRenovar?.precio_mensual || 0))
+    : 0;
+
+  return (
+    <div style={mOverlay} onClick={onCerrar}>
+      <div style={{ ...mModal, maxWidth: 560 }} onClick={e => e.stopPropagation()}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 800 }}>
+            {esRenovar ? "🔄 Renovar membresía" : "💎 Hacer miembro"}
+          </h2>
+          <button onClick={onCerrar} style={mCerrar}>×</button>
+        </div>
+
+        {esRenovar ? (
+          <p style={{ fontSize: 14, marginTop: 0 }}>
+            {planRenovar?.emoji} <b>{planRenovar?.nombre}</b> ({membresia.ciclo === "ANUAL" ? "anual" : "mensual"}) — {fmt(montoRenovar)}
+          </p>
+        ) : (
+          <>
+            {/* Paso 1: ciclo + plan */}
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {(["MENSUAL", "ANUAL"] as const).map(c => (
+                <button key={c} onClick={() => setCiclo(c)}
+                  style={{ ...mChip, ...(ciclo === c ? mChipActivo : {}) }}>
+                  {c === "MENSUAL" ? "Mensual" : "Anual"}
+                </button>
+              ))}
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 14 }}>
+              {planes.length === 0 && <p style={{ gridColumn: "1 / -1", color: "#888", fontSize: 13 }}>Cargando planes…</p>}
+              {planes.map(p => {
+                const b = benDe(p);
+                const vmax = vmaxDe(p);
+                return (
+                  <button key={p.id}
+                    onClick={() => { setPlan(p); setSeleccion(s => vmax >= 0 ? s.slice(0, vmax) : s); }}
+                    style={{
+                      textAlign: "left", padding: 12, borderRadius: 12, cursor: "pointer", background: "#fff",
+                      border: plan?.id === p.id ? `2px solid ${p.color || "#2563eb"}` : "1px solid #e2e8f0",
+                      boxShadow: plan?.id === p.id ? `0 0 0 3px ${p.color || "#2563eb"}22` : "none",
+                    }}>
+                    <div style={{ fontWeight: 800, fontSize: 14 }}>{p.emoji} {p.nombre}</div>
+                    <div style={{ fontSize: 13, color: "#555" }}>{fmt(precio(p))}{ciclo === "ANUAL" ? "/año" : "/mes"}</div>
+                    <div style={{ fontSize: 11, color: "#999", marginTop: 4 }}>
+                      {b.lavados_mes !== undefined && <>{b.lavados_mes < 0 ? "Lavados ilimitados" : `${b.lavados_mes} lavado(s)/mes`} · </>}
+                      {vmax < 0 ? "vehículos ilimitados" : `hasta ${vmax} vehículo(s)`}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Paso 2: vehículos a amarrar */}
+            {plan && (
+              <div style={{ marginBottom: 14 }}>
+                <p style={{ fontSize: 13, fontWeight: 700, margin: "0 0 8px" }}>
+                  Vehículos a amarrar ({seleccion.length}{vmaxDe(plan) >= 0 ? `/${vmaxDe(plan)}` : ""})
+                </p>
+                {(vehiculos || []).length === 0 ? (
+                  <p style={{ fontSize: 13, color: "#888", margin: 0 }}>
+                    El cliente no tiene vehículos — agrégalo primero desde la pestaña 🚗 Vehículos.
+                  </p>
+                ) : (
+                  (vehiculos || []).map((v: any) => (
+                    <label key={v.id} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, padding: "4px 0", cursor: "pointer" }}>
+                      <input type="checkbox" checked={seleccion.includes(v.id)} onChange={() => toggleVehiculo(v.id)} />
+                      <span style={{ fontFamily: "monospace", fontWeight: 700 }}>{v.placa}</span>
+                      <span style={{ color: "#666" }}>— {v.marca} {v.modelo} {v.ano || ""}</span>
+                    </label>
+                  ))
+                )}
+              </div>
+            )}
+          </>
+        )}
+
+        {/* Paso 3: forma de pago */}
+        {(esRenovar || plan) && (
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ fontSize: 13, fontWeight: 700, margin: "0 0 8px" }}>Forma de pago</p>
+            <div style={{ display: "flex", gap: 8 }}>
+              {["EFECTIVO", "TARJETA", "TRANSFERENCIA"].map(m => (
+                <button key={m} onClick={() => setMetodoPago(m)}
+                  style={{ ...mChip, ...(metodoPago === m ? mChipActivo : {}) }}>
+                  {m.charAt(0) + m.slice(1).toLowerCase()}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {error && <p style={{ color: "#dc2626", fontSize: 13, margin: "4px 0 10px" }}>{error}</p>}
+        <button onClick={confirmar} disabled={guardando || (!esRenovar && !plan)}
+          style={{ ...mBtnPrimario, background: "linear-gradient(90deg,#2563eb,#7c3aed)", opacity: guardando || (!esRenovar && !plan) ? 0.5 : 1 }}>
+          {guardando ? "Procesando…"
+            : esRenovar ? `🔄 Renovar — ${fmt(montoRenovar)}`
+            : plan ? `💎 Activar ${plan.nombre} — ${fmt(precio(plan))}`
+            : "Elige un plan"}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+// Estilos de los modales y el widget de membresía
+const wmCard: any = { background: "#fff", borderRadius: 14, padding: "16px 20px", boxShadow: "0 4px 20px rgba(0,0,0,0.08)", marginBottom: 20 };
+const mOverlay: any = { position: "fixed", inset: 0, background: "rgba(0,0,0,0.45)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 16 };
+const mModal: any = { background: "#fff", borderRadius: 16, padding: 26, width: "100%", maxWidth: 460, maxHeight: "90vh", overflowY: "auto", boxShadow: "0 20px 60px rgba(0,0,0,0.3)" };
+const mCerrar: any = { background: "none", border: "none", fontSize: 24, color: "#9ca3af", cursor: "pointer", lineHeight: 1 };
+const mLabel: any = { display: "block", fontSize: 12, fontWeight: 700, color: "#555", marginBottom: 4 };
+const mInput: any = { display: "block", width: "100%", padding: 11, marginBottom: 12, borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
+const mBtnPrimario: any = { width: "100%", padding: 13, background: "#111827", color: "#fff", border: "none", borderRadius: 9, cursor: "pointer", fontWeight: 800, fontSize: 14 };
+const mChip: any = { padding: "8px 16px", borderRadius: 8, border: "1px solid #e2e8f0", background: "#fff", cursor: "pointer", fontWeight: 600, fontSize: 13, color: "#374151" };
+const mChipActivo: any = { border: "2px solid #2563eb", background: "#eff6ff", color: "#1d4ed8", fontWeight: 800 };
 
 function MiniKpi({ label, value, color }: { label: string; value: string; color: string }) {
   return (

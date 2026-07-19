@@ -34,7 +34,7 @@ export default function BusquedaGlobal() {
     if (q.length < 2) { setResultado(null); setAbierto(false); return; }
     setLoading(true);
     try {
-      const res  = await fetch(`${API}/busqueda?q=${encodeURIComponent(q)}`);
+      const res  = await fetch(`${API}/buscar?q=${encodeURIComponent(q)}`);
       const data = await res.json();
       setResultado(data);
       setAbierto(true);
@@ -140,7 +140,7 @@ export default function BusquedaGlobal() {
               {resultado.clientes.length > 0 && (
                 <Section titulo="👤 Clientes">
                   {resultado.clientes.map(c => (
-                    <Item key={c.id} onClick={() => navegar(`/clientes`)}>
+                    <Item key={c.id} onClick={() => navegar(`/clientes/${c.id}/historial`)}>
                       <div style={{ fontWeight: 600, color: "#f1f5f9", fontSize: 13 }}>{c.nombre}</div>
                       {c.telefono && <div style={{ fontSize: 12, color: "#64748b" }}>{c.telefono}{c.cedula ? ` · ${c.cedula}` : ""}</div>}
                     </Item>
