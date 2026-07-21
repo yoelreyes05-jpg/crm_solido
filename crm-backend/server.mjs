@@ -181,19 +181,44 @@ app.get("/clientes", async (req, res) => {
 });
 
 app.post("/clientes", async (req, res) => {
-  const { nombre, telefono, email } = req.body;
-  const { data, error } = await supabase.from("clientes").insert([{ nombre, telefono, email }]).select();
+  const { nombre, telefono, email,
+    tipo_cliente, rnc, razon_social, contacto_nombre, contacto_telefono } = req.body;
+  const tipo = String(tipo_cliente || "INDIVIDUAL").toUpperCase() === "EMPRESA" ? "EMPRESA" : "INDIVIDUAL";
+  const fila = {
+    nombre, telefono, email,
+    tipo_cliente: tipo,
+    // Los datos de empresa solo se guardan si el cliente es EMPRESA
+    rnc:               tipo === "EMPRESA" ? (rnc || null)               : null,
+    razon_social:      tipo === "EMPRESA" ? (razon_social || null)      : null,
+    contacto_nombre:   tipo === "EMPRESA" ? (contacto_nombre || null)   : null,
+    contacto_telefono: tipo === "EMPRESA" ? (contacto_telefono || null) : null,
+  };
+  const { data, error } = await supabase.from("clientes").insert([fila]).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);
 });
 
 app.patch("/clientes/:id", async (req, res) => {
   const { id } = req.params;
-  const { nombre, telefono, email } = req.body;
+  const { nombre, telefono, email,
+    tipo_cliente, rnc, razon_social, contacto_nombre, contacto_telefono } = req.body;
   const campos = {};
   if (nombre   !== undefined) campos.nombre   = nombre;
   if (telefono !== undefined) campos.telefono = telefono;
   if (email    !== undefined) campos.email    = email;
+  if (tipo_cliente !== undefined) {
+    const tipo = String(tipo_cliente).toUpperCase() === "EMPRESA" ? "EMPRESA" : "INDIVIDUAL";
+    campos.tipo_cliente = tipo;
+    if (tipo === "INDIVIDUAL") {
+      // Al volver a individual se limpian los datos de empresa
+      campos.rnc = null; campos.razon_social = null;
+      campos.contacto_nombre = null; campos.contacto_telefono = null;
+    }
+  }
+  if (rnc               !== undefined) campos.rnc               = rnc || null;
+  if (razon_social      !== undefined) campos.razon_social      = razon_social || null;
+  if (contacto_nombre   !== undefined) campos.contacto_nombre   = contacto_nombre || null;
+  if (contacto_telefono !== undefined) campos.contacto_telefono = contacto_telefono || null;
   const { data, error } = await supabase.from("clientes").update(campos).eq("id", id).select();
   if (error) return res.json({ error: error.message });
   res.json(data[0]);

@@ -11,7 +11,10 @@ export default function Clientes() {
   const { usuario, puedeCrear, puedeEditar, puedeEliminar } = usePermisos("clientes");
   const [clientes, setClientes] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
-  const [nuevo, setNuevo] = useState({ nombre: "", telefono: "", email: "" });
+  const [nuevo, setNuevo] = useState({
+    nombre: "", telefono: "", email: "",
+    tipo_cliente: "INDIVIDUAL", rnc: "", razon_social: "", contacto_nombre: "", contacto_telefono: "",
+  });
 
   // Membresía al crear cliente
   const [planes, setPlanes] = useState<any[]>([]);
@@ -20,7 +23,10 @@ export default function Clientes() {
 
   // Modal de edición
   const [editando, setEditando] = useState<any | null>(null);
-  const [editForm, setEditForm] = useState({ nombre: "", telefono: "", email: "" });
+  const [editForm, setEditForm] = useState({
+    nombre: "", telefono: "", email: "",
+    tipo_cliente: "INDIVIDUAL", rnc: "", razon_social: "", contacto_nombre: "", contacto_telefono: "",
+  });
   const [guardando, setGuardando] = useState(false);
 
   const obtenerClientes = async () => {
@@ -42,7 +48,8 @@ export default function Clientes() {
   useEffect(() => { obtenerClientes(); obtenerPlanes(); }, []);
 
   const resetForm = () => {
-    setNuevo({ nombre: "", telefono: "", email: "" });
+    setNuevo({ nombre: "", telefono: "", email: "",
+      tipo_cliente: "INDIVIDUAL", rnc: "", razon_social: "", contacto_nombre: "", contacto_telefono: "" });
     setEsMiembro(false);
     setMembForm({ plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
   };
@@ -87,7 +94,12 @@ export default function Clientes() {
 
   const abrirEditar = (c: any) => {
     setEditando(c);
-    setEditForm({ nombre: c.nombre || "", telefono: c.telefono || "", email: c.email || "" });
+    setEditForm({
+      nombre: c.nombre || "", telefono: c.telefono || "", email: c.email || "",
+      tipo_cliente: c.tipo_cliente || "INDIVIDUAL",
+      rnc: c.rnc || "", razon_social: c.razon_social || "",
+      contacto_nombre: c.contacto_nombre || "", contacto_telefono: c.contacto_telefono || "",
+    });
   };
 
   const guardarEdicion = async () => {
@@ -130,9 +142,43 @@ export default function Clientes() {
         {/* FORMULARIO NUEVO — solo si puede crear */}
         {puedeCrear && <div style={card}>
           <h2 style={cardTitle}>➕ Nuevo Cliente</h2>
-          <label style={label}>Nombre *</label>
-          <input placeholder="Nombre completo" value={nuevo.nombre}
+
+          {/* TIPO DE CLIENTE */}
+          <label style={label}>Tipo de cliente</label>
+          <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+            {[["INDIVIDUAL", "👤 Individual"], ["EMPRESA", "🏢 Empresa / Flotilla"]].map(([val, txt]) => (
+              <button key={val} type="button"
+                onClick={() => setNuevo({ ...nuevo, tipo_cliente: val })}
+                style={tipoBtn(nuevo.tipo_cliente === val)}>
+                {txt}
+              </button>
+            ))}
+          </div>
+
+          <label style={label}>{nuevo.tipo_cliente === "EMPRESA" ? "Nombre de la empresa *" : "Nombre *"}</label>
+          <input placeholder={nuevo.tipo_cliente === "EMPRESA" ? "Ej. Transporte XYZ SRL" : "Nombre completo"} value={nuevo.nombre}
             onChange={e => setNuevo({ ...nuevo, nombre: e.target.value })} style={input} />
+
+          {nuevo.tipo_cliente === "EMPRESA" && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+              <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px" }}>
+                🚚 Todos los vehículos de la flotilla se registran bajo esta empresa desde su Ficha 360.
+              </p>
+              <label style={label}>RNC</label>
+              <input placeholder="1-31-00000-0" value={nuevo.rnc}
+                onChange={e => setNuevo({ ...nuevo, rnc: e.target.value })} style={input} />
+              <label style={label}>Razón social</label>
+              <input placeholder="Razón social (para factura)" value={nuevo.razon_social}
+                onChange={e => setNuevo({ ...nuevo, razon_social: e.target.value })} style={input} />
+              <label style={label}>Persona de contacto</label>
+              <input placeholder="Nombre de quien autoriza" value={nuevo.contacto_nombre}
+                onChange={e => setNuevo({ ...nuevo, contacto_nombre: e.target.value })} style={input} />
+              <label style={label}>Teléfono de contacto</label>
+              <input placeholder="809-000-0000" value={nuevo.contacto_telefono}
+                onChange={e => setNuevo({ ...nuevo, contacto_telefono: e.target.value })} style={{ ...input, marginBottom: 0 }} />
+            </div>
+          )}
+
           <label style={label}>Teléfono</label>
           <input placeholder="809-000-0000" value={nuevo.telefono}
             onChange={e => setNuevo({ ...nuevo, telefono: e.target.value })} style={input} />
@@ -213,7 +259,19 @@ export default function Clientes() {
                 ) : clientesFiltrados.map(c => (
                   <tr key={c.id}>
                     <td style={td}>{c.id}</td>
-                    <td style={{ ...td, fontWeight: 600 }}>{c.nombre}</td>
+                    <td style={{ ...td, fontWeight: 600 }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                        <span>{c.nombre}</span>
+                        {c.tipo_cliente === "EMPRESA" && (
+                          <span style={{ background: "#e0e7ff", color: "#3730a3", padding: "2px 8px", borderRadius: 6, fontSize: 11, fontWeight: 700 }}>
+                            🏢 Empresa
+                          </span>
+                        )}
+                      </div>
+                      {c.tipo_cliente === "EMPRESA" && c.rnc && (
+                        <div style={{ fontSize: 11, color: "#888", fontWeight: 400, marginTop: 2 }}>RNC: {c.rnc}</div>
+                      )}
+                    </td>
                     <td style={td}>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                         <span>{c.telefono || "—"}</span>
@@ -263,13 +321,47 @@ export default function Clientes() {
             <h2 style={{ marginTop: 0, marginBottom: 20, fontSize: 20, fontWeight: 700 }}>
               ✏️ Editar Cliente
             </h2>
-            <label style={label}>Nombre *</label>
+
+            <label style={label}>Tipo de cliente</label>
+            <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+              {[["INDIVIDUAL", "👤 Individual"], ["EMPRESA", "🏢 Empresa / Flotilla"]].map(([val, txt]) => (
+                <button key={val} type="button"
+                  onClick={() => setEditForm({ ...editForm, tipo_cliente: val })}
+                  style={tipoBtn(editForm.tipo_cliente === val)}>
+                  {txt}
+                </button>
+              ))}
+            </div>
+
+            <label style={label}>{editForm.tipo_cliente === "EMPRESA" ? "Nombre de la empresa *" : "Nombre *"}</label>
             <input
               value={editForm.nombre}
               onChange={e => setEditForm({ ...editForm, nombre: e.target.value })}
               style={input}
-              placeholder="Nombre completo"
+              placeholder={editForm.tipo_cliente === "EMPRESA" ? "Ej. Transporte XYZ SRL" : "Nombre completo"}
             />
+
+            {editForm.tipo_cliente === "EMPRESA" && (
+              <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+                <label style={label}>RNC</label>
+                <input value={editForm.rnc}
+                  onChange={e => setEditForm({ ...editForm, rnc: e.target.value })}
+                  style={input} placeholder="1-31-00000-0" />
+                <label style={label}>Razón social</label>
+                <input value={editForm.razon_social}
+                  onChange={e => setEditForm({ ...editForm, razon_social: e.target.value })}
+                  style={input} placeholder="Razón social (para factura)" />
+                <label style={label}>Persona de contacto</label>
+                <input value={editForm.contacto_nombre}
+                  onChange={e => setEditForm({ ...editForm, contacto_nombre: e.target.value })}
+                  style={input} placeholder="Nombre de quien autoriza" />
+                <label style={label}>Teléfono de contacto</label>
+                <input value={editForm.contacto_telefono}
+                  onChange={e => setEditForm({ ...editForm, contacto_telefono: e.target.value })}
+                  style={{ ...input, marginBottom: 0 }} placeholder="809-000-0000" />
+              </div>
+            )}
+
             <label style={label}>Teléfono</label>
             <input
               value={editForm.telefono}
@@ -314,6 +406,7 @@ const cardTitle: any = { marginBottom: 15, fontSize: 18, fontWeight: 600 };
 const label: any = { display: "block", fontSize: 13, fontWeight: 600, marginBottom: 4, color: "#555" };
 const input: any = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
 const btnPrimary: any = { padding: 13, background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", fontWeight: 700 };
+const tipoBtn = (activo: boolean): any => ({ flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, border: activo ? "2px solid #111827" : "1px solid #ddd", background: activo ? "#111827" : "#fff", color: activo ? "#fff" : "#374151" });
 const btnAccion = (bg: string): any => ({ padding: "5px 10px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" });
 const table: any = { width: "100%", borderCollapse: "collapse" };
 const th: any = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13 };
