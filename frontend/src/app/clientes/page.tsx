@@ -8,10 +8,15 @@ import { auditHeaders } from "@/lib/audit";
 
 export default function Clientes() {
   const router = useRouter();
-  const { puedeCrear, puedeEditar, puedeEliminar } = usePermisos("clientes");
+  const { usuario, puedeCrear, puedeEditar, puedeEliminar } = usePermisos("clientes");
   const [clientes, setClientes] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [nuevo, setNuevo] = useState({ nombre: "", telefono: "", email: "" });
+
+  // Membresía al crear cliente
+  const [planes, setPlanes] = useState<any[]>([]);
+  const [esMiembro, setEsMiembro] = useState(false);
+  const [membForm, setMembForm] = useState({ plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
 
   // Modal de edición
   const [editando, setEditando] = useState<any | null>(null);
@@ -26,10 +31,26 @@ export default function Clientes() {
     } catch { setClientes([]); }
   };
 
-  useEffect(() => { obtenerClientes(); }, []);
+  const obtenerPlanes = async () => {
+    try {
+      const res = await fetch(`${API}/planes`);
+      const data = await res.json();
+      setPlanes(Array.isArray(data) ? data : []);
+    } catch { setPlanes([]); }
+  };
+
+  useEffect(() => { obtenerClientes(); obtenerPlanes(); }, []);
+
+  const resetForm = () => {
+    setNuevo({ nombre: "", telefono: "", email: "" });
+    setEsMiembro(false);
+    setMembForm({ plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
+  };
 
   const crearCliente = async () => {
     if (!nuevo.nombre.trim()) return alert("Nombre requerido");
+    if (esMiembro && !membForm.plan_id) return alert("Selecciona un plan de membresía");
+    setGuardando(true);
     try {
       const res = await fetch(`${API}/clientes`, {
         method: "POST",
@@ -38,9 +59,30 @@ export default function Clientes() {
       });
       const data = await res.json();
       if (data.error) return alert(data.error);
-      setNuevo({ nombre: "", telefono: "", email: "" });
+
+      // Si es miembro, inscribir en el plan seleccionado (registra pago + caja)
+      if (esMiembro && membForm.plan_id && data.id) {
+        try {
+          const resM = await fetch(`${API}/planes/membresias`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              cliente_id: data.id,
+              plan_id: Number(membForm.plan_id),
+              ciclo: membForm.ciclo,
+              metodo_pago: membForm.metodo_pago,
+              usuario: usuario?.nombre || "Sistema",
+            })
+          });
+          const dataM = await resM.json();
+          if (dataM.error) alert("Cliente creado, pero la membresía no se registró: " + dataM.error);
+        } catch { alert("Cliente creado, pero la membresía no se registró (error de conexión)."); }
+      }
+
+      resetForm();
       obtenerClientes();
     } catch { alert("Error al guardar"); }
+    finally { setGuardando(false); }
   };
 
   const abrirEditar = (c: any) => {
@@ -97,7 +139,58 @@ export default function Clientes() {
           <label style={label}>Email</label>
           <input placeholder="correo@ejemplo.com" value={nuevo.email}
             onChange={e => setNuevo({ ...nuevo, email: e.target.value })} style={input} />
-          <button onClick={crearCliente} style={btnPrimary}>Guardar Cliente</button>
+
+          {/* MEMBRESÍA */}
+          <label style={{ display: "flex", alignItems: "center", gap: 8, margin: "6px 0 12px", cursor: "pointer", fontSize: 14, fontWeight: 600, color: "#374151" }}>
+            <input type="checkbox" checked={esMiembro}
+              onChange={e => setEsMiembro(e.target.checked)}
+              style={{ width: 18, height: 18, cursor: "pointer" }} />
+            💳 ¿Desea ser miembro?
+          </label>
+
+          {esMiembro && (
+            <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+              <label style={label}>Plan / Membresía *</label>
+              {planes.length === 0 ? (
+                <p style={{ fontSize: 13, color: "#888", margin: "4px 0 8px" }}>No hay planes disponibles.</p>
+              ) : (
+                <select value={membForm.plan_id}
+                  onChange={e => setMembForm({ ...membForm, plan_id: e.target.value })}
+                  style={input}>
+                  <option value="">— Selecciona un plan —</option>
+                  {planes.map(p => {
+                    const precio = membForm.ciclo === "ANUAL" ? p.precio_anual : p.precio_mensual;
+                    return (
+                      <option key={p.id} value={p.id}>
+                        {(p.emoji || "⭐") + " " + p.nombre + " — RD$" + Number(precio || 0).toLocaleString("es-DO") + (membForm.ciclo === "ANUAL" ? "/año" : "/mes")}
+                      </option>
+                    );
+                  })}
+                </select>
+              )}
+
+              <label style={label}>Ciclo</label>
+              <select value={membForm.ciclo}
+                onChange={e => setMembForm({ ...membForm, ciclo: e.target.value })}
+                style={input}>
+                <option value="MENSUAL">📅 Mensual</option>
+                <option value="ANUAL">🗓️ Anual</option>
+              </select>
+
+              <label style={label}>Método de pago</label>
+              <select value={membForm.metodo_pago}
+                onChange={e => setMembForm({ ...membForm, metodo_pago: e.target.value })}
+                style={{ ...input, marginBottom: 0 }}>
+                <option value="EFECTIVO">💵 Efectivo</option>
+                <option value="TARJETA">💳 Tarjeta</option>
+                <option value="TRANSFERENCIA">🏦 Transferencia</option>
+              </select>
+            </div>
+          )}
+
+          <button onClick={crearCliente} disabled={guardando} style={{ ...btnPrimary, opacity: guardando ? 0.6 : 1 }}>
+            {guardando ? "Guardando..." : (esMiembro ? "Guardar Cliente + Membresía" : "Guardar Cliente")}
+          </button>
         </div>}
 
         {/* LISTA */}
