@@ -1224,19 +1224,20 @@ app.post("/ventas", async (req, res) => {
   const total = subtotal + itbis;
   const tipo = ncf_tipo || "B02";
 
-  // NCF atómico vía RPC. Se eliminó el fallback Math.random(), que emitía
-  // comprobantes fuera de todo rango autorizado sin avisar.
-  const { data: compData, error: errNcf } = await supabase
-    .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
+  const { data: ncfData } = await supabase
+    .from("ncf_config")
+    .select("*")
+    .eq("tipo", tipo)
+    .single();
 
-  if (errNcf || !compData || compData.length === 0) {
-    return res.status(500).json({
-      error: `No se pudo emitir el comprobante ${tipo}: ${errNcf?.message || "no hay secuencia activa"}`,
-      detalle: "Revisar ncf_config (unidad_negocio='taller')."
-    });
+  let ncf;
+  if (ncfData) {
+    const nuevo = ncfData.secuencia_actual + 1;
+    await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
+    ncf = ncfData.prefijo + String(nuevo).padStart(8, "0");
+  } else {
+    ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
   }
-
-  const ncf = compData[0].comprobante;
 
   const { data: venta, error } = await supabase
     .from("ventas")
@@ -1458,31 +1459,17 @@ app.post("/cafeteria/venta", async (req, res) => {
   const { items, total, metodo_pago, ncf_tipo, monto_efectivo, monto_tarjeta, monto_transferencia } = req.body;
   const tipo = ncf_tipo || "B02";
 
-  // ── Comprobante de la cafetería ─────────────────────────────────────────
-  // La cafetería es un contribuyente DISTINTO al taller, con su propio RNC.
-  // Antes compartía la secuencia del taller: por eso los NCF B02 3, 4, 10,
-  // 11, 12 y 21 del taller terminaron en cafeteria_ventas.
-  //
-  // Mientras la cafetería no tenga RNC ni autorización de la DGII, NO puede
-  // emitir comprobantes fiscales. Vende con ticket interno y ncf = null.
-  // El día que tenga su autorización, se activa su fila en ncf_config
-  // (unidad_negocio='cafeteria') y empieza a facturar sin tocar este código.
-  //
-  // Se eliminó el valor por defecto `tipo + "00000001"`, que le asignaba el
-  // MISMO NCF a todas las ventas cuando no encontraba configuración.
-  let ncf = null;
-  let ncfTipoFinal = null;
+  const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
 
-  const { data: compData, error: errNcf } = await supabase
-    .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "cafeteria" });
-
-  if (!errNcf && compData && compData.length > 0) {
-    ncf = compData[0].comprobante;
-    ncfTipoFinal = tipo;
+  let ncf = tipo + "00000001";
+  if (ncfData) {
+    const nuevo = ncfData.secuencia_actual + 1;
+    await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
+    ncf = ncfData.prefijo + String(nuevo).padStart(8, "0");
   }
 
   // Base de la venta (siempre válida).
-  const filaBase = { total: Number(total), metodo_pago, ncf, ncf_tipo: ncfTipoFinal, created_at: new Date() };
+  const filaBase = { total: Number(total), metodo_pago, ncf, ncf_tipo: tipo, created_at: new Date() };
   const esMixto = String(metodo_pago).toUpperCase() === "MIXTO";
   // Para pago MIXTO intentamos guardar el desglose. Si las columnas no existen
   // (migración v13 no corrida), reintentamos sin ellas para que la venta NO se rechace.
@@ -1515,14 +1502,7 @@ app.post("/cafeteria/venta", async (req, res) => {
     const { data: prod } = await supabase.from("cafeteria_productos").select("stock").eq("id", item.id).single();
     if (prod) await supabase.from("cafeteria_productos").update({ stock: prod.stock - item.qty }).eq("id", item.id);
   }
-  // `fiscal: false` => la impresión debe mostrar TICKET INTERNO, sin la
-  // leyenda "Comprobante Fiscal" y sin RNC. No es un documento fiscal.
-  res.json({
-    ...venta[0],
-    ncf,
-    fiscal: !!ncf,
-    ticket: `TICKET-${String(venta[0].id).padStart(5, "0")}`
-  });
+  res.json({ ...venta[0], ncf });
 });
 
 // GET /cafeteria/ventas?limit=N — lista de ventas (usada por los dashboards)
@@ -2641,39 +2621,15 @@ app.post("/auth/login", async (req, res) => {
 // =====================================================
 // ⚠️ SOLO LECTURA — no incrementa. El incremento real ocurre en POST /facturas.
 app.get("/ncf/siguiente", async (req, res) => {
-  const { tipo, unidad } = req.query;
-  // Desde la separación taller/cafetería hay varias filas por tipo, así que
-  // el filtro por unidad_negocio es obligatorio: sin él, .single() falla.
+  const { tipo } = req.query;
   const { data } = await supabase
     .from("ncf_config")
     .select("*")
     .eq("tipo", tipo || "B02")
-    .eq("unidad_negocio", unidad || "taller")
-    .eq("activo", true)
-    .maybeSingle();
-
-  // Sin secuencia activa no se inventa un número: se informa el estado real.
-  if (!data) {
-    return res.json({
-      ncf: null,
-      disponible: false,
-      motivo: `No hay secuencia activa de tipo ${tipo || "B02"} para la unidad ${unidad || "taller"}.`
-    });
-  }
-
+    .single();
+  if (!data) return res.json({ ncf: (tipo || "B02") + "00000001" });
   const siguiente = (data.secuencia_actual || 0) + 1;
-  const agotado = data.secuencia_hasta != null && siguiente > data.secuencia_hasta;
-  const vencido = data.fecha_vencimiento != null &&
-                  new Date(data.fecha_vencimiento) < new Date();
-
-  res.json({
-    ncf: data.prefijo + String(siguiente).padStart(data.longitud_secuencia || 8, "0"),
-    disponible: !agotado && !vencido,
-    motivo: agotado ? "Rango agotado: solicitar nueva autorización a la DGII."
-          : vencido ? `Autorización vencida el ${data.fecha_vencimiento}.`
-          : null,
-    restantes: data.secuencia_hasta != null ? data.secuencia_hasta - siguiente + 1 : null
-  });
+  res.json({ ncf: data.prefijo + String(siguiente).padStart(8, "0") });
 });
 
 // =====================================================
@@ -2759,6 +2715,19 @@ app.post("/facturas", async (req, res) => {
     const total = subtotal + itbis;
 
     const tipo = ncf_tipo || "B02";
+    const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
+
+    let ncf;
+    const fechaVence = new Date();
+    fechaVence.setFullYear(fechaVence.getFullYear() + 2);
+
+    if (ncfData) {
+      const nuevo = (ncfData.secuencia_actual || 0) + 1;
+      await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
+      ncf = (ncfData.prefijo || tipo) + String(nuevo).padStart(8, "0");
+    } else {
+      ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
+    }
 
     // Resolver orden_id y cotizacion_id desde diagnostico_id
     let orden_id_resuelto = null;
@@ -2776,43 +2745,12 @@ app.post("/facturas", async (req, res) => {
     // su propio flujo de cuenta por cobrar con el cliente).
     const esPendienteCobro = !!pendiente_cobro && (metodo_pago || "EFECTIVO").toUpperCase() !== "CREDITO";
 
-    // ── NCF ────────────────────────────────────────────────────────────────
-    // Se pide lo más tarde posible, justo antes del insert, para reducir al
-    // mínimo la ventana en que un número puede quemarse.
-    //
-    // siguiente_comprobante() es atómico: usa UPDATE ... RETURNING, que
-    // bloquea la fila. Dos facturas simultáneas NUNCA reciben el mismo NCF.
-    // Valida además rango agotado y autorización vencida.
-    //
-    // Si falla, se aborta la factura. Antes había un fallback con
-    // Math.random() que inventaba comprobantes: eso generaba NCF fuera de
-    // todo rango autorizado, en silencio. Es preferible no vender a emitir
-    // un comprobante inválido ante la DGII.
-    //
-    // Si el insert falla después de obtener el número, el NCF queda sin
-    // usar. NO se revierte la secuencia a propósito: decrementar es inseguro
-    // bajo concurrencia (otra factura pudo tomar el siguiente número y se
-    // generaría un duplicado). Los huecos los detecta la vista
-    // v_ncf_faltantes y se reportan como anulados en el Formato 608.
-    const { data: compData, error: errNcf } = await supabase
-      .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
-
-    if (errNcf || !compData || compData.length === 0) {
-      return res.status(500).json({
-        error: `No se pudo emitir el comprobante ${tipo}: ${errNcf?.message || "no hay secuencia activa"}`,
-        detalle: "Revisar ncf_config (unidad_negocio='taller'): tipo no configurado, rango agotado o autorización vencida."
-      });
-    }
-
-    const ncf        = compData[0].comprobante;
-    const fechaVence = compData[0].vence; // null si aún no hay autorización cargada
-
     const { data: factura, error: errFac } = await supabase
       .from("facturas")
       .insert([{
         ncf,
         ncf_tipo: tipo,
-        ncf_vence: fechaVence,
+        ncf_vence: fechaVence.toISOString().split("T")[0],
         estado: esPendienteCobro ? "PENDIENTE_COBRO" : "ACTIVA",
         cliente_id: cliente_id || null,
         cliente_nombre: cliente_nombre || "Consumidor Final",
@@ -6151,19 +6089,20 @@ app.post("/cotizaciones/:id/convertir", async (req, res) => {
     // Crear factura con los datos de la cotización
     const { metodo_pago = "EFECTIVO", dias_credito } = req.body;
 
-    // NCF atómico vía RPC (mismo mecanismo que POST /facturas)
+    // Obtener siguiente NCF (usa ncf_config igual que POST /facturas)
     const tipo_ncf = cot.ncf_tipo || "B02";
-    const { data: compCot, error: errNcfCot } = await supabase
-      .rpc("siguiente_comprobante", { p_tipo: tipo_ncf, p_unidad: "taller" });
+    const { data: ncfRow } = await supabase
+      .from("ncf_config")
+      .select("*")
+      .eq("tipo", tipo_ncf)
+      .single();
 
-    if (errNcfCot || !compCot || compCot.length === 0) {
-      return res.status(500).json({
-        error: `No se pudo emitir el comprobante ${tipo_ncf}: ${errNcfCot?.message || "no hay secuencia activa"}`,
-        detalle: "Revisar ncf_config (unidad_negocio='taller')."
-      });
+    let ncf = null;
+    if (ncfRow) {
+      const siguienteNum = (ncfRow.secuencia_actual || 0) + 1;
+      ncf = (ncfRow.prefijo || tipo_ncf) + String(siguienteNum).padStart(8, "0");
+      await supabase.from("ncf_config").update({ secuencia_actual: siguienteNum }).eq("tipo", tipo_ncf);
     }
-
-    const ncf = compCot[0].comprobante;
 
     // Resolver orden_id desde el diagnóstico de la cotización
     let orden_id_factura = null;
@@ -7267,21 +7206,17 @@ app.post("/carwash/:id/facturar", async (req, res) => {
     const subtotal = base;
     const total = subtotal + itbis;
 
-    // NCF atómico vía RPC. El lavado del carwash factura por la misma
-    // secuencia del taller: es el mismo contribuyente y el mismo RNC.
     const tipo = ncf_tipo || "B02";
-    const { data: compLav, error: errNcfLav } = await supabase
-      .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
-
-    if (errNcfLav || !compLav || compLav.length === 0) {
-      return res.status(500).json({
-        error: `No se pudo emitir el comprobante ${tipo}: ${errNcfLav?.message || "no hay secuencia activa"}`,
-        detalle: "Revisar ncf_config (unidad_negocio='taller')."
-      });
+    const { data: ncfData } = await supabase.from("ncf_config").select("*").eq("tipo", tipo).single();
+    let ncf;
+    const fechaVence = new Date(); fechaVence.setFullYear(fechaVence.getFullYear() + 2);
+    if (ncfData) {
+      const nuevo = (ncfData.secuencia_actual || 0) + 1;
+      await supabase.from("ncf_config").update({ secuencia_actual: nuevo }).eq("tipo", tipo);
+      ncf = (ncfData.prefijo || tipo) + String(nuevo).padStart(8, "0");
+    } else {
+      ncf = tipo + Math.floor(Math.random() * 99999999).toString().padStart(8, "0");
     }
-
-    const ncf        = compLav[0].comprobante;
-    const fechaVence = compLav[0].vence;
 
     const vehInfo = veh ? [veh.marca, veh.modelo, veh.placa].filter(Boolean).join(" ") : null;
 
@@ -7294,7 +7229,7 @@ app.post("/carwash/:id/facturar", async (req, res) => {
     }
 
     const { data: factura, error } = await supabase.from("facturas").insert([{
-      ncf, ncf_tipo: tipo, ncf_vence: fechaVence, estado: "ACTIVA",
+      ncf, ncf_tipo: tipo, ncf_vence: fechaVence.toISOString().split("T")[0], estado: "ACTIVA",
       cliente_id: orden.cliente_id, cliente_nombre: cli?.nombre || "Consumidor Final",
       cliente_rnc: cli?.rnc || cli?.cedula || null,
       vehiculo_id: orden.vehiculo_id, vehiculo_info: vehInfo,
