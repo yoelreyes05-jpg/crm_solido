@@ -1,10 +1,72 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useRouter } from "next/navigation";
 
 import { API_URL as API } from "@/config";
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
+
+// Consulta exacta al padrón DGII por RNC/cédula. Devuelve null si no existe.
+async function dgiiPorRNC(rnc: string) {
+  const limpio = (rnc || "").replace(/\D/g, "");
+  if (limpio.length < 9) return null;
+  try {
+    const res = await fetch(`${API}/rnc/${limpio}`);
+    if (!res.ok) return null;
+    return await res.json();
+  } catch { return null; }
+}
+
+// Buscador reutilizable del padrón DGII: por RNC (números) o por nombre.
+// Al elegir un resultado llama onSelect({ rnc, razon_social, ... }).
+function BuscadorDGII({ onSelect }: { onSelect: (d: any) => void }) {
+  const [q, setQ] = useState("");
+  const [resultados, setResultados] = useState<any[]>([]);
+  const [buscando, setBuscando] = useState(false);
+  const debounce = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const abortCtrl = useRef<AbortController | null>(null);
+
+  const buscar = (val: string) => {
+    setQ(val);
+    if (debounce.current) clearTimeout(debounce.current);
+    if (val.trim().length < 2) { setResultados([]); setBuscando(false); return; }
+    setBuscando(true);
+    debounce.current = setTimeout(async () => {
+      if (abortCtrl.current) abortCtrl.current.abort();
+      abortCtrl.current = new AbortController();
+      try {
+        const res = await fetch(`${API}/rnc/buscar?q=${encodeURIComponent(val.trim())}`,
+          { signal: abortCtrl.current.signal });
+        const data = await res.json();
+        setResultados(Array.isArray(data) ? data : []);
+      } catch (e: any) { if (e.name !== "AbortError") setResultados([]); }
+      finally { setBuscando(false); }
+    }, 320);
+  };
+
+  const elegir = (item: any) => { onSelect(item); setQ(""); setResultados([]); };
+
+  return (
+    <div style={{ position: "relative", marginBottom: 10 }}>
+      <label style={label}>🔍 Buscar empresa en DGII (RNC o nombre)</label>
+      <input value={q} onChange={e => buscar(e.target.value)}
+        placeholder="Escribe el RNC o el nombre de la empresa" style={{ ...input, marginBottom: 0 }} />
+      {buscando && <p style={{ fontSize: 12, color: "#888", margin: "4px 0 0" }}>Buscando en el padrón DGII…</p>}
+      {resultados.length > 0 && (
+        <div style={dgiiDrop}>
+          {resultados.map((r, i) => (
+            <div key={r.rnc + "_" + i} onClick={() => elegir(r)} style={dgiiItem}>
+              <div style={{ fontWeight: 700, fontSize: 13 }}>{r.razon_social || r.nombre_comercial}</div>
+              <div style={{ fontSize: 11, color: "#666" }}>
+                RNC: {r.rnc}{r.estado ? " · " + r.estado : ""}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function Clientes() {
   const router = useRouter();
@@ -164,9 +226,20 @@ export default function Clientes() {
               <p style={{ fontSize: 12, color: "#64748b", margin: "0 0 10px" }}>
                 🚚 Todos los vehículos de la flotilla se registran bajo esta empresa desde su Ficha 360.
               </p>
+              <BuscadorDGII onSelect={(d) => setNuevo(n => ({
+                ...n,
+                rnc: d.rnc || n.rnc,
+                razon_social: d.razon_social || n.razon_social,
+                nombre: n.nombre || d.razon_social || d.nombre_comercial || "",
+              }))} />
               <label style={label}>RNC</label>
               <input placeholder="1-31-00000-0" value={nuevo.rnc}
-                onChange={e => setNuevo({ ...nuevo, rnc: e.target.value })} style={input} />
+                onChange={e => setNuevo({ ...nuevo, rnc: e.target.value })}
+                onBlur={async () => {
+                  const d = await dgiiPorRNC(nuevo.rnc);
+                  if (d?.razon_social) setNuevo(n => ({ ...n, razon_social: d.razon_social, nombre: n.nombre || d.razon_social }));
+                }}
+                style={input} />
               <label style={label}>Razón social</label>
               <input placeholder="Razón social (para factura)" value={nuevo.razon_social}
                 onChange={e => setNuevo({ ...nuevo, razon_social: e.target.value })} style={input} />
@@ -343,9 +416,19 @@ export default function Clientes() {
 
             {editForm.tipo_cliente === "EMPRESA" && (
               <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 10, padding: 14, marginBottom: 12 }}>
+                <BuscadorDGII onSelect={(d) => setEditForm(f => ({
+                  ...f,
+                  rnc: d.rnc || f.rnc,
+                  razon_social: d.razon_social || f.razon_social,
+                  nombre: f.nombre || d.razon_social || d.nombre_comercial || "",
+                }))} />
                 <label style={label}>RNC</label>
                 <input value={editForm.rnc}
                   onChange={e => setEditForm({ ...editForm, rnc: e.target.value })}
+                  onBlur={async () => {
+                    const d = await dgiiPorRNC(editForm.rnc);
+                    if (d?.razon_social) setEditForm(f => ({ ...f, razon_social: d.razon_social, nombre: f.nombre || d.razon_social }));
+                  }}
                   style={input} placeholder="1-31-00000-0" />
                 <label style={label}>Razón social</label>
                 <input value={editForm.razon_social}
@@ -407,6 +490,8 @@ const label: any = { display: "block", fontSize: 13, fontWeight: 600, marginBott
 const input: any = { display: "block", marginBottom: 12, padding: 12, width: "100%", borderRadius: 8, border: "1px solid #ddd", boxSizing: "border-box", fontSize: 14 };
 const btnPrimary: any = { padding: 13, background: "#111827", color: "#fff", border: "none", borderRadius: 8, cursor: "pointer", width: "100%", fontWeight: 700 };
 const tipoBtn = (activo: boolean): any => ({ flex: 1, padding: "10px 8px", borderRadius: 8, cursor: "pointer", fontSize: 13, fontWeight: 700, border: activo ? "2px solid #111827" : "1px solid #ddd", background: activo ? "#111827" : "#fff", color: activo ? "#fff" : "#374151" });
+const dgiiDrop: any = { position: "absolute", left: 0, right: 0, top: "100%", zIndex: 50, background: "#fff", border: "1px solid #ddd", borderRadius: 8, marginTop: 4, maxHeight: 240, overflowY: "auto", boxShadow: "0 8px 24px rgba(0,0,0,0.12)" };
+const dgiiItem: any = { padding: "8px 12px", cursor: "pointer", borderBottom: "1px solid #f1f5f9" };
 const btnAccion = (bg: string): any => ({ padding: "5px 10px", background: bg, color: "#fff", border: "none", borderRadius: 6, cursor: "pointer", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" });
 const table: any = { width: "100%", borderCollapse: "collapse" };
 const th: any = { textAlign: "left", padding: "10px 12px", background: "#f1f5f9", fontSize: 13 };
