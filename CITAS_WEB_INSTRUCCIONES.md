@@ -18,31 +18,31 @@ Esto **crea la tabla `citas_taller` completa** (no existía en tu base de datos:
 
 ## 2. Correo — crear una contraseña de aplicación de Gmail
 
-El envío usa la cuenta `solidoautoservicio@gmail.com`. Gmail **no** permite usar la contraseña normal desde un servidor; hay que crear una *contraseña de aplicación*:
+El correo se envía con **Brevo** (API HTTPS). Railway bloquea los puertos SMTP salientes —por eso el envío directo por Gmail daba *"Connection timeout"*—, pero Brevo envía por HTTPS (puerto 443), que nunca se bloquea. Puedes seguir usando `solidoautoservicio@gmail.com` como remitente si lo verificas en Brevo.
 
-1. Entra a la cuenta de Google de `solidoautoservicio@gmail.com`.
-2. **Seguridad** → activa la **Verificación en 2 pasos** (si no está activa).
-3. Busca **"Contraseñas de aplicaciones"** → crea una nueva para "Correo".
-4. Google te da una clave de **16 dígitos**. Cópiala (sin espacios).
+1. Crea una cuenta gratis en **https://www.brevo.com** (plan gratuito: 300 correos/día).
+2. **Verifica el remitente:** Brevo → *Senders, Domains & Dedicated IPs* → pestaña **Senders** → **Add a sender** → escribe `solidoautoservicio@gmail.com`. Brevo enviará un correo de confirmación a esa bandeja → ábrelo y haz clic para confirmar.
+3. **Crea la API key:** Brevo → menú de tu cuenta → **SMTP & API** → pestaña **API Keys** → **Generate a new API key** → cópiala (se muestra una sola vez).
 
-> Importante: por seguridad, **tú** debes generar y pegar esta contraseña en Railway. Yo no la manejo ni la guardo en el código.
+> Nota: la API key es una credencial. **Tú** la pegas en Railway; yo no la manejo ni la guardo en el código.
 
 ---
 
-## 3. Backend (Railway) — variables de entorno + dependencia
+## 3. Backend (Railway) — variable de entorno
 
 En el servicio del backend en **Railway → Variables**, agrega:
 
 ```
-GMAIL_USER          = solidoautoservicio@gmail.com
-GMAIL_APP_PASSWORD  = (la clave de 16 dígitos del paso 2)
+BREVO_API_KEY   = (la API key del paso 2)
 ```
 
-Se agregó `nodemailer` a `crm-backend/package.json`. Railway lo instalará solo al desplegar (corre `npm install`). Si corres el backend localmente: `npm install` dentro de `crm-backend`.
+Opcional: `MAIL_FROM_EMAIL = solidoautoservicio@gmail.com` (si no la pones, usa el valor de `GMAIL_USER`, que ya tienes). Ese correo debe estar **verificado** como remitente en Brevo (paso 2).
 
-**CORS:** si tienes configurada la variable `CORS_ORIGINS` en Railway, agrega el dominio donde vive el portal web (ej. `https://solidoautoservicio.com`) a la lista, separado por comas. Si `CORS_ORIGINS` no existe, no hay que hacer nada (permite todos los orígenes).
+Ya puedes **borrar** las variables `GMAIL_APP_PASSWORD` (ya no se usan). Se quitó `nodemailer` del proyecto; no hace falta instalar nada porque Brevo se llama con `fetch` (incluido en Node 18+).
 
-Luego **redespliega el backend**.
+**CORS:** si tienes configurada la variable `CORS_ORIGINS` en Railway, agrega el dominio del portal web (ej. `https://solidoautoservicio.online`) a la lista, separado por comas. Si `CORS_ORIGINS` no existe, no hay que hacer nada.
+
+Luego **haz push del código actualizado (`server.mjs` y `package.json`) y redespliega el backend.**
 
 ---
 

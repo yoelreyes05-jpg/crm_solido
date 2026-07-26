@@ -3,7 +3,6 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
-import nodemailer from "nodemailer";
 
 const app = express();
 
@@ -32,31 +31,50 @@ app.use(express.json({ limit: "10mb" }));
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
 // =====================================================
-// ✉️ CORREO — Gmail (nodemailer)
+// ✉️ CORREO — Brevo (API HTTPS, funciona en Railway sin SMTP)
 // =====================================================
-// Configurar en las variables de entorno (Railway):
-//   GMAIL_USER          = solidoautoservicio@gmail.com
-//   GMAIL_APP_PASSWORD  = contraseña de aplicación de 16 dígitos (NO la contraseña normal)
-// Cómo generarla: cuenta de Google → Seguridad → Verificación en 2 pasos →
-//   "Contraseñas de aplicaciones" → crear una para "Correo".
-const MAIL_FROM = "Sólido Auto Servicio <solidoautoservicio@gmail.com>";
-const _mailer = (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
-  ? nodemailer.createTransport({
-      service: "gmail",
-      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
-    })
-  : null;
+// Railway bloquea los puertos SMTP salientes, por eso el envío directo por
+// Gmail daba "Connection timeout". Brevo envía por su API HTTPS (puerto 443),
+// que nunca se bloquea. Se puede seguir usando el correo de Gmail como
+// remitente si se verifica como "sender" en Brevo.
+//
+// Variables de entorno (Railway):
+//   BREVO_API_KEY   = la API key de Brevo (Brevo → SMTP & API → API Keys)
+//   MAIL_FROM_EMAIL = solidoautoservicio@gmail.com  (opcional; por defecto usa GMAIL_USER)
+//                     ⚠️ este correo debe estar verificado como remitente en Brevo.
+const MAIL_FROM_NAME  = "Sólido Auto Servicio";
+const MAIL_FROM_EMAIL = process.env.MAIL_FROM_EMAIL || process.env.GMAIL_USER || "solidoautoservicio@gmail.com";
+const BREVO_API_KEY   = process.env.BREVO_API_KEY || "";
 
-// Envía un correo. Nunca lanza: si el correo falla o no está configurado,
-// registra una advertencia y devuelve false (no rompe el flujo de la cita).
+// Envía un correo por la API de Brevo. Nunca lanza: si falla o no está
+// configurado, registra una advertencia y devuelve false (no rompe la cita).
 async function enviarCorreo({ to, subject, html, replyTo }) {
-  if (!_mailer) {
-    console.warn("⚠️ Correo no configurado (faltan GMAIL_USER / GMAIL_APP_PASSWORD). Se omite el envío.");
+  if (!BREVO_API_KEY) {
+    console.warn("⚠️ Correo no configurado (falta BREVO_API_KEY). Se omite el envío.");
     return false;
   }
   if (!to) return false;
   try {
-    await _mailer.sendMail({ from: MAIL_FROM, to, subject, html, replyTo });
+    const r = await fetch("https://api.brevo.com/v3/smtp/email", {
+      method: "POST",
+      headers: {
+        "api-key": BREVO_API_KEY,
+        "Content-Type": "application/json",
+        "accept": "application/json",
+      },
+      body: JSON.stringify({
+        sender: { name: MAIL_FROM_NAME, email: MAIL_FROM_EMAIL },
+        to: [{ email: to }],
+        subject,
+        htmlContent: html,
+        ...(replyTo ? { replyTo: { email: replyTo } } : {}),
+      }),
+    });
+    if (!r.ok) {
+      const t = await r.text().catch(() => "");
+      console.warn(`⚠️ Error enviando correo (Brevo ${r.status}):`, t.slice(0, 300));
+      return false;
+    }
     return true;
   } catch (err) {
     console.warn("⚠️ Error enviando correo:", err.message);
