@@ -13,6 +13,8 @@ import ModuloContable from "@/components/ModuloContable";
 const TIENDA = {
   nombre: "ALOHA PERFUME STORE",
   telefono: "829-393-3673",
+  instagram: "@alohaperfumes_store",
+  direccion: "Calle Constanza #71, Los Cerros de Sabana Perdida",
   emoji: "🌺",
 };
 
@@ -100,7 +102,7 @@ function generarHTMLAloha(venta: any, items: any[]) {
   <div class="header">
     <div class="logo">${TIENDA.emoji}</div>
     <div class="nombre">${TIENDA.nombre}</div>
-    <div class="sub">Tel: ${TIENDA.telefono}</div>
+    <div class="sub">Tel: ${TIENDA.telefono}<br/>${TIENDA.instagram}<br/>${TIENDA.direccion}</div>
   </div>
   <div style="font-size:12px;margin-bottom:10px;">
     <b>Factura:</b> ${venta.numero || "—"}<br/>
@@ -123,7 +125,8 @@ function generarHTMLAloha(venta: any, items: any[]) {
   </div>
   <div class="footer">
     ¡Gracias por su compra! ${TIENDA.emoji}<br/>
-    <b>${TIENDA.nombre}</b> · ${TIENDA.telefono}
+    <b>${TIENDA.nombre}</b> · ${TIENDA.telefono}<br/>
+    ${TIENDA.instagram} · ${TIENDA.direccion}
   </div>
   <script>window.onload=function(){window.print();}</script>
   </body></html>`;
@@ -187,7 +190,8 @@ export default function AlohaPage() {
           <h1 style={{ fontSize: 24, fontWeight: 900, color: C.primaryD, letterSpacing: 1, margin: 0 }}>
             {TIENDA.nombre}
           </h1>
-          <div style={{ fontSize: 13, color: C.sub }}>Tel: {TIENDA.telefono} · Módulo independiente</div>
+          <div style={{ fontSize: 13, color: C.sub }}>Tel: {TIENDA.telefono} · {TIENDA.instagram}</div>
+          <div style={{ fontSize: 12, color: C.sub }}>📍 {TIENDA.direccion}</div>
         </div>
       </div>
 
