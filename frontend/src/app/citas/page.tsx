@@ -29,6 +29,7 @@ type Cita = {
   id: number; cliente_id: number; vehiculo_id: number; fecha: string; hora: string;
   tipo_servicio: string; descripcion: string; estado: string; recordatorio_enviado: boolean;
   cliente_nombre: string; cliente_telefono: string; vehiculo_info: string; notas: string;
+  cliente_email?: string; origen?: string;
 };
 
 export default function CitasPage() {
@@ -237,8 +238,14 @@ export default function CitasPage() {
                       <tr key={c.id}>
                         <td style={{ ...S.td, fontWeight: 800, fontSize: 15 }}>{c.hora}</td>
                         <td style={S.td}>
-                          <div style={{ fontWeight: 700 }}>{c.cliente_nombre}</div>
+                          <div style={{ fontWeight: 700, display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                            {c.cliente_nombre}
+                            {c.origen === "WEB" && (
+                              <span style={{ padding: "1px 7px", borderRadius: 20, fontSize: 10, fontWeight: 800, background: "#e0e7ff", color: "#4338ca" }}>🌐 Web</span>
+                            )}
+                          </div>
                           {c.cliente_telefono && <div style={{ fontSize: 11, color: "#60a5fa" }}>📞 {c.cliente_telefono}</div>}
+                          {c.cliente_email && <div style={{ fontSize: 11, color: "#888" }}>✉️ {c.cliente_email}</div>}
                         </td>
                         <td style={S.td}>{c.vehiculo_info || "—"}</td>
                         <td style={S.td}>

@@ -3,6 +3,7 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
+import nodemailer from "nodemailer";
 
 const app = express();
 
@@ -29,6 +30,70 @@ app.use(cors({
 app.use(express.json({ limit: "10mb" }));
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
+
+// =====================================================
+// ✉️ CORREO — Gmail (nodemailer)
+// =====================================================
+// Configurar en las variables de entorno (Railway):
+//   GMAIL_USER          = solidoautoservicio@gmail.com
+//   GMAIL_APP_PASSWORD  = contraseña de aplicación de 16 dígitos (NO la contraseña normal)
+// Cómo generarla: cuenta de Google → Seguridad → Verificación en 2 pasos →
+//   "Contraseñas de aplicaciones" → crear una para "Correo".
+const MAIL_FROM = "Sólido Auto Servicio <solidoautoservicio@gmail.com>";
+const _mailer = (process.env.GMAIL_USER && process.env.GMAIL_APP_PASSWORD)
+  ? nodemailer.createTransport({
+      service: "gmail",
+      auth: { user: process.env.GMAIL_USER, pass: process.env.GMAIL_APP_PASSWORD },
+    })
+  : null;
+
+// Envía un correo. Nunca lanza: si el correo falla o no está configurado,
+// registra una advertencia y devuelve false (no rompe el flujo de la cita).
+async function enviarCorreo({ to, subject, html, replyTo }) {
+  if (!_mailer) {
+    console.warn("⚠️ Correo no configurado (faltan GMAIL_USER / GMAIL_APP_PASSWORD). Se omite el envío.");
+    return false;
+  }
+  if (!to) return false;
+  try {
+    await _mailer.sendMail({ from: MAIL_FROM, to, subject, html, replyTo });
+    return true;
+  } catch (err) {
+    console.warn("⚠️ Error enviando correo:", err.message);
+    return false;
+  }
+}
+
+// Plantilla HTML de confirmación de cita (marca Sólido Auto Servicio).
+function plantillaCitaCliente({ nombre, fecha, hora, placa, modelo, motivo }) {
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;background:#f5f7fb;padding:24px;border-radius:14px">
+    <div style="background:#0f172a;color:#fff;text-align:center;padding:22px;border-radius:12px 12px 0 0">
+      <div style="font-size:22px;font-weight:900;letter-spacing:1px">SÓLIDO AUTO SERVICIO</div>
+      <div style="font-size:12px;opacity:.8;margin-top:4px">Más que un taller, una experiencia</div>
+    </div>
+    <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px">
+      <h2 style="color:#16a34a;margin:0 0 8px">✅ ¡Cita agendada!</h2>
+      <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 16px">
+        Hola <strong>${nombre || "cliente"}</strong>, recibimos tu solicitud de cita. Estos son los datos:
+      </p>
+      <table style="width:100%;border-collapse:collapse;font-size:14px;color:#334155">
+        <tr><td style="padding:8px 0;color:#64748b">📅 Fecha</td><td style="padding:8px 0;font-weight:700;text-align:right">${fecha}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b">🕐 Hora</td><td style="padding:8px 0;font-weight:700;text-align:right">${hora}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b">🚗 Vehículo</td><td style="padding:8px 0;font-weight:700;text-align:right">${modelo || "—"}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b">🔖 Placa</td><td style="padding:8px 0;font-weight:700;text-align:right">${placa || "—"}</td></tr>
+        <tr><td style="padding:8px 0;color:#64748b">🔧 Motivo</td><td style="padding:8px 0;font-weight:700;text-align:right">${motivo || "—"}</td></tr>
+      </table>
+      <div style="background:#fef3c7;color:#92400e;font-size:13px;padding:12px 14px;border-radius:9px;margin-top:16px;line-height:1.5">
+        Tu cita está <strong>pendiente de confirmación</strong>. Nuestro equipo se comunicará contigo para confirmarla.
+      </div>
+      <p style="color:#64748b;font-size:13px;margin-top:18px;line-height:1.6">
+        ¿Necesitas cambiar la fecha? Escríbenos por WhatsApp al <strong>849-569-2027</strong>.<br/>
+        Gracias por confiar en Sólido Auto Servicio. 🙌
+      </p>
+    </div>
+  </div>`;
+}
 
 // =====================================================
 // 🕵️ AUDITORÍA — log_acciones
@@ -10379,12 +10444,16 @@ async function enriquecerCitas(citas) {
   return citas.map(c => {
     const cli = clientes?.find(x => x.id === c.cliente_id);
     const veh = vehiculos?.find(x => x.id === c.vehiculo_id);
+    // Para citas de la web no hay cliente/vehículo registrado todavía:
+    // usamos los datos de contacto capturados en el formulario público.
+    const vehWebParts = [c.modelo_texto, c.placa_texto ? `(${c.placa_texto})` : ""].filter(Boolean).join(" ");
     return {
       ...c,
-      cliente_nombre:   cli?.nombre || "Sin cliente",
-      cliente_telefono: cli?.telefono || "",
-      vehiculo_info:    veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : "",
-      vehiculo_placa:   veh?.placa || "",
+      cliente_nombre:   cli?.nombre || c.nombre_contacto || "Sin cliente",
+      cliente_telefono: cli?.telefono || c.telefono_contacto || "",
+      cliente_email:    cli?.email || c.email_contacto || "",
+      vehiculo_info:    veh ? `${veh.marca} ${veh.modelo} (${veh.placa})` : (vehWebParts || ""),
+      vehiculo_placa:   veh?.placa || c.placa_texto || "",
     };
   });
 }
@@ -10472,6 +10541,81 @@ app.post("/citas", async (req, res) => {
     logAccion(req, { accion: "CREAR", modulo: "citas", registroId: data.id,
       descripcion: `Agendó cita #${data.id} para ${fecha}` });
     res.json(data);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /citas/publica — cita agendada desde el PORTAL WEB (sin autenticación).
+// El cliente aún no existe en el CRM: guardamos sus datos de contacto en la cita.
+// Envía correo de confirmación al cliente y aviso al taller.
+app.post("/citas/publica", async (req, res) => {
+  try {
+    const nombre = String(req.body.nombre || "").trim();
+    const email  = String(req.body.email  || "").trim();
+    const placa  = String(req.body.placa  || "").trim().toUpperCase();
+    const modelo = String(req.body.modelo || "").trim();
+    const motivo = String(req.body.motivo || "").trim();
+    const telefono = String(req.body.telefono || "").trim();
+    const fecha  = String(req.body.fecha || "").trim();
+    const hora   = String(req.body.hora  || "09:00").trim();
+
+    // Validación mínima
+    if (!nombre)  return res.status(400).json({ error: "El nombre es requerido" });
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ error: "Correo electrónico inválido" });
+    if (!placa)   return res.status(400).json({ error: "La placa es requerida" });
+    if (!modelo)  return res.status(400).json({ error: "El modelo del vehículo es requerido" });
+    if (!motivo)  return res.status(400).json({ error: "El motivo de la cita es requerido" });
+    if (!fecha)   return res.status(400).json({ error: "La fecha es requerida" });
+
+    // No permitir fechas pasadas
+    const hoy = new Date().toISOString().slice(0, 10);
+    if (fecha < hoy) return res.status(400).json({ error: "La fecha no puede ser en el pasado" });
+
+    const { data, error } = await supabase.from("citas_taller").insert([{
+      fecha,
+      hora,
+      tipo_servicio:     "OTRO",
+      descripcion:       motivo,
+      origen:            "WEB",
+      estado:            "PENDIENTE",
+      nombre_contacto:   nombre,
+      email_contacto:    email,
+      telefono_contacto: telefono || null,
+      placa_texto:       placa,
+      modelo_texto:      modelo,
+    }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    // Correo de confirmación al cliente (no bloquea la respuesta si falla).
+    enviarCorreo({
+      to: email,
+      subject: "✅ Tu cita en Sólido Auto Servicio fue agendada",
+      html: plantillaCitaCliente({ nombre, fecha, hora, placa, modelo, motivo }),
+    });
+
+    // Aviso interno al taller para que la secretaria lo vea también por correo.
+    enviarCorreo({
+      to: process.env.GMAIL_USER || "solidoautoservicio@gmail.com",
+      replyTo: email,
+      subject: `📅 Nueva cita web — ${nombre} (${fecha} ${hora})`,
+      html: `
+        <div style="font-family:Arial,sans-serif;font-size:14px;color:#334155">
+          <h3 style="color:#0f172a">Nueva cita agendada desde la web</h3>
+          <p><strong>Cliente:</strong> ${nombre}<br/>
+          <strong>Correo:</strong> ${email}<br/>
+          <strong>Teléfono:</strong> ${telefono || "—"}<br/>
+          <strong>Vehículo:</strong> ${modelo} — placa ${placa}<br/>
+          <strong>Fecha:</strong> ${fecha} a las ${hora}<br/>
+          <strong>Motivo:</strong> ${motivo}</p>
+          <p style="color:#64748b">Revísala y confírmala en el CRM → módulo Citas.</p>
+        </div>`,
+    });
+
+    logAccion(req, { accion: "CREAR", modulo: "citas", registroId: data.id,
+      descripcion: `Cita web #${data.id} — ${nombre} para ${fecha} ${hora}`,
+      detalle: { origen: "WEB", email } });
+
+    res.json({ ok: true, id: data.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
