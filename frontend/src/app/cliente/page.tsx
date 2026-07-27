@@ -1,6 +1,12 @@
 "use client";
 import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
+import PortalAcceso from "@/components/PortalAcceso";
+import {
+  cargarEstado, cargarHistorial, cargarDetalleHistorial,
+  responderCotizacion, revalidarSesion, salir,
+  type Sesion,
+} from "@/lib/portalCliente";
 
 const ESTADO_INFO = {
   RECIBIDO:        { color: "#60a5fa", grad: "linear-gradient(135deg,#1e3a5f,#2563eb)", emoji: "📋", paso: 1, msg: "Tu vehículo fue recibido. Pronto será evaluado." },
@@ -488,6 +494,15 @@ ${h.observaciones ? `
 }
 
 export default function ClienteApp() {
+  // ── SESIÓN DEL PORTAL ──
+  // Antes bastaba escribir una placa para ver cualquier vehículo, y la página
+  // descargaba /vehiculos, /ordenes y /diagnosticos completos al navegador.
+  // Ahora el cliente se identifica una vez y el backend solo le devuelve lo
+  // suyo. Ver frontend/src/lib/portalCliente.ts.
+  const [sesion, setSesion]                 = useState<Sesion["cliente"] | null>(null);
+  const [verificandoSesion, setVerificando] = useState(true);
+  const [cotizando, setCotizando]           = useState<number | null>(null);
+
   const [placa, setPlaca]                   = useState("");
   const [resultado, setResultado]           = useState<any>(null);
   const [repuestos, setRepuestos]           = useState<any[]>([]);
@@ -541,6 +556,23 @@ export default function ClienteApp() {
     return () => window.removeEventListener('beforeinstallprompt', handler);
   }, []);
 
+  // Sesión guardada: si el token sigue vivo, el cliente entra directo. Dura 30
+  // días, así que en la práctica se identifica una vez y luego solo abre la app.
+  useEffect(() => {
+    let vigente = true;
+    (async () => {
+      const s = await revalidarSesion();
+      if (!vigente) return;
+      if (s) {
+        setSesion(s.cliente);
+        await cargarDatos();
+      }
+      setVerificando(false);
+    })();
+    return () => { vigente = false; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const verRepuestos = async () => {
     const nuevoEstado = !showRepuestos;
     setShowRepuestos(nuevoEstado);
@@ -577,51 +609,74 @@ export default function ClienteApp() {
     setDeferredPrompt(null);
   };
 
-  const buscar = async () => {
-    if (!placa.trim()) return setError("Ingresa la placa de tu vehículo");
-    setLoading(true); setError(""); setResultado(null); setHistorialPerm([]); setHistDetalle(null);
+  /**
+   * Carga los datos del vehículo de la sesión.
+   *
+   * Antes esto descargaba /vehiculos + /ordenes + /diagnosticos ENTEROS y
+   * filtraba por placa en el navegador — cualquiera con DevTools veía los
+   * datos de todos los clientes. Ahora son dos llamadas autenticadas que el
+   * backend acota al vehículo de la sesión.
+   */
+  const cargarDatos = async () => {
+    setLoading(true); setError("");
     try {
-      const placaNorm = placa.trim().toUpperCase();
-      const [vRes, oRes, dRes, hRes] = await Promise.all([
-        fetch(`${API}/vehiculos`),
-        fetch(`${API}/ordenes`),
-        fetch(`${API}/diagnosticos`),
-        fetch(`${API}/vehiculo-historial/placa/${encodeURIComponent(placaNorm)}`),
+      const [estado, hist] = await Promise.all([
+        cargarEstado(),
+        cargarHistorial().catch(() => ({ historial: [] })),
       ]);
-      const vehiculos    = await vRes.json();
-      const ordenes      = await oRes.json();
-      const diagnosticos = await dRes.json();
-      const histData     = await hRes.json();
 
-      const vehiculo = vehiculos.find((v: any) =>
-        v.placa?.toUpperCase() === placaNorm
-      );
-      if (!vehiculo && (!histData.found)) {
-        setError("No encontramos un vehículo con esa placa. Verifica e intenta de nuevo.");
-        return;
+      setResultado({
+        vehiculo: estado.vehiculo,
+        ordenes: estado.ordenes || [],
+        diagnosticos: estado.diagnosticos || [],
+        cotizaciones: estado.cotizaciones || [],
+        cotizacionesPendientes: estado.cotizaciones_pendientes || [],
+        lineaTiempo: estado.linea_tiempo || [],
+        mantenimiento: estado.mantenimiento || [],
+        recordatorios: estado.recordatorios || [],
+      });
+      setHistorialPerm(hist.historial || []);
+      setPlaca(estado.vehiculo?.placa || "");
+    } catch (e: any) {
+      if (e?.status === 401) {
+        // Sesión vencida: portalCliente ya limpió el token.
+        setSesion(null); setResultado(null);
+      } else {
+        setError(e?.message || "Error de conexión. Intenta más tarde.");
       }
-
-      if (histData.found) setHistorialPerm(histData.historial || []);
-
-      if (vehiculo) {
-        const ordenesVehiculo = ordenes
-          .filter((o: any) => o.vehiculo_id === vehiculo.id || o.vehiculo_info?.includes(vehiculo.placa))
-          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        const diagVehiculo = diagnosticos
-          .filter((d: any) => d.vehiculo_id === vehiculo.id)
-          .sort((a: any, b: any) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-        setResultado({ vehiculo, ordenes: ordenesVehiculo, diagnosticos: diagVehiculo });
-      } else if (histData.found) {
-        // Vehículo eliminado del sistema activo pero existe historial
-        setResultado({
-          vehiculo: { ...histData.vehiculo, id: null },
-          ordenes: [], diagnosticos: []
-        });
-      }
-    } catch {
-      setError("Error de conexión. Intenta más tarde.");
     } finally {
       setLoading(false);
+    }
+  };
+
+  /** Se llama cuando PortalAcceso confirma la identidad. */
+  const alEntrar = async (s: Sesion) => {
+    setSesion(s.cliente);
+    setError("");
+    await cargarDatos();
+  };
+
+  const cerrarSesion = async () => {
+    await salir();
+    setSesion(null); setResultado(null); setPlaca("");
+    setHistorialPerm([]); setHistDetalle(null); setHistDetalleCompleto(null);
+    setTab("estado");
+  };
+
+  /** Aprobar o rechazar una cotización desde el celular. */
+  const responderCot = async (id: number, aprobar: boolean) => {
+    if (aprobar && !confirm("¿Confirmas que apruebas esta cotización? El taller comenzará la reparación.")) return;
+    const motivo = aprobar ? "" : (prompt("¿Por qué la rechazas? (opcional)") || "");
+
+    setCotizando(id);
+    try {
+      const r = await responderCotizacion(id, aprobar, { motivo });
+      alert(r.mensaje);
+      await cargarDatos();
+    } catch (e: any) {
+      alert(e?.message || "No se pudo registrar tu respuesta.");
+    } finally {
+      setCotizando(null);
     }
   };
 
@@ -632,15 +687,13 @@ export default function ClienteApp() {
     setTab("histperm");
     setLoadingDetalle(true);
     try {
-      // Las órdenes activas tienen id "orden_XX" — usan el endpoint de orden activa
-      const esOrdenActiva = typeof h.id === "string" && h.id.startsWith("orden_");
-      const url = esOrdenActiva
-        ? `${API}/vehiculo-historial/orden/${h._orden_id}/detalle`
-        : `${API}/vehiculo-historial/${h.id}/detalle`;
-      const res  = await fetch(url);
-      const data = await res.json();
-      if (res.ok) setHistDetalleCompleto(data);
-    } catch {}
+      // El endpoint del portal valida del lado servidor que el registro sea de
+      // este vehículo: cambiar el id en la URL ya no muestra el de otro cliente.
+      const data = await cargarDetalleHistorial(h.id);
+      setHistDetalleCompleto(data);
+    } catch (e: any) {
+      if (e?.status === 401) { setSesion(null); setResultado(null); }
+    }
     finally { setLoadingDetalle(false); }
   };
 
@@ -823,6 +876,70 @@ export default function ClienteApp() {
         .car-emoji { font-size:52px; }
         .car-marca { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff; }
         .car-meta  { font-size:13px; color:#64748b; margin-top:4px; }
+        /* ── Cotización pendiente de aprobación ── */
+        .cot-card {
+          background: linear-gradient(160deg, rgba(217,119,6,.14), rgba(15,23,42,.6));
+          border: 1px solid rgba(251,191,36,.32);
+          border-radius: 18px; padding: 18px; margin-bottom: 16px;
+        }
+        .cot-encabezado {
+          display:flex; flex-direction:column; gap:3px; margin-bottom:14px;
+          font-size:14px; font-weight:700; color:#fcd34d;
+        }
+        .cot-encabezado small { font-size:11.5px; font-weight:400; color:#a16207; }
+        .cot-items {
+          background: rgba(0,0,0,.22); border-radius:12px; padding:10px 12px; margin-bottom:12px;
+        }
+        .cot-item {
+          display:flex; justify-content:space-between; gap:12px;
+          font-size:12.5px; color:#cbd5e1; padding:5px 0; line-height:1.45;
+          border-bottom:1px solid rgba(255,255,255,.05);
+        }
+        .cot-item:last-child { border-bottom:none; }
+        .cot-item-mas { color:#64748b; font-style:italic; justify-content:center; }
+        .cot-total {
+          display:flex; justify-content:space-between; align-items:center;
+          padding:12px 14px; border-radius:12px; margin-bottom:10px;
+          background: rgba(255,255,255,.05);
+        }
+        .cot-total span   { font-size:12px; color:#94a3b8; text-transform:uppercase; letter-spacing:1px; }
+        .cot-total strong { font-size:20px; color:#fbbf24; font-family:'Syne',sans-serif; }
+        .cot-tiempo { font-size:12.5px; color:#94a3b8; margin-bottom:14px; }
+        .cot-botones { display:flex; gap:10px; }
+        .cot-btn {
+          flex:1; padding:14px; border:none; border-radius:12px;
+          font-size:14px; font-weight:700; cursor:pointer; transition:transform .12s, opacity .12s;
+        }
+        .cot-btn:disabled { opacity:.5; cursor:not-allowed; }
+        .cot-btn:hover:not(:disabled) { transform:translateY(-1px); }
+        .cot-btn-si { background:linear-gradient(135deg,#047857,#10b981); color:#fff; }
+        .cot-btn-no { background:rgba(255,255,255,.06); color:#94a3b8; border:1px solid rgba(255,255,255,.1); }
+
+        /* ── Recordatorios de mantenimiento ── */
+        .mant-card {
+          background: rgba(15,23,42,.6); border:1px solid rgba(255,255,255,.07);
+          border-radius:18px; padding:18px; margin-bottom:16px;
+        }
+        .mant-titulo {
+          font-size:14px; font-weight:700; color:#93c5fd; margin-bottom:12px;
+          font-family:'Syne',sans-serif;
+        }
+        .mant-fila {
+          display:flex; justify-content:space-between; align-items:center; gap:12px;
+          padding:10px 0; border-bottom:1px solid rgba(255,255,255,.05);
+        }
+        .mant-fila:last-of-type { border-bottom:none; }
+        .mant-fila strong { display:block; font-size:13.5px; color:#e2e8f0; font-weight:600; }
+        .mant-fila small  { display:block; font-size:11.5px; color:#64748b; margin-top:2px; }
+        .mant-fila > span { font-size:12px; color:#94a3b8; white-space:nowrap; }
+        .mant-vencido > span { color:#fca5a5; font-weight:700; }
+        .mant-cita {
+          display:block; margin-top:14px; padding:12px; text-align:center;
+          background:rgba(34,197,94,.12); border:1px solid rgba(74,222,128,.28);
+          border-radius:12px; color:#86efac; font-size:13px; font-weight:600; text-decoration:none;
+        }
+        .mant-cita:hover { background:rgba(34,197,94,.18); }
+
         .placa-badge {
           margin-top:12px; display:inline-block;
           background:rgba(255,255,255,0.07); border:1px solid rgba(255,255,255,0.15);
@@ -1159,42 +1276,130 @@ export default function ClienteApp() {
               </div>
             )}
 
-            {/* ── BUSCADOR ── */}
-            {!resultado && (
+            {/* ── ACCESO ──
+                Antes aquí había un input de placa suelto: escribir cualquier
+                placa mostraba el vehículo de cualquier persona. Ahora el
+                cliente verifica identidad y solo ve lo suyo. */}
+            {!sesion && !verificandoSesion && (
+              <PortalAcceso onEntrar={alEntrar} />
+            )}
+
+            {verificandoSesion && (
+              <div className="card fade-up delay-1" style={{ textAlign: "center", padding: "40px 24px" }}>
+                <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+                <div style={{ color: "#94a3b8", fontSize: 14 }}>Cargando tu vehículo…</div>
+              </div>
+            )}
+
+            {sesion && !resultado && loading && (
+              <div className="card fade-up delay-1" style={{ textAlign: "center", padding: "40px 24px" }}>
+                <div style={{ fontSize: 28, marginBottom: 10 }}>⏳</div>
+                <div style={{ color: "#94a3b8", fontSize: 14 }}>Buscando tu información…</div>
+              </div>
+            )}
+
+            {sesion && error && !resultado && (
               <div className="card fade-up delay-1">
-                <div className="card-title">🔎 Consulta tu Vehículo</div>
-                <p className="search-intro">
-                  Ingresa la placa de tu vehículo para ver su estado en tiempo real.
-                </p>
-                <label className="field-label">Placa del vehículo</label>
-                <input
-                  value={placa}
-                  onChange={e => setPlaca(e.target.value.toUpperCase())}
-                  onKeyDown={e => e.key === "Enter" && buscar()}
-                  placeholder="A123456"
-                  maxLength={10}
-                  className="input-placa"
-                />
-                {error && <div className="error-banner">⚠️ {error}</div>}
-                <button
-                  onClick={buscar}
-                  disabled={loading || !placa.trim()}
-                  className="btn-buscar"
-                >
-                  {loading ? "⏳ Buscando..." : "🔍 Consultar Estado"}
-                </button>
+                <div className="error-banner">⚠️ {error}</div>
+                <button onClick={cargarDatos} className="btn-buscar">🔄 Reintentar</button>
               </div>
             )}
 
             {/* ── RESULTADO ── */}
             {resultado && (
               <div>
-                <button
-                  onClick={() => { setResultado(null); setPlaca(""); }}
-                  className="btn-volver"
-                >
-                  ← Nueva consulta
+                <button onClick={cerrarSesion} className="btn-volver">
+                  ← Salir{sesion?.nombre ? ` (${sesion.nombre.split(" ")[0]})` : ""}
                 </button>
+
+                {/* ── COTIZACIONES PENDIENTES ──
+                    Aprobar desde el celular sin llamada ni visita: el taller lo
+                    ve al instante en el kanban y arranca la reparación. */}
+                {(resultado.cotizacionesPendientes || []).map((c: any) => (
+                  <div key={c.id} className="cot-card fade-up">
+                    <div className="cot-encabezado">
+                      <span>📋 Cotización pendiente de tu aprobación</span>
+                      {c.valida_hasta && (
+                        <small>Válida hasta {new Date(c.valida_hasta).toLocaleDateString("es-DO")}</small>
+                      )}
+                    </div>
+
+                    {Array.isArray(c.items_detalle) && c.items_detalle.length > 0 && (
+                      <div className="cot-items">
+                        {c.items_detalle.slice(0, 6).map((it: any, i: number) => (
+                          <div key={i} className="cot-item">
+                            <span>{it.descripcion || it.nombre || "Servicio"}</span>
+                            <span>RD$ {Number(it.subtotal ?? it.precio ?? 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</span>
+                          </div>
+                        ))}
+                        {c.items_detalle.length > 6 && (
+                          <div className="cot-item cot-item-mas">
+                            +{c.items_detalle.length - 6} conceptos más
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    <div className="cot-total">
+                      <span>Total</span>
+                      <strong>RD$ {Number(c.total || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 })}</strong>
+                    </div>
+
+                    {c.tiempo_estimado && (
+                      <div className="cot-tiempo">⏱ Tiempo estimado: {c.tiempo_estimado}</div>
+                    )}
+
+                    <div className="cot-botones">
+                      <button
+                        className="cot-btn cot-btn-si"
+                        disabled={cotizando === c.id}
+                        onClick={() => responderCot(c.id, true)}
+                      >
+                        {cotizando === c.id ? "…" : "✓ Aprobar"}
+                      </button>
+                      <button
+                        className="cot-btn cot-btn-no"
+                        disabled={cotizando === c.id}
+                        onClick={() => responderCot(c.id, false)}
+                      >
+                        ✕ Rechazar
+                      </button>
+                    </div>
+                  </div>
+                ))}
+
+                {/* ── RECORDATORIOS DE MANTENIMIENTO ── */}
+                {(resultado.recordatorios || []).length > 0 && (
+                  <div className="mant-card fade-up">
+                    <div className="mant-titulo">🔔 Mantenimiento próximo</div>
+                    {resultado.recordatorios.map((m: any) => {
+                      const vencido = m.proximo_fecha && new Date(m.proximo_fecha) < new Date();
+                      return (
+                        <div key={m.id} className={`mant-fila ${vencido ? "mant-vencido" : ""}`}>
+                          <div>
+                            <strong>{m.tipo_servicio}</strong>
+                            {m.descripcion && <small>{m.descripcion}</small>}
+                          </div>
+                          <span>
+                            {vencido ? "Vencido" : "Toca"}{" "}
+                            {m.proximo_fecha
+                              ? new Date(m.proximo_fecha).toLocaleDateString("es-DO", { day: "numeric", month: "short" })
+                              : `a los ${Number(m.proximo_km || 0).toLocaleString("es-DO")} km`}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    <a
+                      className="mant-cita"
+                      href={`https://wa.me/18495692027?text=${encodeURIComponent(
+                        `Hola, quiero agendar el mantenimiento de mi vehículo placa ${resultado.vehiculo?.placa || ""}.`
+                      )}`}
+                      target="_blank" rel="noreferrer"
+                    >
+                      📅 Agendar por WhatsApp
+                    </a>
+                  </div>
+                )}
 
                 {/* VEHÍCULO */}
                 <div className="car-card fade-up">

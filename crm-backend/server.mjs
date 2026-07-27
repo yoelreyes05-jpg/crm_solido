@@ -3,8 +3,14 @@ dotenv.config();
 import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
+import portalCliente from "./routes/portalCliente.mjs";
 
 const app = express();
+
+// Railway (y cualquier proxy) reescribe la IP de origen. Sin esto, req.ip es
+// siempre la misma para todos y el rate limiting del portal o no sirve o
+// bloquea a todo el mundo a la vez.
+app.set("trust proxy", 1);
 
 // CORS — configurable por variable de entorno CORS_ORIGINS
 // En producción: CORS_ORIGINS=https://mi-app.vercel.app,https://otro-dominio.com
@@ -27,6 +33,16 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));
+
+// =====================================================
+// 🔐 PORTAL DEL CLIENTE — /portal/*
+// =====================================================
+// Reemplaza el patrón de /cliente, que descargaba /vehiculos + /ordenes +
+// /diagnosticos completos al navegador y filtraba por placa del lado del
+// cliente (exposición de toda la base — Ley 172-13).
+// Aquí el cliente se identifica y el backend devuelve SOLO su vehículo.
+// Ver crm-backend/sql/portal_cliente.sql y PORTAL_CLIENTE.md.
+app.use("/portal", portalCliente);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
