@@ -34,10 +34,15 @@ export default function GenerarCodigoPortal({
   clienteId,
   clienteNombre,
   telefono,
+  estiloBoton,
+  etiqueta,
 }: {
   clienteId: number;
   clienteNombre?: string;
   telefono?: string;
+  /** Para que el botón encaje con los estilos en línea de la tabla de clientes. */
+  estiloBoton?: React.CSSProperties;
+  etiqueta?: string;
 }) {
   const [abierto, setAbierto]   = useState(false);
   const [codigo, setCodigo]     = useState("");
@@ -86,8 +91,14 @@ export default function GenerarCodigoPortal({
 
   return (
     <>
-      <button className="gcp-boton" onClick={generar} disabled={cargando}>
-        🔑 {cargando ? "Generando…" : "Código de acceso al portal"}
+      <button
+        className={estiloBoton ? undefined : "gcp-boton"}
+        style={estiloBoton}
+        onClick={generar}
+        disabled={cargando}
+        title="Genera un código de 8 dígitos para que el cliente entre al portal desde su celular"
+      >
+        🔑 {cargando ? "Generando…" : etiqueta || "Código de acceso al portal"}
       </button>
 
       {abierto && (

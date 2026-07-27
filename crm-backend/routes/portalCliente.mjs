@@ -27,6 +27,7 @@ import {
 import {
   enviarCodigoPorCorreo, hayCanalDeCorreo, hayCanalDeWhatsApp,
 } from "../services/enviarCodigo.mjs";
+import { clavePublicaVapid, suscripcionValida, enviarPush, hayPush } from "../services/webPush.mjs";
 
 const router = express.Router();
 
@@ -820,6 +821,146 @@ router.post("/cotizaciones/:id/responder", requiereSesion, async (req, res) => {
 });
 
 // ═════════════════════════════════════════════════════════════════════════════
+// Notificaciones push de la PWA
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * GET /portal/push/clave
+ * La clave pública VAPID que el navegador necesita para suscribirse.
+ * Público a propósito: es pública por diseño, no es un secreto.
+ */
+router.get("/push/clave", async (req, res) => {
+  const clave = clavePublicaVapid();
+  if (!clave) return fallo(res, 503, "Notificaciones push no configuradas en el servidor.");
+  res.json({ error: false, clave, disponible: await hayPush() });
+});
+
+/**
+ * POST /portal/push/suscribir   { suscripcion: PushSubscription }
+ * Guarda el dispositivo. Un mismo cliente puede tener varios (celular, tablet).
+ */
+router.post("/push/suscribir", requiereSesion, async (req, res) => {
+  const { clienteId, vehiculoId } = req.portal;
+  const s = req.body?.suscripcion;
+
+  if (!suscripcionValida(s)) return fallo(res, 400, "Suscripción inválida.");
+
+  // upsert por endpoint: si el cliente reinstala la PWA, el navegador puede
+  // devolver el mismo endpoint y no queremos duplicar filas.
+  const { error } = await supabase
+    .from("portal_push_suscripciones")
+    .upsert(
+      {
+        cliente_id: clienteId,
+        vehiculo_id: vehiculoId,
+        endpoint: s.endpoint,
+        p256dh: s.keys.p256dh,
+        auth: s.keys.auth,
+        user_agent: String(req.headers["user-agent"] || "").slice(0, 400),
+        activa: true,
+        fallos: 0,
+      },
+      { onConflict: "endpoint" }
+    );
+
+  if (error) {
+    console.warn("[portal] push suscribir:", error.message);
+    return fallo(res, 500, "No se pudo activar las notificaciones.");
+  }
+
+  // Preferencia por defecto, para que el cliente pueda apagarlas después.
+  await supabase
+    .from("portal_preferencias_notif")
+    .upsert({ cliente_id: clienteId, push: true }, { onConflict: "cliente_id" });
+
+  res.json({ error: false, mensaje: "Notificaciones activadas." });
+});
+
+/** POST /portal/push/baja   { endpoint } */
+router.post("/push/baja", requiereSesion, async (req, res) => {
+  const endpoint = String(req.body?.endpoint || "");
+  if (!endpoint) return fallo(res, 400, "endpoint requerido.");
+
+  await supabase
+    .from("portal_push_suscripciones")
+    .update({ activa: false })
+    .eq("endpoint", endpoint)
+    .eq("cliente_id", req.portal.clienteId); // no dar de baja la de otro
+
+  res.json({ error: false });
+});
+
+/**
+ * POST /portal/push/prueba
+ * Manda una notificación de prueba a los dispositivos del cliente. Es la única
+ * forma de confirmar que el permiso quedó bien dado antes de que ocurra un
+ * cambio de estado real.
+ */
+router.post("/push/prueba", requiereSesion, async (req, res) => {
+  const { data: subs } = await supabase
+    .from("portal_push_suscripciones")
+    .select("endpoint, p256dh, auth")
+    .eq("cliente_id", req.portal.clienteId)
+    .eq("activa", true);
+
+  if (!subs?.length) return fallo(res, 404, "No hay dispositivos suscritos.");
+
+  let enviados = 0;
+  for (const s of subs) {
+    const r = await enviarPush(s, {
+      titulo: "🔔 Notificaciones activadas",
+      cuerpo: "Te avisaremos aquí cuando tu vehículo cambie de estado.",
+      url: "/cliente",
+      etiqueta: "prueba",
+    });
+    if (r.ok) enviados++;
+  }
+
+  if (!enviados) return fallo(res, 502, "No se pudo entregar la notificación de prueba.");
+  res.json({ error: false, enviados });
+});
+
+/** GET /portal/preferencias */
+router.get("/preferencias", requiereSesion, async (req, res) => {
+  const { data } = await supabase
+    .from("portal_preferencias_notif")
+    .select("correo, push, whatsapp")
+    .eq("cliente_id", req.portal.clienteId)
+    .maybeSingle();
+
+  const { count } = await supabase
+    .from("portal_push_suscripciones")
+    .select("id", { count: "exact", head: true })
+    .eq("cliente_id", req.portal.clienteId)
+    .eq("activa", true);
+
+  res.json({
+    error: false,
+    preferencias: data || { correo: true, push: true, whatsapp: true },
+    dispositivos: count || 0,
+  });
+});
+
+/** PATCH /portal/preferencias   { correo?, push?, whatsapp? } */
+router.patch("/preferencias", requiereSesion, async (req, res) => {
+  const cambios = {};
+  for (const k of ["correo", "push", "whatsapp"]) {
+    if (typeof req.body?.[k] === "boolean") cambios[k] = req.body[k];
+  }
+  if (!Object.keys(cambios).length) return fallo(res, 400, "Nada que actualizar.");
+
+  const { error } = await supabase
+    .from("portal_preferencias_notif")
+    .upsert(
+      { cliente_id: req.portal.clienteId, ...cambios, actualizado_en: new Date().toISOString() },
+      { onConflict: "cliente_id" }
+    );
+
+  if (error) return fallo(res, 500, "No se pudieron guardar las preferencias.");
+  res.json({ error: false, preferencias: cambios });
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Sesión
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -849,12 +990,13 @@ router.post("/salir", requiereSesion, async (req, res) => {
 });
 
 /** GET /portal/salud — diagnóstico de configuración, sin datos sensibles. */
-router.get("/salud", (req, res) => {
+router.get("/salud", async (req, res) => {
   res.json({
     error: false,
     token_configurado: Boolean(process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET),
     admin_configurado: Boolean(process.env.PORTAL_ADMIN_SECRET),
     canal_correo: hayCanalDeCorreo(),
+    canal_push: await hayPush(),
     canal_whatsapp: hayCanalDeWhatsApp(),
     trust_proxy: req.app.get("trust proxy") ? "activo" : "INACTIVO — actívalo en Railway",
     ip_detectada: ipDe(req),

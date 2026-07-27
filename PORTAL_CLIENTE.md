@@ -35,23 +35,92 @@ El frontend pregunta primero qué métodos aplican a esa placa (`POST /portal/ac
 **Nuevos**
 
 ```
-crm-backend/sql/portal_cliente.sql          Tablas de acceso + consultas de diagnóstico
-crm-backend/services/tokenPortal.mjs        Tokens HMAC y códigos (cero dependencias nuevas)
-crm-backend/services/enviarCodigo.mjs       Correo vía Brevo + WhatsApp inactivo
-crm-backend/routes/portalCliente.mjs        Router /portal/*
-frontend/src/lib/portalCliente.ts           SDK del portal
-frontend/src/components/PortalAcceso.tsx    Pantalla de identificación
-frontend/src/components/GenerarCodigoPortal.tsx  Botón para la secretaria
+crm-backend/sql/portal_cliente.sql              Tablas de acceso + diagnóstico
+crm-backend/sql/notificaciones_cliente.sql      Bitácora de avisos, push, preferencias
+crm-backend/services/tokenPortal.mjs            Tokens HMAC y códigos (sin dependencias)
+crm-backend/services/enviarCodigo.mjs           Código de acceso por correo (Brevo)
+crm-backend/services/notificarCliente.mjs       Avisos de cambio de estado (correo + push)
+crm-backend/services/webPush.mjs                Web Push / VAPID
+crm-backend/routes/portalCliente.mjs            Router /portal/*
+frontend/worker/index.js                        Service worker de push (next-pwa lo compila)
+frontend/src/lib/portalCliente.ts               SDK del portal
+frontend/src/components/PortalAcceso.tsx        Pantalla de identificación
+frontend/src/components/ActivarNotificaciones.tsx  Activar avisos desde el portal
+frontend/src/components/GenerarCodigoPortal.tsx    Botón para la secretaria
 ```
 
 **Modificados**
 
 ```
-crm-backend/server.mjs                      + trust proxy, + app.use("/portal", ...)
-frontend/src/app/cliente/page.tsx           buscar() → cargarDatos(), + acceso, cotizaciones, mantenimiento
+crm-backend/server.mjs                      + trust proxy, + /portal, + aviso en transicionarEstado
+crm-backend/package.json                    + web-push
+frontend/src/app/cliente/page.tsx           buscar() → cargarDatos(), acceso, cotizaciones, avisos
+frontend/src/app/clientes/page.tsx          + botón «Portal» en cada fila
+frontend/src/app/clientes/[id]/historial/page.tsx  + botón «Acceso al portal»
+frontend/public/manifest.json               arreglado el ícono 512 (apuntaba a un archivo inexistente)
 ```
 
-No se agregó ninguna dependencia npm. Los tokens usan `node:crypto` en vez de `jsonwebtoken`, y el correo reusa **Brevo**, que ya envía las confirmaciones de citas desde `server.mjs`.
+Única dependencia npm nueva: `web-push`. Los tokens usan `node:crypto` en vez de `jsonwebtoken`, y el correo reusa **Brevo**, que ya envía las confirmaciones de citas.
+
+---
+
+## Notificaciones automáticas
+
+Hasta ahora `transicionarEstado()` solo avisaba por WhatsApp, y como la API de Meta no está aprobada, en la práctica **el cliente no recibía nada**: se enteraba solo si entraba al portal a mirar.
+
+Ahora el aviso sale por dos canales que sí funcionan hoy:
+
+| Canal | Requiere | Alcance |
+|---|---|---|
+| **Correo** | correo válido en ficha | Depende de cuántos clientes lo tengan |
+| **Push (PWA)** | que el cliente instale la app y acepte | No depende de correo ni de Meta |
+
+El enganche está en `transicionarEstado()`, que es el punto único por donde pasan todos los cambios de estado — kanban, pantalla del taller, carril de lavado y aprobación desde el portal. Ningún camino se queda sin avisar.
+
+Se notifican: `DIAGNOSTICO`, `ESPERANDO_APROBACION`, `REPARACION`, `LISTO`, `ENTREGADO`, `CANCELADA`.
+
+No se notifican `CONTROL_CALIDAD` ni `EN_LAVADO` a propósito: son pasos internos, y avisar de ellos solo genera llamadas preguntando si ya se puede pasar a buscar el vehículo.
+
+**Anti-duplicado:** el índice `uq_notif_cli_evento` impide que la misma orden avise dos veces del mismo estado por el mismo canal. Sin eso, arrastrar una tarjeta del kanban de ida y vuelta le manda tres correos al cliente.
+
+### Configurar el push
+
+```bash
+npm i web-push --prefix crm-backend
+npx web-push generate-vapid-keys
+```
+
+En Railway:
+
+```bash
+VAPID_PUBLIC_KEY=<la pública>
+VAPID_PRIVATE_KEY=<la privada>
+VAPID_SUBJECT=mailto:solidoautoservicio@gmail.com
+URL_PORTAL=https://crm-solido.vercel.app/cliente
+```
+
+En Vercel:
+
+```bash
+NEXT_PUBLIC_VAPID_PUBLIC_KEY=<la MISMA pública>
+```
+
+Si falta cualquiera de estas, el push se apaga solo y el correo sigue funcionando. Nada se rompe por desplegar antes de terminar la configuración.
+
+> **iPhone:** las notificaciones push solo funcionan con la PWA instalada en la pantalla de inicio. El componente detecta ese caso y le explica al cliente cómo instalarla. En Android y escritorio funcionan directo desde el navegador.
+
+> **`frontend/worker/index.js`:** no edites `public/sw.js` a mano — next-pwa lo regenera en cada build y borra los cambios. Todo lo de push va en `worker/index.js`, que next-pwa compila e importa automáticamente.
+
+---
+
+## Dónde genera la secretaria el código
+
+En dos lugares, ambos ya montados:
+
+1. **Lista de clientes** (`/clientes`) — botón azul **🔑 Portal** en la columna de acciones de cada fila.
+2. **Ficha 360** (`/clientes/<id>/historial`) — botón **🔑 Acceso al portal** junto a «Agendar cita».
+
+Al presionarlo se abre un modal con el código en pantalla grande para dictarlo, más un botón para copiarlo y otro para enviarlo por WhatsApp si el cliente tiene teléfono. Vive 24 horas, es de un solo uso, y generar uno nuevo invalida el anterior.
 
 ---
 
@@ -65,7 +134,12 @@ Antes de tocar nada, corre en el SQL Editor de Supabase la consulta comentada al
 
 ### 2. Correr el SQL
 
-Pega `crm-backend/sql/portal_cliente.sql` completo en el SQL Editor. Crea cuatro tablas con prefijo `portal_` y no toca ninguna existente.
+Pega en el SQL Editor, en este orden:
+
+1. `crm-backend/sql/portal_cliente.sql` — cuatro tablas `portal_*` de acceso
+2. `crm-backend/sql/notificaciones_cliente.sql` — bitácora de avisos, suscripciones push y preferencias
+
+Ninguno toca tablas existentes.
 
 Si te da error en las llaves foráneas, revisa que `clientes.id` y `vehiculos.id` sigan siendo `int4` — el script asume los tipos que están hoy en `SUPABASE_TABLES.txt`.
 
@@ -103,11 +177,14 @@ Debe responder:
   "token_configurado": true,
   "admin_configurado": true,
   "canal_correo": true,
+  "canal_push": true,
   "canal_whatsapp": false,
   "trust_proxy": "activo",
   "ip_detectada": "190.x.x.x"
 }
 ```
+
+`canal_whatsapp: false` es lo esperado hasta que Meta apruebe la API. `canal_push: false` significa que falta instalar `web-push` o las llaves VAPID.
 
 Si `trust_proxy` sale `INACTIVO` o `ip_detectada` es siempre la misma para todos, el rate limiting no sirve: revisa que `app.set("trust proxy", 1)` esté antes de las rutas.
 
@@ -115,21 +192,9 @@ Si `trust_proxy` sale `INACTIVO` o `ip_detectada` es siempre la misma para todos
 
 `/cliente` ya no muestra el input de placa suelto: muestra la pantalla de acceso. La sesión dura 30 días, así que el cliente se identifica una vez y después solo abre la app.
 
-### 6. Montar el botón de la secretaria
+### 6. Probar el flujo completo
 
-En la ficha del cliente (`frontend/src/app/clientes/page.tsx` o donde tengas el detalle):
-
-```tsx
-import GenerarCodigoPortal from "@/components/GenerarCodigoPortal";
-
-<GenerarCodigoPortal
-  clienteId={cliente.id}
-  clienteNombre={cliente.nombre}
-  telefono={cliente.telefono}
-/>
-```
-
-Genera el código, lo muestra en pantalla grande para dictarlo, y ofrece enviarlo por WhatsApp con `wa.me` si el cliente tiene teléfono.
+El botón de la secretaria ya está montado en `/clientes` y en la Ficha 360 — no hay que integrar nada más.
 
 ---
 
@@ -153,6 +218,23 @@ Antes de anunciarlo a los clientes:
 - [ ] Abrir DevTools → Network en `/cliente` y confirmar que **no** hay llamadas a `/vehiculos`, `/ordenes` ni `/diagnosticos`
 
 Ese último punto es el que cierra el hueco original.
+
+**Notificaciones:**
+
+- [ ] `GET /portal/salud` devuelve `canal_correo: true` y `canal_push: true`
+- [ ] Mover una orden a `LISTO` en el kanban → llega el correo en menos de un minuto
+- [ ] Mover la misma orden fuera y de vuelta a `LISTO` → **no** llega un segundo correo
+- [ ] Instalar la PWA en un celular, activar avisos, tocar «Enviar notificación de prueba» → aparece en la pantalla de bloqueo
+- [ ] Con la PWA cerrada, mover una orden a `LISTO` → llega igual
+- [ ] Tocar la notificación → abre `/cliente`, no una pestaña nueva
+- [ ] Apagar el interruptor de correo en el portal y mover otra orden → no llega correo, sí llega push
+- [ ] Revisar `select * from notificaciones_cliente order by creado_en desc limit 20` — que no haya filas `fallido`
+
+**Botón de la secretaria:**
+
+- [ ] En `/clientes`, el botón **🔑 Portal** aparece en cada fila y genera el código
+- [ ] En la Ficha 360, el botón **🔑 Acceso al portal** hace lo mismo
+- [ ] El botón de WhatsApp del modal abre el chat con el mensaje ya escrito
 
 ---
 
@@ -181,3 +263,9 @@ El portal está blindado; el CRM detrás no. Alguien con la URL de Railway todav
 **Por qué los códigos se guardan hasheados.** Si alguien lee la base (o un backup), no obtiene códigos usables. Se guarda `sha256(codigo + salt)` y se compara en tiempo constante.
 
 **Sobre `routes/facturacion.js`.** Está escrito en CommonJS (`require`) pero el backend es `"type": "module"` — por eso nunca se montó. Si lo vas a activar, hay que convertirlo a ESM como `portalCliente.mjs`.
+
+**Por qué `web-push` sí es una dependencia y los tokens no.** El cifrado del payload de Web Push (RFC 8291) se puede escribir a mano con `node:crypto`, pero el riesgo no está en la criptografía sino en la interoperabilidad: cada navegador tiene su propio push service y los detalles de cabeceras y del JWT VAPID son fáciles de equivocar de forma que solo falla en Safari, o solo en Firefox. Ahí conviene el paquete estándar. Los tokens de sesión son otra cosa: los emite y valida el mismo backend, no hay terceros, y HMAC con `node:crypto` alcanza.
+
+**Sobre `notificarCliente.mjs` y `enviarCodigo.mjs`.** Los dos mandan correo por Brevo pero están separados a propósito: `enviarCodigo` lanza excepción si falla (el cliente espera un código que nunca llegará y hay que redirigirlo al mostrador), mientras que `notificarCliente` traga el error y lo registra (un correo caído no puede impedir que una orden avance en el taller).
+
+**El ícono 512 del manifest estaba roto.** Apuntaba a `/logo-512x512.png` pero el archivo real es `logo-512-512.png`. Eso afecta el ícono de instalación de la PWA y el de las notificaciones. Corregido.

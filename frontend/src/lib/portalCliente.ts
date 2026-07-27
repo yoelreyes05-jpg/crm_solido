@@ -254,6 +254,137 @@ export async function salir() {
   borrarSesion();
 }
 
+// ─── Notificaciones push (PWA) ───────────────────────────────────────────────
+
+export type Preferencias = { correo: boolean; push: boolean; whatsapp: boolean };
+
+/** La clave pública VAPID del servidor. Sin ella no se puede suscribir. */
+export function clavePush() {
+  return pedir<{ clave: string; disponible: boolean }>("/push/clave", {}, false);
+}
+
+export function cargarPreferencias() {
+  return pedir<{ preferencias: Preferencias; dispositivos: number }>("/preferencias");
+}
+
+export function guardarPreferencias(cambios: Partial<Preferencias>) {
+  return pedir<{ preferencias: Partial<Preferencias> }>("/preferencias", {
+    method: "PATCH",
+    body: JSON.stringify(cambios),
+  });
+}
+
+export function enviarPushDePrueba() {
+  return pedir<{ enviados: number }>("/push/prueba", { method: "POST" });
+}
+
+/** VAPID viaja en base64url; `applicationServerKey` exige un Uint8Array. */
+function base64UrlABytes(base64: string): Uint8Array {
+  const relleno = "=".repeat((4 - (base64.length % 4)) % 4);
+  const normal = (base64 + relleno).replace(/-/g, "+").replace(/_/g, "/");
+  const bin = window.atob(normal);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return bytes;
+}
+
+/** ¿Este navegador soporta notificaciones push? (iOS solo desde la PWA instalada) */
+export function soportaPush(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    "serviceWorker" in navigator &&
+    "PushManager" in window &&
+    "Notification" in window
+  );
+}
+
+/**
+ * Pide permiso y registra el dispositivo.
+ * Devuelve el motivo del fallo en vez de lanzar, para poder mostrarle al
+ * cliente algo mejor que "error".
+ */
+export async function activarPush(): Promise<
+  { ok: true } | { ok: false; motivo: "sin-soporte" | "denegado" | "sin-clave" | "error"; detalle?: string }
+> {
+  if (!soportaPush()) return { ok: false, motivo: "sin-soporte" };
+
+  try {
+    const permiso = await Notification.requestPermission();
+    if (permiso !== "granted") return { ok: false, motivo: "denegado" };
+
+    const { clave, disponible } = await clavePush();
+    if (!clave || !disponible) return { ok: false, motivo: "sin-clave" };
+
+    const registro = await navigator.serviceWorker.ready;
+
+    // Si ya había una suscripción con otra clave (rotaste VAPID), hay que
+    // darla de baja primero o `subscribe` falla.
+    const previa = await registro.pushManager.getSubscription();
+    if (previa) await previa.unsubscribe().catch(() => {});
+
+    const suscripcion = await registro.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: base64UrlABytes(clave) as BufferSource,
+    });
+
+    await pedir("/push/suscribir", {
+      method: "POST",
+      body: JSON.stringify({ suscripcion: suscripcion.toJSON() }),
+    });
+
+    return { ok: true };
+  } catch (e: any) {
+    return { ok: false, motivo: "error", detalle: e?.message };
+  }
+}
+
+/** Da de baja este dispositivo. */
+export async function desactivarPush() {
+  if (!soportaPush()) return;
+  try {
+    const registro = await navigator.serviceWorker.ready;
+    const suscripcion = await registro.pushManager.getSubscription();
+    if (suscripcion) {
+      await pedir("/push/baja", {
+        method: "POST",
+        body: JSON.stringify({ endpoint: suscripcion.endpoint }),
+      }).catch(() => {});
+      await suscripcion.unsubscribe();
+    }
+  } catch {}
+  await guardarPreferencias({ push: false }).catch(() => {});
+}
+
+/** ¿Este dispositivo concreto ya está suscrito? */
+export async function dispositivoSuscrito(): Promise<boolean> {
+  if (!soportaPush() || Notification.permission !== "granted") return false;
+  try {
+    const registro = await navigator.serviceWorker.ready;
+    return Boolean(await registro.pushManager.getSubscription());
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * El service worker avisa cuando el navegador rota las claves de suscripción.
+ * Sin esto el cliente deja de recibir avisos en silencio.
+ */
+export function escucharResuscripcion() {
+  if (typeof window === "undefined" || !("serviceWorker" in navigator)) return () => {};
+
+  const alMensaje = (ev: MessageEvent) => {
+    if (ev.data?.tipo !== "resuscribir-push" || !ev.data?.suscripcion) return;
+    pedir("/push/suscribir", {
+      method: "POST",
+      body: JSON.stringify({ suscripcion: ev.data.suscripcion }),
+    }).catch(() => {});
+  };
+
+  navigator.serviceWorker.addEventListener("message", alMensaje);
+  return () => navigator.serviceWorker.removeEventListener("message", alMensaje);
+}
+
 // ─── Uso interno del CRM (secretaria) ────────────────────────────────────────
 
 /**

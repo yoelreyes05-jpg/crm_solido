@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { auditHeaders } from "@/lib/audit";
+import GenerarCodigoPortal from "@/components/GenerarCodigoPortal";
 
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
@@ -133,6 +134,18 @@ export default function FichaCliente() {
             <button onClick={() => router.push("/citas")} style={{ background: "#111827", color: "#fff", border: "none", padding: "7px 16px", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}>
               📅 Agendar cita
             </button>
+            {/* Código de 8 dígitos para que el cliente entre al portal desde su
+                celular. Imprescindible para quien no tiene teléfono ni correo
+                en ficha: es su única vía de acceso. */}
+            {cliente?.id && (
+              <GenerarCodigoPortal
+                clienteId={Number(cliente.id)}
+                clienteNombre={cliente.nombre}
+                telefono={cliente.telefono}
+                etiqueta="Acceso al portal"
+                estiloBoton={{ background: "#0ea5e9", color: "#fff", border: "none", padding: "7px 16px", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+              />
+            )}
           </div>
         </div>
         {/* KPIs de la relación */}

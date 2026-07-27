@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
+import GenerarCodigoPortal from "@/components/GenerarCodigoPortal";
 
 // Consulta exacta al padrón DGII por RNC/cédula. Devuelve null si no existe.
 async function dgiiPorRNC(rnc: string) {
@@ -371,6 +372,16 @@ export default function Clientes() {
                           style={btnAccion("#3b82f6")} title="Ficha 360 — historial, citas, notas e interacciones">
                           👤 Ficha 360
                         </button>
+                        {/* Código para que el cliente entre al portal desde su
+                            celular. Es la vía para quien no tiene teléfono ni
+                            correo en ficha y no puede usar los otros métodos. */}
+                        <GenerarCodigoPortal
+                          clienteId={c.id}
+                          clienteNombre={c.nombre}
+                          telefono={c.telefono}
+                          estiloBoton={btnAccion("#0ea5e9")}
+                          etiqueta="Portal"
+                        />
                         {puedeEliminar && (
                           <button onClick={() => eliminarCliente(c.id, c.nombre)}
                             style={btnAccion("#dc2626")} title="Eliminar">

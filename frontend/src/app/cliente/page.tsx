@@ -2,6 +2,7 @@
 import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
 import PortalAcceso from "@/components/PortalAcceso";
+import ActivarNotificaciones from "@/components/ActivarNotificaciones";
 import {
   cargarEstado, cargarHistorial, cargarDetalleHistorial,
   responderCotizacion, revalidarSesion, salir,
@@ -1311,6 +1312,10 @@ export default function ClienteApp() {
                 <button onClick={cerrarSesion} className="btn-volver">
                   ← Salir{sesion?.nombre ? ` (${sesion.nombre.split(" ")[0]})` : ""}
                 </button>
+
+                {/* Avisos automáticos: sin esto el cliente solo se entera del
+                    estado si entra a mirar. */}
+                <ActivarNotificaciones />
 
                 {/* ── COTIZACIONES PENDIENTES ──
                     Aprobar desde el celular sin llamada ni visita: el taller lo

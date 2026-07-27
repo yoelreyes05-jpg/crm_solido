@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import portalCliente from "./routes/portalCliente.mjs";
+import { notificarCambioEstado, esEventoNotificable } from "./services/notificarCliente.mjs";
 
 const app = express();
 
@@ -6882,6 +6883,17 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
   if (WA_MENSAJES[nuevoEstado]) {
     notificarClienteWA(idNum, WA_MENSAJES[nuevoEstado]).catch(e =>
       console.warn("⚠️ WhatsApp notif error:", e.message)
+    );
+  }
+
+  // ✉️📲 Notificación por correo y push a la PWA.
+  // Este es el punto único por donde pasan TODOS los cambios de estado (kanban,
+  // pantalla del taller, carril de lavado, aprobación desde el portal), así que
+  // notificar aquí garantiza que ningún camino se quede sin avisar.
+  // Fire-and-forget: un fallo de correo no debe impedir que la orden avance.
+  if (esEventoNotificable(nuevoEstado)) {
+    notificarCambioEstado(idNum, nuevoEstado).catch(e =>
+      console.warn("⚠️ Notificación al cliente:", e.message)
     );
   }
 
