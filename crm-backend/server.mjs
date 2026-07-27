@@ -6816,6 +6816,19 @@ const TRANSICIONES_VALIDAS = {
   ENTREGADO:             [],
 };
 
+// Transiciones extra que SOLO existen para órdenes marcadas como express
+// (cambio de aceite, lavado, gomas: trabajos que no requieren cotización).
+//
+// El cliente no pidió un diagnóstico ni va a aprobar nada, así que pedirle
+// aprobación lo confunde y deja la orden trabada. El chequeo de rutina del
+// técnico igual se registra, pero marcado como cortesía.
+//
+// Se mantiene el paso por LISTO en vez de saltar a ENTREGADO: es lo que
+// dispara el aviso "tu vehículo está listo" y deja la hora real de entrega.
+const TRANSICIONES_EXPRESS = {
+  DIAGNOSTICO: ["LISTO"],
+};
+
 /**
  * transicionarEstado — cambia el estado de una orden de forma controlada
  * y deja registro en orden_trabajo_log.
@@ -6828,7 +6841,7 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
   // Leer orden actual
   const { data: orden, error: errLeer } = await supabase
     .from("ordenes_trabajo")
-    .select("id, estado")
+    .select("id, estado, es_express")
     .eq("id", idNum)
     .maybeSingle();
 
@@ -6837,12 +6850,22 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
 
   const estadoActual = orden.estado || "RECIBIDO";
 
-  // Validar que la transición sea permitida
-  const permitidos = TRANSICIONES_VALIDAS[estadoActual] || [];
+  // Validar que la transición sea permitida.
+  // Una orden express suma los atajos de TRANSICIONES_EXPRESS; el resto del
+  // flujo normal le sigue estando disponible por si el técnico encuentra algo
+  // que sí requiere cotización y hay que devolverla al camino largo.
+  const permitidos = [
+    ...(TRANSICIONES_VALIDAS[estadoActual] || []),
+    ...(orden.es_express ? (TRANSICIONES_EXPRESS[estadoActual] || []) : []),
+  ];
+
   if (!permitidos.includes(nuevoEstado)) {
+    const pista = !orden.es_express && (TRANSICIONES_EXPRESS[estadoActual] || []).includes(nuevoEstado)
+      ? ` Ese salto solo aplica a órdenes marcadas como servicio express.`
+      : "";
     return {
       ok: false,
-      error: `Transición inválida: ${estadoActual} → ${nuevoEstado}. Permitidas: ${permitidos.join(", ") || "ninguna"}`
+      error: `Transición inválida: ${estadoActual} → ${nuevoEstado}. Permitidas: ${permitidos.join(", ") || "ninguna"}.${pista}`
     };
   }
 
@@ -6903,6 +6926,50 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
 
   return { ok: true };
 }
+
+// ── PATCH /ordenes/:id/express — activar o quitar el ciclo corto ────────────
+// Lo usa recepción al recibir el vehículo. Body: { es_express, motivo }
+app.patch("/ordenes/:id/express", async (req, res) => {
+  const idNum = parseInt(req.params.id, 10);
+  if (isNaN(idNum)) return res.status(400).json({ error: "ID de orden inválido" });
+
+  const esExpress = req.body?.es_express !== false;
+  const motivo = String(req.body?.motivo || "").slice(0, 200) || null;
+
+  const { data: orden } = await supabase
+    .from("ordenes_trabajo").select("id, estado").eq("id", idNum).maybeSingle();
+  if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+
+  // Marcarla tarde no tiene sentido: si ya pasó de diagnóstico, el camino largo
+  // ya está en marcha y saltarse pasos dejaría el expediente incoherente.
+  const estadosPermitidos = ["RECIBIDO", "DIAGNOSTICO"];
+  if (esExpress && !estadosPermitidos.includes(orden.estado || "RECIBIDO")) {
+    return res.status(409).json({
+      error: `Solo se puede marcar como express mientras la orden está en ${estadosPermitidos.join(" o ")}. ` +
+             `Esta está en ${orden.estado}.`,
+    });
+  }
+
+  const { data, error } = await supabase
+    .from("ordenes_trabajo")
+    .update({ es_express: esExpress, express_motivo: esExpress ? motivo : null })
+    .eq("id", idNum)
+    .select()
+    .maybeSingle();
+
+  if (error) return res.status(500).json({ error: error.message });
+
+  logAccion(req, {
+    accion: esExpress ? "ACTIVAR_EXPRESS" : "QUITAR_EXPRESS",
+    modulo: "ordenes",
+    registroId: idNum,
+    descripcion: esExpress
+      ? `Marcó la orden #${idNum} como servicio express${motivo ? ` (${motivo})` : ""}`
+      : `Quitó el servicio express de la orden #${idNum}`,
+  });
+
+  res.json(data || { ok: true });
+});
 
 // ── GET /ordenes/:id — detalle completo de una orden ────────────────────────
 app.get("/ordenes/:id", async (req, res) => {

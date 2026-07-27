@@ -202,7 +202,14 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   const avancesSnap: any[] = Array.isArray(h.avances_data) ? h.avances_data : [];
   const avances: any[] = Array.isArray(detalleCompleto?.avances) && detalleCompleto.avances.length > 0
     ? detalleCompleto.avances : avancesSnap;
-  const timeline: any[] = Array.isArray(h.timeline_data) ? h.timeline_data : [];
+  // El historial de estados llega con tres nombres según de dónde venga el
+  // expediente: snapshot de una orden activa, o las tablas de auditoría que
+  // devuelve el detalle. Se toma el primero que traiga filas.
+  const timeline: any[] =
+    (Array.isArray(h.timeline_data) && h.timeline_data.length > 0 && h.timeline_data)
+    || (Array.isArray(detalleCompleto?.estado_historial) && detalleCompleto.estado_historial.length > 0 && detalleCompleto.estado_historial)
+    || (Array.isArray(detalleCompleto?.orden_trabajo_log) && detalleCompleto.orden_trabajo_log)
+    || [];
 
   const cotItems  = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle : (Array.isArray(cot.items) ? cot.items : []);
   const facItems: any[] = Array.isArray(fac.items) ? fac.items : [];
@@ -226,8 +233,32 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   const fechaEntrega: string  = detalleCompleto?.orden?.fecha_entrega  || h.fecha_entrega  || (fechas as any).entrega || "";
 
   const diagLive: any = detalleCompleto?.diagnostico || null;
-  const hallazgos: string = diagLive?.descripcion || diagLive?.hallazgos || h.fallas_identificadas || "";
+
+  // `descripcion` y `hallazgos` son alias que solo crea el endpoint
+  // /diagnosticos. Cuando el diagnóstico viene del detalle del expediente
+  // llega en crudo, y el nombre real de la columna es `fallas_identificadas`.
+  // Sin este respaldo la sección salía vacía aunque hubiera datos.
+  const hallazgos: string =
+    diagLive?.descripcion || diagLive?.hallazgos || diagLive?.fallas_identificadas
+    || h.fallas_identificadas || h.diagnostico_general || "";
+
+  const observacionesDiag: string =
+    diagLive?.observaciones || h.observaciones_diagnostico || "";
+
+  const tecnicoDiag: string = diagLive?.tecnico_nombre || h.tecnico_nombre || "";
+  const fechaDiag: string = diagLive?.created_at || "";
+
   const codigosFalla: string = diagLive?.codigos_falla || h.codigos_falla || "";
+
+  // Accesorios revisados en recepción: la tabla los guarda como diez columnas
+  // booleanas sueltas, no como un JSON.
+  const ACCESORIOS: [string, string][] = [
+    ["radio_pantalla", "Radio / Pantalla"], ["tapiceria_ok", "Tapicería"],
+    ["alfombras_ok", "Alfombras"],          ["luces_ok", "Luces"],
+    ["bocina_ok", "Bocina"],                ["espejos_ok", "Espejos"],
+    ["gato_ok", "Gato"],                    ["llanta_repuesto_ok", "Llanta de repuesto"],
+    ["documentos_ok", "Documentos"],        ["herramientas_ok", "Herramientas"],
+  ];
 
   const QC_LBL: Record<string,string> = {
     motor:"Motor",transmision:"Transmisión",frenos:"Frenos",suspension:"Suspensión",
@@ -308,18 +339,52 @@ ${inspec ? `
         return `<span class="chip">${lab}: ${_tl[tipo]||tipo.replace(/_/g," ")||"—"}</span>`;
       }).join("")}</div>
     </div>` : ""}
-  ${inspec.kilometraje ? `<div class="row"><span class="label">Kilometraje</span><span>${Number(inspec.kilometraje).toLocaleString()} km</span></div>` : ""}
-  ${inspec.combustible ? `<div class="row"><span class="label">Combustible</span><span>${inspec.combustible}%</span></div>` : ""}
-  ${inspec.observaciones_generales ? `
-    <div style="margin-top:8px;font-size:13px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px 10px;white-space:pre-wrap">${inspec.observaciones_generales}</div>` : ""}
+  <!-- Los nombres reales de las columnas son km_entrada y nivel_combustible.
+       Se dejan los alias como respaldo por si el snapshot JSONB los trae. -->
+  ${(inspec.km_entrada || inspec.kilometraje) ? `<div class="row"><span class="label">Kilometraje de entrada</span><span>${Number(inspec.km_entrada || inspec.kilometraje).toLocaleString("es-DO")} km</span></div>` : ""}
+  ${(inspec.nivel_combustible != null || inspec.combustible != null) ? `<div class="row"><span class="label">Nivel de combustible</span><span>${inspec.nivel_combustible ?? inspec.combustible}%</span></div>` : ""}
+  ${inspec.condicion_general ? `<div class="row"><span class="label">Condición general</span><span>${inspec.condicion_general}</span></div>` : ""}
+  ${inspec.estado_pintura ? `<div class="row"><span class="label">Pintura</span><span>${inspec.estado_pintura}</span></div>` : ""}
+  ${inspec.estado_vidrios ? `<div class="row"><span class="label">Vidrios</span><span>${inspec.estado_vidrios}</span></div>` : ""}
+  ${inspec.estado_llantas ? `<div class="row"><span class="label">Llantas</span><span>${inspec.estado_llantas}</span></div>` : ""}
+  ${inspec.rayones ? `<div class="row"><span class="label">Rayones</span><span>${inspec.rayones}</span></div>` : ""}
+  ${inspec.golpes ? `<div class="row"><span class="label">Golpes</span><span>${inspec.golpes}</span></div>` : ""}
+
+  ${ACCESORIOS.some(([k]) => inspec[k] != null) ? `
+    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9">
+      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px">Accesorios e interior</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">
+        ${ACCESORIOS.map(([k, label]) =>
+          `<div style="font-size:12px">${inspec[k] ? "✅" : "❌"} ${label}</div>`).join("")}
+      </div>
+      ${inspec.otros_accesorios ? `<div style="font-size:12px;color:#374151;margin-top:6px">Otros: ${inspec.otros_accesorios}</div>` : ""}
+    </div>` : ""}
+
+  ${(inspec.observaciones || inspec.observaciones_generales) ? `
+    <div style="margin-top:8px;font-size:13px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px 10px;white-space:pre-wrap">${inspec.observaciones || inspec.observaciones_generales}</div>` : ""}
+
+  ${(inspec.creado_por_nombre || inspec.fecha_recepcion) ? `
+    <div style="font-size:11px;color:#64748b;margin-top:8px;padding-top:6px;border-top:1px solid #f1f5f9">
+      Recibido por: <strong>${inspec.creado_por_nombre || "—"}</strong>${inspec.fecha_recepcion ? ` · ${fmtDT(inspec.fecha_recepcion)}` : ""}
+    </div>` : ""}
 </div>` : ""}
 
 <!-- ══ Diagnóstico / Hallazgos ══ -->
-${(hallazgos || codigosFalla) ? `
-<h3>🔎 Diagnóstico / Hallazgos</h3>
+${(hallazgos || codigosFalla || observacionesDiag) ? `
+<h3>🔬 Diagnóstico Técnico</h3>
 <div class="card" style="background:#fffbeb;border-color:#fde68a">
+  ${(tecnicoDiag || fechaDiag) ? `
+    <div style="display:flex;gap:24px;font-size:11px;color:#64748b;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #fde68a">
+      ${tecnicoDiag ? `<div>TÉCNICO<br><strong style="font-size:12px;color:#374151">${tecnicoDiag}</strong></div>` : ""}
+      ${fechaDiag ? `<div>REGISTRADO<br><strong style="font-size:12px;color:#374151">${fmtDT(fechaDiag)}</strong></div>` : ""}
+    </div>` : ""}
   ${codigosFalla ? `<div style="font-size:12px;margin-bottom:6px"><strong>Códigos de falla:</strong> ${codigosFalla}</div>` : ""}
-  ${hallazgos    ? `<div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${hallazgos}</div>` : ""}
+  ${hallazgos ? `
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#92400e;margin-bottom:4px">⚠️ Fallas identificadas</div>
+    <div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${hallazgos}</div>` : ""}
+  ${observacionesDiag ? `
+    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#92400e;margin:10px 0 4px">Observaciones</div>
+    <div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${observacionesDiag}</div>` : ""}
 </div>` : ""}
 
 <!-- ══ Mano de obra (trabajos a realizar) ══ -->
@@ -1554,6 +1619,21 @@ export default function ClienteApp() {
                             .split("\n").filter((l: string) => l.trim());
                           return (
                             <div key={d.id} className="diag-card" style={{ marginBottom:12 }}>
+                              {/* Revisión de cortesía: el cliente no la pidió y no
+                                  se le cobra. Decirlo evita que crea que estos
+                                  hallazgos son un cargo pendiente. */}
+                              {d.es_cortesia && (
+                                <div style={{
+                                  background:"rgba(16,185,129,0.12)",
+                                  border:"1px solid rgba(52,211,153,0.3)",
+                                  borderRadius:10, padding:"9px 12px", marginBottom:10,
+                                  fontSize:12, color:"#6ee7b7", lineHeight:1.5,
+                                }}>
+                                  🎁 <strong>Revisión de cortesía</strong> — no se factura.
+                                  Lo revisamos mientras hacíamos tu servicio, por si quieres
+                                  atenderlo más adelante.
+                                </div>
+                              )}
                               {/* Header */}
                               <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:10 }}>
                                 <div>

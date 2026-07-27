@@ -318,6 +318,12 @@ export default function RecepcionPage() {
   // Paso 4 — Orden
   const [descripcion, setDescripcion] = useState("");
   const [prioridad, setPrioridad] = useState<Prioridad>("NORMAL");
+
+  // Servicio express: ciclo corto RECIBIDO → DIAGNOSTICO → LISTO → ENTREGADO.
+  // Para trabajos que el cliente ya aprobó al dejar el vehículo (cambio de
+  // aceite, lavado, gomas). Sin esto la orden queda esperando que apruebe una
+  // cotización que nunca pidió.
+  const [esExpress, setEsExpress] = useState(false);
   const [creandoOrden, setCreandoOrden] = useState(false);
 
   // ── Cargar clientes ───────────────────────────────────────────────────────
@@ -538,6 +544,24 @@ export default function RecepcionPage() {
 
       const ordenId: number = dataOrden.id ?? dataOrden.orden?.id;
       if (!ordenId) throw new Error("El servidor no devolvió el ID de la orden");
+
+      // 1b. Marcar como express si aplica. No bloqueante: la orden ya existe y
+      //     la marca se puede activar después desde el detalle de la orden.
+      if (esExpress) {
+        try {
+          const r = await fetch(`${API}/ordenes/${ordenId}/express`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ es_express: true, motivo: descripcion.trim() }),
+          });
+          if (!r.ok) {
+            const e = await r.json().catch(() => ({}));
+            console.warn("⚠️ No se pudo marcar como express:", e.error || r.status);
+          }
+        } catch (exErr) {
+          console.warn("⚠️ No se pudo marcar como express:", exErr);
+        }
+      }
 
       // 2. Crear la inspección (no-bloqueante: si la tabla aún no existe en Supabase,
       //    la orden ya fue creada y no se cancela)
@@ -1320,6 +1344,40 @@ export default function RecepcionPage() {
                       {p}
                     </button>
                   ))}
+                </div>
+              </div>
+
+              {/* Servicio express — ciclo corto sin cotización */}
+              <div
+                onClick={() => setEsExpress(v => !v)}
+                style={{
+                  marginBottom: 22, padding: "14px 16px", borderRadius: 12, cursor: "pointer",
+                  border: esExpress ? "2px solid #10b981" : `1px solid ${BORDER}`,
+                  background: esExpress ? "rgba(16,185,129,0.10)" : BG,
+                  display: "flex", alignItems: "flex-start", gap: 12,
+                }}
+              >
+                <div
+                  style={{
+                    flex: "none", width: 22, height: 22, borderRadius: 6, marginTop: 1,
+                    border: esExpress ? "none" : `2px solid ${BORDER}`,
+                    background: esExpress ? "#10b981" : "transparent",
+                    color: "#fff", fontSize: 14, fontWeight: 800,
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                  }}
+                >
+                  {esExpress ? "✓" : ""}
+                </div>
+                <div>
+                  <div style={{ fontSize: 14, fontWeight: 700, color: esExpress ? "#10b981" : MUTED }}>
+                    ⚡ Servicio express
+                  </div>
+                  <div style={{ fontSize: 12, color: MUTED, marginTop: 3, lineHeight: 1.5 }}>
+                    Para trabajos que el cliente ya aprobó al dejar el vehículo:
+                    cambio de aceite, lavado, gomas. La orden va directo de
+                    diagnóstico a <strong>Listo</strong>, sin cotización ni espera de aprobación.
+                    El chequeo del técnico se guarda igual, como cortesía.
+                  </div>
                 </div>
               </div>
 

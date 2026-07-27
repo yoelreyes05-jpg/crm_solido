@@ -718,14 +718,28 @@ router.get("/estado", requiereSesion, ruta(async (req, res) => {
     if (c.diagnostico_id != null) cotPorDiagnostico[c.diagnostico_id] = c;
   }
 
+  // Órdenes express, para marcar sus diagnósticos como cortesía.
+  const ordenesExpress = new Set(
+    ordenes.filter((o) => o.es_express).map((o) => o.id)
+  );
+
   const diagnosticos = (diagRes.data || []).map((d) => {
     const cot = cotPorDiagnostico[d.id];
     const manoObra = Number(cot?.mano_obra || 0);
     const repuestos = Number(cot?.repuestos || 0);
     const total = manoObra + repuestos || Number(cot?.total || d.costo_estimado || 0);
 
+    // Un diagnóstico hecho durante un servicio express es una revisión de
+    // cortesía: el cliente no la pidió y no se le cobra. Sin marcarlo, ve
+    // hallazgos en su portal y asume que le van a facturar algo que no aprobó.
+    const esCortesia = d.es_cortesia === true || ordenesExpress.has(d.orden_id);
+
     return {
       ...d,
+      es_cortesia: esCortesia,
+      etiqueta_cortesia: esCortesia
+        ? "Revisión de cortesía — no se factura"
+        : null,
       cliente_nombre: cliRes.data?.nombre || "",
       vehiculo_info: infoVehiculo,
       tecnico_nombre: d.tecnico_nombre || "—",

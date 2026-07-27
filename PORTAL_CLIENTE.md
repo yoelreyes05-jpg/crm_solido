@@ -304,6 +304,34 @@ Un detalle relacionado: las consultas fallidas se resolvían con `|| []`, así q
 
 ---
 
+## Servicio express
+
+Un cambio de aceite pasaba por el mismo flujo que una reparación mayor: diagnóstico → esperando aprobación → reparación → control de calidad → listo. El cliente recibía un aviso pidiéndole aprobar una cotización que nunca pidió, y la orden se quedaba trabada esperando esa aprobación.
+
+Ahora recepción tiene una casilla **⚡ Servicio express**. Al marcarla, el camino se acorta:
+
+```
+RECIBIDO → DIAGNOSTICO → LISTO → ENTREGADO
+```
+
+Se mantiene el paso por `LISTO` en vez de saltar directo a `ENTREGADO`: es lo que dispara el aviso «tu vehículo está listo» y lo que deja registrada la hora real de entrega.
+
+El camino largo sigue disponible para una orden express. Si el técnico encuentra algo que sí requiere cotización, la manda a `ESPERANDO_APROBACION` con normalidad — la marca express **suma** un atajo, no cierra puertas.
+
+### El diagnóstico de cortesía
+
+El chequeo que hace el técnico durante un express se guarda igual, marcado como `es_cortesia`. En el portal el cliente lo ve con una etiqueta explícita: *«Revisión de cortesía — no se factura»*.
+
+Esa distinción importa por dos razones. Sin ella el cliente ve hallazgos técnicos en su portal y asume que le van a cobrar algo que no aprobó. Y con ella, el hallazgo queda registrado como una recomendación que abre la conversación para el próximo servicio.
+
+`crm-backend/sql/servicio_express.sql` trae una consulta que lista los hallazgos de cortesía que nunca se convirtieron en trabajo — es, literalmente, la lista de oportunidades de venta que el taller está dejando pasar.
+
+### Por qué la marca es manual
+
+Deducirla del texto del motivo de entrada fallaría en cuanto alguien escriba «cambio aceite» en vez de «cambio de aceite». La casilla es una decisión de la secretaria, que es quien tiene el contexto. Si más adelante los datos muestran que siempre son los mismos tres o cuatro servicios, la consulta de `servicio_express.sql` lo dirá y ahí sí valdrá la pena automatizarlo.
+
+---
+
 ## Sobre la pista del teléfono
 
 La pista muestra **solo los últimos 2 dígitos** (`***-***-**27`), aunque el cliente deba escribir 4.
