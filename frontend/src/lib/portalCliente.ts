@@ -324,14 +324,24 @@ export function soportaPush(): boolean {
   );
 }
 
+export type MotivoPush = "sin-soporte" | "denegado" | "sin-clave" | "error";
+
+/**
+ * Resultado de activar el push.
+ *
+ * Es un tipo plano con `motivo` opcional y no una unión discriminada a
+ * propósito: el proyecto compila con `"strict": false`, y sin `strictNullChecks`
+ * TypeScript no estrecha uniones por un discriminante booleano — leer `r.motivo`
+ * tras un `if (r.ok)` rompía el build en Vercel.
+ */
+export type ResultadoPush = { ok: boolean; motivo?: MotivoPush; detalle?: string };
+
 /**
  * Pide permiso y registra el dispositivo.
  * Devuelve el motivo del fallo en vez de lanzar, para poder mostrarle al
  * cliente algo mejor que "error".
  */
-export async function activarPush(): Promise<
-  { ok: true } | { ok: false; motivo: "sin-soporte" | "denegado" | "sin-clave" | "error"; detalle?: string }
-> {
+export async function activarPush(): Promise<ResultadoPush> {
   if (!soportaPush()) return { ok: false, motivo: "sin-soporte" };
 
   try {

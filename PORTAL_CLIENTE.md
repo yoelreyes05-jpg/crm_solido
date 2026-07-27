@@ -299,3 +299,10 @@ El portal está blindado; el CRM detrás no. Alguien con la URL de Railway todav
 **Sobre `notificarCliente.mjs` y `enviarCodigo.mjs`.** Los dos mandan correo por Brevo pero están separados a propósito: `enviarCodigo` lanza excepción si falla (el cliente espera un código que nunca llegará y hay que redirigirlo al mostrador), mientras que `notificarCliente` traga el error y lo registra (un correo caído no puede impedir que una orden avance en el taller).
 
 **El ícono 512 del manifest estaba roto.** Apuntaba a `/logo-512x512.png` pero el archivo real es `logo-512-512.png`. Eso afecta el ícono de instalación de la PWA y el de las notificaciones. Corregido.
+
+**Restricciones de este proyecto que hay que respetar al tocar el frontend.** El `tsconfig.json` tiene `"strict": false`, y eso apaga `strictNullChecks`. Consecuencia poco obvia: **TypeScript no estrecha uniones discriminadas por un booleano**. Un tipo como `{ ok: true } | { ok: false; motivo: string }` compila en local pero rompe el build de Vercel al leer `r.motivo` dentro de un `else`. Por eso `ResultadoPush` es un tipo plano con `motivo` opcional.
+
+Dos convenciones más, tomadas del código existente para no introducir dependencias de tipos:
+
+- Los estilos de componente van en `<style>{\`...\`}</style>` plano, como en `cliente/page.tsx` — no en `<style jsx>`. Como esas reglas son globales, todas las clases llevan prefijo (`gcp-`, `notif-`, `pa-`).
+- Los tipos de React se importan explícitamente (`import type { CSSProperties } from "react"`) en vez de usar el namespace global `React.`.

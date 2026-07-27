@@ -16,6 +16,7 @@
  */
 
 import { useState } from "react";
+import type { CSSProperties } from "react";
 import { generarCodigoMostrador, ErrorPortal } from "@/lib/portalCliente";
 
 const SECRETO_ADMIN = process.env.NEXT_PUBLIC_PORTAL_ADMIN_SECRET || "";
@@ -41,7 +42,7 @@ export default function GenerarCodigoPortal({
   clienteNombre?: string;
   telefono?: string;
   /** Para que el botón encaje con los estilos en línea de la tabla de clientes. */
-  estiloBoton?: React.CSSProperties;
+  estiloBoton?: CSSProperties;
   etiqueta?: string;
 }) {
   const [abierto, setAbierto]   = useState(false);
@@ -148,7 +149,10 @@ export default function GenerarCodigoPortal({
         </div>
       )}
 
-      <style jsx>{`
+      {/* <style> plano y no styled-jsx: es el patrón que ya usa cliente/page.tsx
+          y no depende de tipos adicionales. Por eso todas las clases llevan
+          prefijo `gcp-`, ya que estas reglas son globales. */}
+      <style>{`
         .gcp-boton {
           padding: 10px 16px; border: 1px solid #cbd5e1; border-radius: 10px;
           background: #fff; color: #334155; font-size: 13px; font-weight: 600;

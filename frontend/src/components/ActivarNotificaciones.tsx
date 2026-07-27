@@ -190,7 +190,9 @@ export default function ActivarNotificaciones() {
         </div>
       )}
 
-      <style jsx>{`
+      {/* <style> plano y no styled-jsx, igual que en cliente/page.tsx.
+          Las clases llevan prefijo `notif-` porque estas reglas son globales. */}
+      <style>{`
         .notif-card {
           background: rgba(15, 23, 42, 0.6);
           border: 1px solid rgba(255, 255, 255, 0.07);
