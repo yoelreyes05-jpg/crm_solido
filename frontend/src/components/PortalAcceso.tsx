@@ -208,7 +208,12 @@ export default function PortalAcceso({ onEntrar }: { onEntrar: (s: Sesion) => vo
             {nombreVeh && <p className="pa-veh">🚗 {nombreVeh} · {placa}</p>}
             <p className="pa-sub">
               Escribe los <strong>últimos 4 dígitos</strong> del teléfono que
-              dejaste en el taller{metodos?.telefono ? ` (${metodos.telefono.pista})` : ""}.
+              dejaste en el taller.
+              {metodos?.telefono ? (
+                <>
+                  {" "}Termina en <strong>{metodos.telefono.pista.slice(-2)}</strong>.
+                </>
+              ) : null}
             </p>
             <input
               ref={inputRef}

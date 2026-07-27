@@ -135,8 +135,18 @@ export function enmascararCorreo(correo) {
   return `${visible}${"*".repeat(Math.max(3, usuario.length - visible.length))}${dominio}`;
 }
 
-/** Enmascara un teléfono: ***-***-1234 */
+/**
+ * Enmascara un teléfono dejando ver SOLO los últimos 2 dígitos: ***-***-**34
+ *
+ * Importante: la verificación pide los últimos 4 dígitos. Si la pista mostrara
+ * esos mismos 4, cualquiera que supiera la placa leería la respuesta en
+ * pantalla y el segundo factor no serviría de nada.
+ *
+ * Con 2 visibles, el cliente reconoce cuál de sus números registró, pero un
+ * extraño todavía tiene que adivinar los otros 2 — 100 combinaciones, que el
+ * límite de 8 intentos por hora vuelve inviable.
+ */
 export function enmascararTelefono(telefono) {
-  const ult = ultimosDigitos(telefono, 4);
-  return ult ? `***-***-${ult}` : "***";
+  const dos = ultimosDigitos(telefono, 2);
+  return dos ? `***-***-**${dos}` : "***";
 }

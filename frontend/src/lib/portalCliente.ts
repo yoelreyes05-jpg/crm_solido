@@ -124,11 +124,37 @@ async function pedir<T = any>(
     if (token) headers["Authorization"] = `Bearer ${token}`;
   }
 
+  // Sin timeout, si el backend deja una petición colgada el usuario se queda
+  // mirando "cargando" indefinidamente.
+  const control = new AbortController();
+  const cronometro = setTimeout(() => control.abort(), 20000);
+
   let res: Response;
   try {
-    res = await fetch(`${API}/portal${ruta}`, { ...opciones, headers });
-  } catch {
-    throw new ErrorPortal("Sin conexión. Revisa tus datos o el wifi.", 0);
+    res = await fetch(`${API}/portal${ruta}`, {
+      ...opciones,
+      headers,
+      signal: control.signal,
+    });
+  } catch (e: any) {
+    // `fetch` solo rechaza por red, CORS o abort — nunca por un status de error.
+    // Distinguir los casos importa: decirle "revisa tu wifi" a alguien cuyo
+    // wifi está bien lo manda a buscar donde no es.
+    if (e?.name === "AbortError") {
+      throw new ErrorPortal(
+        "El servidor está tardando demasiado. Intenta de nuevo en un momento.",
+        0
+      );
+    }
+    if (typeof navigator !== "undefined" && navigator.onLine === false) {
+      throw new ErrorPortal("Parece que no tienes internet. Revisa tu conexión.", 0);
+    }
+    throw new ErrorPortal(
+      "No pudimos comunicarnos con el servidor. Si el problema sigue, avísale al taller.",
+      0
+    );
+  } finally {
+    clearTimeout(cronometro);
   }
 
   let cuerpo: any = null;

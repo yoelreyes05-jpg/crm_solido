@@ -38,8 +38,11 @@ const supabase = createClient(
 
 const OTP_MINUTOS       = 10;
 const SESION_DIAS       = 30;
-const LIMITE_POR_IP     = 20;   // intentos por hora
-const LIMITE_POR_PLACA  = 8;    // intentos por hora
+const LIMITE_POR_IP     = 20;   // intentos fallidos por hora
+// La pista solo revela 2 dígitos, así que a un extraño le quedan 100
+// combinaciones posibles. Con 5 intentos por hora necesitaría ~20 horas de
+// ataque sostenido contra una sola placa, y el límite por IP lo corta antes.
+const LIMITE_POR_PLACA  = 5;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Utilidades
@@ -54,6 +57,19 @@ const ipDe = (req) =>
 /** Respuesta de error con status HTTP real (punto #10 del análisis). */
 const fallo = (res, status, mensaje, extra = {}) =>
   res.status(status).json({ error: true, mensaje, ...extra });
+
+/**
+ * Envoltorio para handlers async.
+ *
+ * Express 4 NO captura rechazos de promesas: si un handler `async` lanza, la
+ * petición se queda colgada sin respuesta y el navegador lo reporta como
+ * "sin conexión" — aunque el servidor esté perfectamente vivo. Peor: en Node
+ * 15+ una promesa rechazada sin manejar tumba el proceso.
+ *
+ * Todo handler de este router va envuelto aquí.
+ */
+const ruta = (fn) => (req, res, next) =>
+  Promise.resolve(fn(req, res, next)).catch(next);
 
 async function registrarIntento(identificador, ip, accion, exito) {
   // No bloqueamos la respuesta por la bitácora.
@@ -127,7 +143,14 @@ async function crearSesion({ cliente_id, vehiculo_id, nivel, req }) {
     .select("id")
     .single();
 
-  if (error) throw error;
+  if (error) {
+    // El error se propaga al manejador del final del router, que distingue
+    // "falta correr el SQL" de un fallo real y responde con un status HTTP.
+    // Nunca dejar que reviente sin respuesta: el cliente vería "sin conexión".
+    const e = new Error(`No se pudo crear la sesión del portal: ${error.message}`);
+    e.code = error.code;
+    throw e;
+  }
 
   const token = emitirToken(
     { sid: sesion.id, cid: cliente_id, vid: vehiculo_id, nivel },
@@ -147,35 +170,50 @@ async function crearSesion({ cliente_id, vehiculo_id, nivel, req }) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function requiereSesion(req, res, next) {
-  const cabecera = req.headers.authorization || "";
-  const token = cabecera.startsWith("Bearer ") ? cabecera.slice(7) : null;
+  try {
+    const cabecera = req.headers.authorization || "";
+    const token = cabecera.startsWith("Bearer ") ? cabecera.slice(7) : null;
 
-  const payload = verificarToken(token);
-  if (!payload) return fallo(res, 401, "Sesión inválida o vencida. Vuelve a identificarte.");
+    const payload = verificarToken(token);
+    if (!payload) return fallo(res, 401, "Sesión inválida o vencida. Vuelve a identificarte.");
 
-  // La firma es válida, pero la sesión puede haber sido revocada desde el CRM.
-  const { data: sesion } = await supabase
-    .from("portal_sesiones")
-    .select("id, cliente_id, vehiculo_id, revocado_en, expira_en")
-    .eq("id", payload.sid)
-    .maybeSingle();
+    // La firma es válida, pero la sesión puede haber sido revocada desde el CRM.
+    const { data: sesion, error } = await supabase
+      .from("portal_sesiones")
+      .select("id, cliente_id, vehiculo_id, revocado_en, expira_en")
+      .eq("id", payload.sid)
+      .maybeSingle();
 
-  if (!sesion) return fallo(res, 401, "Sesión no encontrada.");
-  if (sesion.revocado_en) return fallo(res, 401, "Sesión revocada. Vuelve a identificarte.");
-  if (new Date(sesion.expira_en) < new Date()) return fallo(res, 401, "Sesión vencida.");
+    // Si la consulta falla (tabla inexistente, Supabase caído) hay que
+    // distinguirlo de "sesión no encontrada": son problemas muy distintos y
+    // decirle al cliente que vuelva a identificarse no arregla el primero.
+    if (error) {
+      const e = new Error(`No se pudo validar la sesión: ${error.message}`);
+      e.code = error.code;
+      throw e;
+    }
 
-  supabase.from("portal_sesiones")
-    .update({ ultimo_uso_en: new Date().toISOString() })
-    .eq("id", sesion.id)
-    .then(() => {}, () => {});
+    if (!sesion) return fallo(res, 401, "Sesión no encontrada.");
+    if (sesion.revocado_en) return fallo(res, 401, "Sesión revocada. Vuelve a identificarte.");
+    if (new Date(sesion.expira_en) < new Date()) return fallo(res, 401, "Sesión vencida.");
 
-  req.portal = {
-    sesionId: sesion.id,
-    clienteId: sesion.cliente_id,
-    vehiculoId: sesion.vehiculo_id,
-    nivel: payload.nivel,
-  };
-  next();
+    supabase.from("portal_sesiones")
+      .update({ ultimo_uso_en: new Date().toISOString() })
+      .eq("id", sesion.id)
+      .then(() => {}, () => {});
+
+    req.portal = {
+      sesionId: sesion.id,
+      clienteId: sesion.cliente_id,
+      vehiculoId: sesion.vehiculo_id,
+      nivel: payload.nivel,
+    };
+    next();
+  } catch (e) {
+    // Un middleware async que lanza deja la petición colgada igual que un
+    // handler. Se pasa al manejador de errores del router.
+    next(e);
+  }
 }
 
 /**
@@ -200,7 +238,7 @@ function requiereAdmin(req, res, next) {
  * Paso previo: dice QUÉ nivel de verificación aplica a esa placa, sin revelar
  * datos del cliente. Así el frontend muestra la pantalla correcta de una vez.
  */
-router.post("/acceso/placa", async (req, res) => {
+router.post("/acceso/placa", ruta(async (req, res) => {
   const ip = ipDe(req);
   const placa = normalizarPlaca(req.body?.placa);
   if (placa.length < 4) return fallo(res, 400, "Ingresa una placa válida.");
@@ -232,14 +270,14 @@ router.post("/acceso/placa", async (req, res) => {
       mostrador: true, // siempre disponible como último recurso
     },
   });
-});
+}));
 
 /**
  * POST /portal/acceso/telefono   { placa, ultimos4 }
  * Nivel 1: sin fricción, sin correo, funciona para el cliente que solo dejó
  * su teléfono — que en este CRM es la mayoría.
  */
-router.post("/acceso/telefono", async (req, res) => {
+router.post("/acceso/telefono", ruta(async (req, res) => {
   const ip = ipDe(req);
   const placa = normalizarPlaca(req.body?.placa);
   const ultimos4 = String(req.body?.ultimos4 || "").replace(/\D/g, "");
@@ -282,14 +320,14 @@ router.post("/acceso/telefono", async (req, res) => {
     cliente: { nombre: cliente.nombre },
     vehiculo: { id: vehiculo.id, placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
   });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ACCESO — Nivel 2: código de 6 dígitos al correo registrado
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** POST /portal/acceso/solicitar-codigo   { placa } */
-router.post("/acceso/solicitar-codigo", async (req, res) => {
+router.post("/acceso/solicitar-codigo", ruta(async (req, res) => {
   const ip = ipDe(req);
   const placa = normalizarPlaca(req.body?.placa);
   if (placa.length < 4) return fallo(res, 400, "Ingresa una placa válida.");
@@ -356,10 +394,10 @@ router.post("/acceso/solicitar-codigo", async (req, res) => {
     destino: enmascararCorreo(correo),
     vence_en_minutos: OTP_MINUTOS,
   });
-});
+}));
 
 /** POST /portal/acceso/verificar-codigo   { placa, codigo } */
-router.post("/acceso/verificar-codigo", async (req, res) => {
+router.post("/acceso/verificar-codigo", ruta(async (req, res) => {
   const ip = ipDe(req);
   const placa = normalizarPlaca(req.body?.placa);
   const codigo = String(req.body?.codigo || "").replace(/\D/g, "");
@@ -413,7 +451,7 @@ router.post("/acceso/verificar-codigo", async (req, res) => {
     cliente: { nombre: cliente.nombre },
     vehiculo: { id: vehiculo.id, placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
   });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // ACCESO — Nivel 3: código dictado en el mostrador
@@ -425,7 +463,7 @@ router.post("/acceso/verificar-codigo", async (req, res) => {
  * código desde la ficha y se lo dicta. Si el cliente tiene un solo vehículo,
  * ni siquiera hace falta la placa.
  */
-router.post("/acceso/mostrador", async (req, res) => {
+router.post("/acceso/mostrador", ruta(async (req, res) => {
   const ip = ipDe(req);
   const codigo = String(req.body?.codigo || "").replace(/\D/g, "");
   const placa = normalizarPlaca(req.body?.placa);
@@ -499,14 +537,14 @@ router.post("/acceso/mostrador", async (req, res) => {
     cliente: { nombre: cliente?.nombre || "" },
     vehiculo: { id: vehiculo.id, placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
   });
-});
+}));
 
 /**
  * POST /portal/admin/codigo-mostrador   { cliente_id, generado_por? }
  * Lo llama la secretaria desde la ficha del cliente en el CRM.
  * Cabecera requerida: x-portal-admin: <PORTAL_ADMIN_SECRET>
  */
-router.post("/admin/codigo-mostrador", requiereAdmin, async (req, res) => {
+router.post("/admin/codigo-mostrador", requiereAdmin, ruta(async (req, res) => {
   const clienteId = Number(req.body?.cliente_id);
   if (!clienteId) return fallo(res, 400, "cliente_id requerido.");
 
@@ -540,10 +578,10 @@ router.post("/admin/codigo-mostrador", requiereAdmin, async (req, res) => {
     vence_en_horas: 24,
     instruccion: "Dícteselo al cliente. Entra en solidoautoservicio.com/cliente → «Tengo un código del taller».",
   });
-});
+}));
 
 /** POST /portal/admin/revocar-sesiones  { cliente_id, motivo? } */
-router.post("/admin/revocar-sesiones", requiereAdmin, async (req, res) => {
+router.post("/admin/revocar-sesiones", requiereAdmin, ruta(async (req, res) => {
   const clienteId = Number(req.body?.cliente_id);
   if (!clienteId) return fallo(res, 400, "cliente_id requerido.");
 
@@ -559,7 +597,7 @@ router.post("/admin/revocar-sesiones", requiereAdmin, async (req, res) => {
 
   if (error) return fallo(res, 500, "No se pudieron revocar las sesiones.");
   res.json({ error: false, revocadas: (data || []).length });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // DATOS — todo lo de abajo exige sesión y está acotado a UN vehículo
@@ -571,7 +609,7 @@ router.post("/admin/revocar-sesiones", requiereAdmin, async (req, res) => {
  * acotada. Devuelve el vehículo, su orden abierta, la línea de tiempo y las
  * cotizaciones pendientes de aprobación.
  */
-router.get("/estado", requiereSesion, async (req, res) => {
+router.get("/estado", requiereSesion, ruta(async (req, res) => {
   const { clienteId, vehiculoId } = req.portal;
 
   const [vehRes, cliRes, ordRes, diagRes, cotRes, mantRes] = await Promise.all([
@@ -661,10 +699,10 @@ router.get("/estado", requiereSesion, async (req, res) => {
     mantenimiento: mantRes.data || [],
     recordatorios,
   });
-});
+}));
 
 /** GET /portal/historial — historial permanente del vehículo de la sesión. */
-router.get("/historial", requiereSesion, async (req, res) => {
+router.get("/historial", requiereSesion, ruta(async (req, res) => {
   const { vehiculoId } = req.portal;
 
   const { data: veh } = await supabase
@@ -681,10 +719,10 @@ router.get("/historial", requiereSesion, async (req, res) => {
 
   if (error) return fallo(res, 500, "No se pudo cargar el historial.");
   res.json({ error: false, historial: data || [] });
-});
+}));
 
 /** GET /portal/historial/:id — detalle de un servicio, validando pertenencia. */
-router.get("/historial/:id", requiereSesion, async (req, res) => {
+router.get("/historial/:id", requiereSesion, ruta(async (req, res) => {
   const { vehiculoId } = req.portal;
 
   const { data, error } = await supabase
@@ -699,14 +737,14 @@ router.get("/historial/:id", requiereSesion, async (req, res) => {
   }
 
   res.json({ error: false, ...data });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Aprobación de cotización desde el celular (mejora #3 del análisis)
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** GET /portal/cotizaciones/:id */
-router.get("/cotizaciones/:id", requiereSesion, async (req, res) => {
+router.get("/cotizaciones/:id", requiereSesion, ruta(async (req, res) => {
   const { vehiculoId } = req.portal;
 
   const { data, error } = await supabase
@@ -716,7 +754,7 @@ router.get("/cotizaciones/:id", requiereSesion, async (req, res) => {
   if (data.vehiculo_id !== vehiculoId) return fallo(res, 403, "Esa cotización no es de tu vehículo.");
 
   res.json({ error: false, cotizacion: data });
-});
+}));
 
 /**
  * POST /portal/cotizaciones/:id/responder   { aprobar: boolean, firma?, motivo? }
@@ -724,7 +762,7 @@ router.get("/cotizaciones/:id", requiereSesion, async (req, res) => {
  * cotización, mueve la orden a "aprobada" para que el taller lo vea al instante
  * en el kanban (con Realtime de Supabase, sin recargar).
  */
-router.post("/cotizaciones/:id/responder", requiereSesion, async (req, res) => {
+router.post("/cotizaciones/:id/responder", requiereSesion, ruta(async (req, res) => {
   const { vehiculoId, clienteId, nivel } = req.portal;
   const aprobar = req.body?.aprobar === true;
   const firma = String(req.body?.firma || "").slice(0, 200_000) || null;
@@ -818,7 +856,7 @@ router.post("/cotizaciones/:id/responder", requiereSesion, async (req, res) => {
       ? "¡Listo! El taller ya fue notificado y comenzará la reparación."
       : "Registramos tu decisión. El taller se comunicará contigo.",
   });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Notificaciones push de la PWA
@@ -829,17 +867,17 @@ router.post("/cotizaciones/:id/responder", requiereSesion, async (req, res) => {
  * La clave pública VAPID que el navegador necesita para suscribirse.
  * Público a propósito: es pública por diseño, no es un secreto.
  */
-router.get("/push/clave", async (req, res) => {
+router.get("/push/clave", ruta(async (req, res) => {
   const clave = clavePublicaVapid();
   if (!clave) return fallo(res, 503, "Notificaciones push no configuradas en el servidor.");
   res.json({ error: false, clave, disponible: await hayPush() });
-});
+}));
 
 /**
  * POST /portal/push/suscribir   { suscripcion: PushSubscription }
  * Guarda el dispositivo. Un mismo cliente puede tener varios (celular, tablet).
  */
-router.post("/push/suscribir", requiereSesion, async (req, res) => {
+router.post("/push/suscribir", requiereSesion, ruta(async (req, res) => {
   const { clienteId, vehiculoId } = req.portal;
   const s = req.body?.suscripcion;
 
@@ -874,10 +912,10 @@ router.post("/push/suscribir", requiereSesion, async (req, res) => {
     .upsert({ cliente_id: clienteId, push: true }, { onConflict: "cliente_id" });
 
   res.json({ error: false, mensaje: "Notificaciones activadas." });
-});
+}));
 
 /** POST /portal/push/baja   { endpoint } */
-router.post("/push/baja", requiereSesion, async (req, res) => {
+router.post("/push/baja", requiereSesion, ruta(async (req, res) => {
   const endpoint = String(req.body?.endpoint || "");
   if (!endpoint) return fallo(res, 400, "endpoint requerido.");
 
@@ -888,7 +926,7 @@ router.post("/push/baja", requiereSesion, async (req, res) => {
     .eq("cliente_id", req.portal.clienteId); // no dar de baja la de otro
 
   res.json({ error: false });
-});
+}));
 
 /**
  * POST /portal/push/prueba
@@ -896,7 +934,7 @@ router.post("/push/baja", requiereSesion, async (req, res) => {
  * forma de confirmar que el permiso quedó bien dado antes de que ocurra un
  * cambio de estado real.
  */
-router.post("/push/prueba", requiereSesion, async (req, res) => {
+router.post("/push/prueba", requiereSesion, ruta(async (req, res) => {
   const { data: subs } = await supabase
     .from("portal_push_suscripciones")
     .select("endpoint, p256dh, auth")
@@ -918,10 +956,10 @@ router.post("/push/prueba", requiereSesion, async (req, res) => {
 
   if (!enviados) return fallo(res, 502, "No se pudo entregar la notificación de prueba.");
   res.json({ error: false, enviados });
-});
+}));
 
 /** GET /portal/preferencias */
-router.get("/preferencias", requiereSesion, async (req, res) => {
+router.get("/preferencias", requiereSesion, ruta(async (req, res) => {
   const { data } = await supabase
     .from("portal_preferencias_notif")
     .select("correo, push, whatsapp")
@@ -939,10 +977,10 @@ router.get("/preferencias", requiereSesion, async (req, res) => {
     preferencias: data || { correo: true, push: true, whatsapp: true },
     dispositivos: count || 0,
   });
-});
+}));
 
 /** PATCH /portal/preferencias   { correo?, push?, whatsapp? } */
-router.patch("/preferencias", requiereSesion, async (req, res) => {
+router.patch("/preferencias", requiereSesion, ruta(async (req, res) => {
   const cambios = {};
   for (const k of ["correo", "push", "whatsapp"]) {
     if (typeof req.body?.[k] === "boolean") cambios[k] = req.body[k];
@@ -958,14 +996,14 @@ router.patch("/preferencias", requiereSesion, async (req, res) => {
 
   if (error) return fallo(res, 500, "No se pudieron guardar las preferencias.");
   res.json({ error: false, preferencias: cambios });
-});
+}));
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Sesión
 // ═════════════════════════════════════════════════════════════════════════════
 
 /** GET /portal/sesion — para revalidar el token al abrir la app. */
-router.get("/sesion", requiereSesion, async (req, res) => {
+router.get("/sesion", requiereSesion, ruta(async (req, res) => {
   const { data: cliente } = await supabase
     .from("clientes").select("nombre").eq("id", req.portal.clienteId).maybeSingle();
   const { data: vehiculo } = await supabase
@@ -978,19 +1016,40 @@ router.get("/sesion", requiereSesion, async (req, res) => {
     vehiculo,
     nivel: req.portal.nivel,
   });
-});
+}));
 
 /** POST /portal/salir */
-router.post("/salir", requiereSesion, async (req, res) => {
+router.post("/salir", requiereSesion, ruta(async (req, res) => {
   await supabase
     .from("portal_sesiones")
     .update({ revocado_en: new Date().toISOString(), revocado_motivo: "cierre de sesión del cliente" })
     .eq("id", req.portal.sesionId);
   res.json({ error: false });
-});
+}));
 
-/** GET /portal/salud — diagnóstico de configuración, sin datos sensibles. */
-router.get("/salud", async (req, res) => {
+/**
+ * GET /portal/salud — diagnóstico de configuración, sin datos sensibles.
+ *
+ * Comprueba también que las tablas del portal existan. Es lo primero que hay
+ * que mirar cuando el portal "no conecta": casi siempre es que faltó correr
+ * el SQL, no un problema de red.
+ */
+router.get("/salud", ruta(async (req, res) => {
+  const tablas = [
+    "portal_sesiones", "portal_otp", "portal_codigos_mostrador", "portal_intentos",
+    "notificaciones_cliente", "portal_push_suscripciones", "portal_preferencias_notif",
+  ];
+
+  const estadoTablas = {};
+  await Promise.all(
+    tablas.map(async (t) => {
+      const { error } = await supabase.from(t).select("*", { head: true, count: "exact" }).limit(1);
+      estadoTablas[t] = error ? `FALTA (${error.code || error.message})` : "ok";
+    })
+  );
+
+  const faltantes = Object.entries(estadoTablas).filter(([, v]) => v !== "ok").map(([k]) => k);
+
   res.json({
     error: false,
     token_configurado: Boolean(process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET),
@@ -1000,6 +1059,52 @@ router.get("/salud", async (req, res) => {
     canal_whatsapp: hayCanalDeWhatsApp(),
     trust_proxy: req.app.get("trust proxy") ? "activo" : "INACTIVO — actívalo en Railway",
     ip_detectada: ipDe(req),
+    tablas: estadoTablas,
+    listo: faltantes.length === 0,
+    ...(faltantes.length
+      ? {
+          accion_requerida:
+            `Faltan ${faltantes.length} tabla(s). Corre en el SQL Editor de Supabase: ` +
+            `crm-backend/sql/portal_cliente.sql y crm-backend/sql/notificaciones_cliente.sql`,
+        }
+      : {}),
+  });
+}));
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Manejador de errores del router
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Sin esto, cualquier excepción dentro de un handler async deja la petición sin
+// respuesta y el cliente ve "sin conexión" aunque el servidor esté vivo.
+// Con `ruta()` arriba, todos los errores terminan aquí.
+
+router.use((err, req, res, next) => {
+  // 42P01 = "relation does not exist": no se corrió el SQL del portal.
+  const codigo = err?.code || "";
+  const texto = String(err?.message || err || "");
+  const faltaTabla = codigo === "42P01" || /does not exist|schema cache/i.test(texto);
+
+  console.error("[portal] error no controlado:", codigo, texto);
+
+  if (faltaTabla) {
+    return res.status(503).json({
+      error: true,
+      mensaje:
+        "El portal aún no está instalado en la base de datos. Avísale al taller.",
+      // Detalle solo para quien lee los logs o llama al endpoint directo:
+      detalle_tecnico:
+        "Faltan las tablas del portal. Corre crm-backend/sql/portal_cliente.sql " +
+        "y crm-backend/sql/notificaciones_cliente.sql en el SQL Editor de Supabase. " +
+        "Revisa GET /portal/salud para ver cuáles faltan.",
+    });
+  }
+
+  if (res.headersSent) return next(err);
+
+  res.status(500).json({
+    error: true,
+    mensaje: "Ocurrió un problema en el servidor. Intenta de nuevo en un momento.",
   });
 });
 

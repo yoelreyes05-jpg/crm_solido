@@ -238,6 +238,36 @@ Ese último punto es el que cierra el hueco original.
 
 ---
 
+## Si el portal dice "no pudimos comunicarnos con el servidor"
+
+**Lo primero: abre `GET /portal/salud`.** Ahora lista tabla por tabla si existe:
+
+```json
+{
+  "listo": false,
+  "tablas": { "portal_sesiones": "FALTA (42P01)", "portal_otp": "ok" },
+  "accion_requerida": "Faltan 1 tabla(s). Corre en el SQL Editor de Supabase: ..."
+}
+```
+
+Casi siempre la causa es que **faltó correr el SQL**, no la red.
+
+El síntoma engaña: buscar la placa funciona (ese endpoint solo lee `vehiculos` y `clientes`, que ya existen) pero al escribir los 4 dígitos falla, porque ahí es donde se crea la sesión en `portal_sesiones`. Si esa tabla no existe, la consulta falla.
+
+Antes eso se veía como un error de wifi por un detalle de Express 4: **no captura los rechazos de promesas en handlers `async`**. La petición se quedaba sin respuesta, el navegador la reportaba como fallo de red, y en Node 15+ el proceso se caía. Corregido: los 21 handlers van envueltos en `ruta()` y hay un manejador de errores que traduce "tabla inexistente" a un 503 con instrucciones.
+
+---
+
+## Sobre la pista del teléfono
+
+La pista muestra **solo los últimos 2 dígitos** (`***-***-**27`), aunque el cliente deba escribir 4.
+
+Es deliberado. Si mostrara los 4, cualquiera que supiera la placa leería la respuesta en la propia pantalla y el segundo factor no serviría para nada. Con 2 visibles, el cliente reconoce cuál de sus números registró, pero a un extraño le quedan 100 combinaciones por adivinar — y con el límite de **5 intentos fallidos por hora por placa** necesitaría unas 20 horas de ataque sostenido, que el límite por IP corta mucho antes.
+
+Si quieres endurecerlo más, la opción es no mostrar ninguna pista y obligar al código por correo o mostrador. El costo es fricción para el cliente que tiene varios números y no recuerda cuál dio.
+
+---
+
 ## Lo que esto no resuelve
 
 Sigue pendiente de `MEJORAS_CRM_Y_APP_CLIENTE.md`, y es más urgente que cualquier mejora de producto:
