@@ -12,7 +12,7 @@ export default function AsistenteIA() {
   const [abierto,   setAbierto]   = useState(false);
   const [pregunta,  setPregunta]  = useState("");
   const [mensajes,  setMensajes]  = useState<Mensaje[]>([
-    { rol: "asistente", texto: "Hola 👋 Soy tu asistente de Sólido Auto Servicio. Tengo acceso en tiempo real a:\n\n🚗 Vehículos · 👤 Clientes · 📋 Órdenes · 🧾 Facturas · 📦 Inventario · 🏭 Suplidores · 💰 Contabilidad · 🚿 Car Wash · ☕ Cafetería · 🎓 Cursos · 📊 Historial\n\n¿Qué necesitas?" },
+    { rol: "asistente", texto: "Hola 👋 Soy tu asistente de Sólido Auto Servicio. Tengo acceso en tiempo real a:\n\n🚗 Vehículos · 👤 Clientes · 📋 Órdenes · 📅 Citas · 🧾 Facturas · 📦 Inventario · 🏭 Suplidores · 💰 Contabilidad · 🚿 Car Wash · ☕ Cafetería · 🎓 Cursos · 💎 Planes/Membresías · 📊 Historial\n\n¿Qué necesitas?" },
   ]);
   const [cargando,  setCargando]  = useState(false);
   const endRef  = useRef<HTMLDivElement>(null);
@@ -64,10 +64,11 @@ export default function AsistenteIA() {
 
   const sugerencias = [
     "¿Cómo va el taller hoy?",
-    "¿Cómo va el car wash?",
+    "¿Qué citas hay hoy?",
+    "¿Quién viene mañana?",
     "¿Cuánto vendimos hoy por canal?",
     "¿Cuánto facturamos este mes?",
-    "¿Qué órdenes están listas para entregar?",
+    "¿Cuántos miembros tienen los planes?",
     "¿Qué repuestos tienen stock bajo?",
     "Historial del vehículo placa ABC123",
     "¿Cuánto nos deben los clientes?",

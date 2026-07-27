@@ -8273,6 +8273,39 @@ const IA_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "resumen_citas",
+      description: "Resumen de la AGENDA DE CITAS del taller: cuántas citas hay hoy, mañana y en los próximos días, cuántas están pendientes de confirmar, y la lista de próximas citas con fecha, hora, cliente, vehículo, motivo, estado y origen (WEB si la agendó el cliente desde la web). Úsalo para '¿qué citas hay hoy?', '¿cuántas citas esta semana?', '¿quién viene mañana?', '¿hay citas pendientes de confirmar?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          dias: { type: "number", description: "Cuántos días hacia adelante mirar (default 7)" },
+        },
+        required: [],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "buscar_citas",
+      description: "Busca citas por rango de fechas, estado, nombre de cliente o placa. Devuelve fecha, hora, cliente, teléfono, correo, vehículo, motivo, estado y origen. Úsalo para 'citas de la semana que viene', 'citas de Juan', 'citas canceladas', 'la cita de la placa ABC123'.",
+      parameters: {
+        type: "object",
+        properties: {
+          fecha_desde:    { type: "string", description: "Fecha inicio YYYY-MM-DD" },
+          fecha_hasta:    { type: "string", description: "Fecha fin YYYY-MM-DD" },
+          estado:         { type: "string", description: "PENDIENTE | CONFIRMADA | COMPLETADA | CANCELADA | NO_ASISTIO" },
+          cliente_nombre: { type: "string", description: "Nombre del cliente (parcial)" },
+          placa:          { type: "string", description: "Placa del vehículo (parcial)" },
+          limit:          { type: "number", description: "Máximo de resultados (default 30)" },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 async function ejecutarHerramientaIA(nombre, args) {
@@ -8789,6 +8822,62 @@ async function ejecutarHerramientaIA(nombre, args) {
         return { resultados };
       }
 
+      case "resumen_citas": {
+        const hoy = new Date().toISOString().slice(0, 10);
+        const manana = (() => { const d = new Date(); d.setDate(d.getDate() + 1); return d.toISOString().slice(0, 10); })();
+        const dias = Math.min(parseInt(args.dias, 10) || 7, 30);
+        const lim = new Date(); lim.setDate(lim.getDate() + dias);
+        const hastaISO = lim.toISOString().slice(0, 10);
+        const { data, error } = await supabase.from("citas_taller").select("*")
+          .gte("fecha", hoy).lte("fecha", hastaISO)
+          .order("fecha", { ascending: true }).order("hora", { ascending: true });
+        if (error) return { error: error.message };
+        const enr = await enriquecerCitas(data || []);
+        const activas = enr.filter(c => c.estado !== "CANCELADA");
+        const fmt = c => ({
+          fecha: c.fecha, hora: c.hora, cliente: c.cliente_nombre,
+          telefono: c.cliente_telefono || "", correo: c.cliente_email || "",
+          vehiculo: c.vehiculo_info || "—", motivo: c.descripcion || c.tipo_servicio || "—",
+          estado: c.estado, origen: c.origen || "CRM",
+        });
+        return {
+          hoy: activas.filter(c => c.fecha === hoy).length,
+          manana: activas.filter(c => c.fecha === manana).length,
+          en_rango: activas.length,
+          pendientes_confirmar: activas.filter(c => c.estado === "PENDIENTE").length,
+          proximas: activas.slice(0, 15).map(fmt),
+        };
+      }
+
+      case "buscar_citas": {
+        let q = supabase.from("citas_taller").select("*")
+          .order("fecha", { ascending: true }).order("hora", { ascending: true })
+          .limit(args.limit || 30);
+        if (args.fecha_desde) q = q.gte("fecha", args.fecha_desde);
+        if (args.fecha_hasta) q = q.lte("fecha", args.fecha_hasta);
+        if (args.estado)      q = q.eq("estado", String(args.estado).toUpperCase());
+        const { data, error } = await q;
+        if (error) return { error: error.message };
+        let citas = await enriquecerCitas(data || []);
+        if (args.cliente_nombre) {
+          const n = args.cliente_nombre.toLowerCase();
+          citas = citas.filter(c => (c.cliente_nombre || "").toLowerCase().includes(n));
+        }
+        if (args.placa) {
+          const p = args.placa.toLowerCase();
+          citas = citas.filter(c => (c.vehiculo_placa || "").toLowerCase().includes(p));
+        }
+        return {
+          total_encontradas: citas.length,
+          citas: citas.map(c => ({
+            fecha: c.fecha, hora: c.hora, cliente: c.cliente_nombre,
+            telefono: c.cliente_telefono || "", correo: c.cliente_email || "",
+            vehiculo: c.vehiculo_info || "—", motivo: c.descripcion || c.tipo_servicio || "—",
+            estado: c.estado, origen: c.origen || "CRM",
+          })),
+        };
+      }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -8824,12 +8913,21 @@ HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
 - ventas_por_canal: ventas/ingresos de HOY por canal — cafetería (POS), cursos (capacitaciones) y car wash — más el total del día. Úsalo para "¿cuánto vendimos hoy?", "ventas de cafetería/cursos/car wash".
 - resumen_membresias: programa de PLANES/MEMBRESÍAS — miembros activos por plan, ingreso recurrente mensual (MRR), ingresos del mes e histórico, por vencer en 5 días y vencidas con teléfono. Úsalo para "¿cuántos miembros hay?", "¿cuánto generan las membresías?", "¿quién debe renovar?".
 - membresia_cliente: plan de UN cliente por nombre — plan, estado, fecha de renovación, lavados/diagnósticos restantes del mes, descuentos, multiplicador de puntos y vehículos cubiertos. Úsalo para "¿qué plan tiene X?", "¿cuántos lavados le quedan a X?".
+- resumen_citas: agenda de CITAS — cuántas hay hoy/mañana/próximos días, pendientes de confirmar y la lista de próximas citas (con origen WEB si la agendó el cliente en línea). Úsalo para "¿qué citas hay hoy?", "¿quién viene mañana?", "¿hay citas sin confirmar?".
+- buscar_citas: buscar citas por fecha, estado, cliente o placa. Úsalo para "citas de la semana que viene", "citas de Juan", "citas canceladas".
 
 CONTEXTO DE MÓDULOS (novedades):
 - El taller ahora tiene un carril rápido de CAR WASH (lavado de vehículos) con estados EN_LAVADO → LISTO → ENTREGADO. El lavado lo registra recepción, lo marca LISTO el técnico de lavado (rol "lavador") y recepción lo cobra/entrega. No se entrega sin factura.
 - También se venden CURSOS (capacitaciones) y productos de CAFETERÍA (POS). Para ingresos del día por canal usa ventas_por_canal.
 - PLANES/MEMBRESÍAS: existen 4 planes — 🚿 Lavado (lavados mensuales), 🔵 Básico (1 lavado + 1 diagnóstico + 5% servicios), 🟣 Premium (2 lavados, diagnósticos ilimitados, 10% servicios, 5% repuestos, puntos x2) y 👑 VIP (todo ilimitado, 15% servicios, 10% repuestos, puntos x3, prioridad). La membresía se amarra al cliente Y a vehículos específicos (límite por plan: Básico/Lavado 1, Premium 2, VIP 3). Si el miembro trae un vehículo no amarrado, el lavado se cobra normal. Los beneficios se aplican AUTOMÁTICO: el lavado cubierto sale en RD$ 0, el descuento aparece como línea en la factura, y los puntos se multiplican. Las membresías vencen solas si no se renuevan; la renovación se cobra y entra a caja. Todo se gestiona en el módulo /planes.
 - El rol "vendedor" emite facturas sin cobrar (quedan PENDIENTE_COBRO y la secretaria las cobra). Hay módulo de AUDITORÍA (log de acciones sensibles) y rol nuevo para cada módulo independiente.
+- CITAS: el taller tiene una agenda de citas (módulo /citas). Las citas pueden crearse desde el CRM o llegar desde el PORTAL WEB (cuando un cliente las agenda en línea entran con origen "WEB" y estado PENDIENTE, y el cliente recibe un correo de confirmación). Estados: PENDIENTE → CONFIRMADA → COMPLETADA, o CANCELADA / NO_ASISTIO. La secretaria las ve, confirma y da seguimiento. Para todo lo de citas usa resumen_citas o buscar_citas.
+
+CONOCIMIENTO GENERAL DE MÓDULOS (para orientar al personal aunque no haya una herramienta específica):
+Sólido Auto Servicio tiene estos módulos en el CRM: Dashboard, Recepción, Mi Taller, Aprobaciones, Control de Calidad, Entrega (flujo de la orden de trabajo); Clientes, Vehículos, Órdenes, Historial de Vehículos, Citas, Recordatorios, Fidelización (puntos Club Sólido) y Planes/Membresías; Inventario y Suplidores; Ventas POS, Facturación (con NCF dominicano) y Contabilidad/Caja; Cafetería, Car Wash y Capacitaciones; y Administración (Usuarios, Permisos por rol, Auditoría, Configuración, Inteligencia Predictiva). Puedes explicar para qué sirve cada uno y guiar al personal, aunque solo consultes datos en vivo con las herramientas listadas arriba.
+
+FUERA DE ALCANCE:
+- Aloha Perfumes es un negocio/módulo INDEPENDIENTE (POS, clientes, inventario y contabilidad propios) y NO forma parte de tu alcance. Si te preguntan por Aloha, responde amablemente que ese módulo se gestiona por separado y que no tienes acceso a su información desde aquí. No inventes datos de Aloha.
 
 REGLAS:
 1. SIEMPRE usa una herramienta — nunca respondas de memoria.
