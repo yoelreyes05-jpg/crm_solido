@@ -37,7 +37,18 @@ function firmar(datos) {
  * @param {number} diasVigencia
  */
 export function emitirToken(payload, diasVigencia = 30) {
-  if (!SECRETO) throw new Error("PORTAL_JWT_SECRET no configurada");
+  if (!SECRETO) {
+    // Se marca con un código para que el router lo distinga de un fallo real y
+    // responda con instrucciones en vez de un 500 genérico. Sin la clave, el
+    // portal encuentra el vehículo pero nunca logra crear la sesión.
+    const e = new Error(
+      "PORTAL_JWT_SECRET no está configurada en el servidor. " +
+        "Genérala con: node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\" " +
+        "y ponla como variable de entorno en Railway."
+    );
+    e.code = "PORTAL_SIN_SECRETO";
+    throw e;
+  }
   const cuerpo = b64u(
     JSON.stringify({
       ...payload,

@@ -167,11 +167,16 @@ async function pedir<T = any>(
   if (!res.ok) {
     // 401 con token = la sesión murió. Limpiamos para que la app pida acceso.
     if (res.status === 401 && conToken && leerToken()) borrarSesion();
-    throw new ErrorPortal(
-      cuerpo?.mensaje || `Error ${res.status}`,
-      res.status,
-      cuerpo
-    );
+
+    // El 503 significa "el portal no está bien instalado", no un fallo del
+    // cliente. Se muestra la acción concreta para que quien lo vea sepa qué
+    // pedirle al taller en vez de reintentar en vano.
+    const mensaje =
+      res.status === 503 && cuerpo?.accion_requerida
+        ? `${cuerpo.mensaje} (${cuerpo.accion_requerida})`
+        : cuerpo?.mensaje || `Error ${res.status}`;
+
+    throw new ErrorPortal(mensaje, res.status, cuerpo);
   }
 
   return cuerpo as T;
@@ -241,8 +246,20 @@ export function cargarHistorial() {
   return pedir<{ historial: any[] }>("/historial");
 }
 
-export function cargarDetalleHistorial(id: number | string) {
-  return pedir<any>(`/historial/${id}`);
+/**
+ * Detalle de un servicio del historial.
+ *
+ * Las órdenes todavía abiertas no están en `vehiculo_historial`: el backend las
+ * devuelve con id `orden_<n>` y su expediente vive en otra ruta. Perder esta
+ * distinción dejaba el detalle y la impresión en blanco para el servicio en
+ * curso, que es justo el que el cliente quiere ver.
+ */
+export function cargarDetalleHistorial(h: any) {
+  const esOrdenActiva = typeof h?.id === "string" && h.id.startsWith("orden_");
+  const ruta = esOrdenActiva
+    ? `/historial/orden/${h._orden_id ?? String(h.id).replace("orden_", "")}`
+    : `/historial/${h?.id ?? h}`;
+  return pedir<any>(ruta);
 }
 
 export function cargarCotizacion(id: number | string) {
@@ -344,17 +361,57 @@ export type ResultadoPush = { ok: boolean; motivo?: MotivoPush; detalle?: string
 export async function activarPush(): Promise<ResultadoPush> {
   if (!soportaPush()) return { ok: false, motivo: "sin-soporte" };
 
+  // 1. Primero el servidor. Pedir permiso antes sería un error: el navegador
+  //    solo muestra ese diálogo una vez, y si luego falla por falta de llaves
+  //    VAPID el usuario habría gastado el permiso a cambio de nada.
+  let clave: string;
+  try {
+    const r = await clavePush();
+    if (!r?.clave || !r.disponible) {
+      return {
+        ok: false,
+        motivo: "sin-clave",
+        detalle: "El servidor no tiene configuradas las llaves VAPID.",
+      };
+    }
+    clave = r.clave;
+  } catch (e: any) {
+    return {
+      ok: false,
+      motivo: "sin-clave",
+      detalle:
+        e?.status === 503
+          ? "Faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY en Railway, o falta instalar el paquete web-push."
+          : e?.message || "No se pudo consultar la configuración de notificaciones.",
+    };
+  }
+
+  // 2. El service worker tiene que estar activo antes de suscribirse.
+  let registro: ServiceWorkerRegistration;
+  try {
+    registro = await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise<never>((_, rechazar) =>
+        setTimeout(() => rechazar(new Error("timeout")), 10000)
+      ),
+    ]);
+  } catch {
+    return {
+      ok: false,
+      motivo: "error",
+      detalle:
+        "El service worker no está activo. Recarga la página; si es la primera visita, " +
+        "puede tardar unos segundos en instalarse.",
+    };
+  }
+
+  // 3. Ahora sí, el permiso.
   try {
     const permiso = await Notification.requestPermission();
     if (permiso !== "granted") return { ok: false, motivo: "denegado" };
 
-    const { clave, disponible } = await clavePush();
-    if (!clave || !disponible) return { ok: false, motivo: "sin-clave" };
-
-    const registro = await navigator.serviceWorker.ready;
-
     // Si ya había una suscripción con otra clave (rotaste VAPID), hay que
-    // darla de baja primero o `subscribe` falla.
+    // darla de baja primero o `subscribe` falla con InvalidStateError.
     const previa = await registro.pushManager.getSubscription();
     if (previa) await previa.unsubscribe().catch(() => {});
 
@@ -370,7 +427,7 @@ export async function activarPush(): Promise<ResultadoPush> {
 
     return { ok: true };
   } catch (e: any) {
-    return { ok: false, motivo: "error", detalle: e?.message };
+    return { ok: false, motivo: "error", detalle: e?.message || String(e) };
   }
 }
 
@@ -432,13 +489,52 @@ export async function generarCodigoMostrador(
   secretoAdmin: string,
   generadoPor?: string
 ) {
-  const res = await fetch(`${API}/portal/admin/codigo-mostrador`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-portal-admin": secretoAdmin },
-    body: JSON.stringify({ cliente_id: clienteId, generado_por: generadoPor }),
-  });
+  // Si el secreto no está configurado, el backend responde 403 y el mensaje
+  // resultante ("No autorizado") no dice qué hay que arreglar. Mejor cortar
+  // aquí con una instrucción concreta.
+  if (!secretoAdmin) {
+    throw new ErrorPortal(
+      "Falta la variable NEXT_PUBLIC_PORTAL_ADMIN_SECRET en el frontend (Vercel). " +
+        "Debe tener el mismo valor que PORTAL_ADMIN_SECRET en Railway.",
+      0
+    );
+  }
+
+  const control = new AbortController();
+  const cronometro = setTimeout(() => control.abort(), 20000);
+
+  let res: Response;
+  try {
+    res = await fetch(`${API}/portal/admin/codigo-mostrador`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "x-portal-admin": secretoAdmin },
+      body: JSON.stringify({ cliente_id: clienteId, generado_por: generadoPor }),
+      signal: control.signal,
+    });
+  } catch (e: any) {
+    // `fetch` solo rechaza por red, CORS o abort. La causa más común aquí es
+    // que la cabecera `x-portal-admin` no esté permitida en el CORS del
+    // backend: el navegador bloquea el preflight y esto parece un fallo de red.
+    if (e?.name === "AbortError") {
+      throw new ErrorPortal("El servidor tardó demasiado en responder.", 0);
+    }
+    throw new ErrorPortal(
+      "No se pudo contactar al servidor. Si acabas de desplegar, verifica que " +
+        "'x-portal-admin' esté en allowedHeaders del CORS en server.mjs.",
+      0
+    );
+  } finally {
+    clearTimeout(cronometro);
+  }
+
   const cuerpo = await res.json().catch(() => null);
-  if (!res.ok) throw new ErrorPortal(cuerpo?.mensaje || `Error ${res.status}`, res.status, cuerpo);
+  if (!res.ok) {
+    throw new ErrorPortal(
+      cuerpo?.detalle_tecnico || cuerpo?.mensaje || `Error ${res.status}`,
+      res.status,
+      cuerpo
+    );
+  }
   return cuerpo as {
     codigo: string;
     cliente: string;

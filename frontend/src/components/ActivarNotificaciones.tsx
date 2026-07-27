@@ -70,15 +70,17 @@ export default function ActivarNotificaciones() {
           setMensaje("¡Listo! Te avisaremos aquí cuando tu vehículo cambie de estado.");
           enviarPushDePrueba().catch(() => {});
         } else {
-          setMensaje(
+          // Se incluye `detalle` a propósito: sin él, "no se pudieron activar"
+          // deja al cliente y al taller sin saber qué falta.
+          const base =
             r.motivo === "denegado"
               ? "Bloqueaste las notificaciones. Actívalas desde los ajustes del navegador para este sitio."
               : r.motivo === "sin-clave"
               ? "Las notificaciones aún no están habilitadas en el servidor. Avísale al taller."
               : r.motivo === "sin-soporte"
               ? "Tu navegador no soporta notificaciones."
-              : "No se pudieron activar. Intenta de nuevo."
-          );
+              : "No se pudieron activar.";
+          setMensaje(r.detalle ? `${base} (${r.detalle})` : base);
         }
       }
     } finally {

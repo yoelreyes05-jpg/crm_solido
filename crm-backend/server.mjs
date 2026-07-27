@@ -30,7 +30,11 @@ app.use(cors({
     cb(new Error(`CORS: origen no permitido → ${origin}`));
   },
   methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-  allowedHeaders: ["Content-Type", "Authorization", "x-usuario"],
+  // Cualquier cabecera que el frontend envíe tiene que estar aquí, o el
+  // navegador rechaza el preflight y la petición nunca sale — se ve como un
+  // fallo de red genérico, no como un error de CORS.
+  // `x-portal-admin` la usa el botón de código de acceso al portal.
+  allowedHeaders: ["Content-Type", "Authorization", "x-usuario", "x-portal-admin"],
   credentials: true,
 }));
 app.use(express.json({ limit: "10mb" }));

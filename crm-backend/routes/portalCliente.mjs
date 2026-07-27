@@ -614,50 +614,77 @@ router.get("/estado", requiereSesion, ruta(async (req, res) => {
 
   const [vehRes, cliRes, ordRes, diagRes, cotRes, mantRes] = await Promise.all([
     supabase.from("vehiculos")
-      .select("id, placa, marca, modelo, ano, color")
+      .select("*")
       .eq("id", vehiculoId).maybeSingle(),
 
     supabase.from("clientes")
       .select("id, nombre, telefono, email")
       .eq("id", clienteId).maybeSingle(),
 
+    // select("*") y no una lista de columnas: si mañana se agrega una columna
+    // que el frontend necesita, no hay que tocar este endpoint. La respuesta
+    // sigue acotada a un vehículo, que es lo que importa para la privacidad.
+    //
+    // El filtro incluye las órdenes antiguas del cliente que quedaron sin
+    // vehiculo_id — el frontend original las rescataba comparando la placa
+    // dentro de vehiculo_info, señal de que en esta base existen.
     supabase.from("ordenes_trabajo")
-      .select(`id, numero_orden, descripcion, estado, status, total, created_at,
-               fecha_diagnostico, fecha_esperando_aprobacion, fecha_aprobacion,
-               fecha_inicio_reparacion, fecha_control_calidad, fecha_listo,
-               fecha_entrega, prioridad, motivo_entrada, aprobado_por_cliente`)
-      .eq("vehiculo_id", vehiculoId)
+      .select("*")
+      .or(`vehiculo_id.eq.${vehiculoId},and(cliente_id.eq.${clienteId},vehiculo_id.is.null)`)
       .order("created_at", { ascending: false })
-      .limit(10),
+      .limit(20),
 
     supabase.from("diagnosticos")
-      .select(`id, orden_id, tipo_servicio, fallas_identificadas, observaciones,
-               estado, created_at, costo_estimado, mano_de_obra_detalle,
-               repuestos_items, trabajos_realizados_items, tecnico_nombre`)
-      .eq("vehiculo_id", vehiculoId)
+      .select("*")
+      .or(`vehiculo_id.eq.${vehiculoId},and(cliente_id.eq.${clienteId},vehiculo_id.is.null)`)
       .order("created_at", { ascending: false })
-      .limit(10),
+      .limit(20),
 
     supabase.from("cotizaciones")
-      .select(`id, numero, diagnostico_id, total, subtotal, itbis, estado,
-               aprobado, aprobado_at, tiempo_estimado, notas, items,
-               items_detalle, valida_hasta, created_at`)
-      .eq("vehiculo_id", vehiculoId)
+      .select("*")
+      .or(`vehiculo_id.eq.${vehiculoId},and(cliente_id.eq.${clienteId},vehiculo_id.is.null)`)
       .order("created_at", { ascending: false })
-      .limit(5),
+      .limit(10),
 
     supabase.from("mantenimiento_preventivo")
-      .select("id, tipo_servicio, descripcion, proximo_fecha, proximo_km, ultimo_servicio_fecha, ultimo_servicio_km, estado")
+      .select("*")
       .eq("vehiculo_id", vehiculoId)
-      .eq("estado", "ACTIVO")
       .order("proximo_fecha", { ascending: true })
-      .limit(10),
+      .limit(20),
   ]);
+
+  // Antes estos errores se tragaban con `|| []`, así que una consulta rota se
+  // veía como "este vehículo no tiene órdenes" — imposible de diagnosticar.
+  const avisos = [];
+  for (const [nombre, r] of [
+    ["ordenes", ordRes], ["diagnosticos", diagRes],
+    ["cotizaciones", cotRes], ["mantenimiento", mantRes],
+  ]) {
+    if (r.error) {
+      console.error(`[portal] /estado consulta ${nombre}:`, r.error.message);
+      avisos.push(`${nombre}: ${r.error.message}`);
+    }
+  }
 
   const vehiculo = vehRes.data;
   if (!vehiculo) return fallo(res, 404, "El vehículo de esta sesión ya no existe.");
 
-  const ordenes = ordRes.data || [];
+  const infoVehiculo = `${vehiculo.marca || ""} ${vehiculo.modelo || ""} (${vehiculo.placa || ""})`.trim();
+
+  // ── Normalización de órdenes ──
+  // Réplica de lo que hace GET /ordenes en server.mjs. Sin esto, `estado`
+  // puede venir null y el frontend hace o.estado.replace(...) → pantalla rota.
+  const ordenes = (ordRes.data || []).map((o) => ({
+    ...o,
+    estado: o.estado || o.status || "RECIBIDO",
+    numero_orden: o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
+    vehiculo_info: infoVehiculo,
+    vehiculo_placa: vehiculo.placa || "",
+    vehiculo_marca: vehiculo.marca || "",
+    vehiculo_modelo: vehiculo.modelo || "",
+    cliente_nombre: cliRes.data?.nombre || "",
+  }));
+
   const ordenActual = ordenes[0] || null;
 
   // Línea de tiempo a partir de las columnas fecha_* de ordenes_trabajo.
@@ -676,13 +703,58 @@ router.get("/estado", requiereSesion, ruta(async (req, res) => {
         .map(([etapa, fecha]) => ({ etapa, fecha }))
     : [];
 
-  const cotizacionesPendientes = (cotRes.data || []).filter(
+  const cotizaciones = cotRes.data || [];
+
+  // ── Normalización de diagnósticos ──
+  // Réplica de los alias que agrega GET /diagnosticos en server.mjs. La tabla
+  // guarda `fallas_identificadas` y `observaciones`, pero la interfaz y la
+  // función de impresión leen `descripcion`, `hallazgos` y `notas`. Sin estos
+  // alias la impresión sale en blanco: hay datos, pero con otro nombre.
+  //
+  // `mano_obra` y `repuestos` viven en cotizaciones, no en diagnosticos; se
+  // cruzan por diagnostico_id para que el desglose de costos no salga en cero.
+  const cotPorDiagnostico = {};
+  for (const c of cotizaciones) {
+    if (c.diagnostico_id != null) cotPorDiagnostico[c.diagnostico_id] = c;
+  }
+
+  const diagnosticos = (diagRes.data || []).map((d) => {
+    const cot = cotPorDiagnostico[d.id];
+    const manoObra = Number(cot?.mano_obra || 0);
+    const repuestos = Number(cot?.repuestos || 0);
+    const total = manoObra + repuestos || Number(cot?.total || d.costo_estimado || 0);
+
+    return {
+      ...d,
+      cliente_nombre: cliRes.data?.nombre || "",
+      vehiculo_info: infoVehiculo,
+      tecnico_nombre: d.tecnico_nombre || "—",
+      mano_obra: manoObra,
+      repuestos,
+      total,
+      // Alias de compatibilidad con el frontend
+      descripcion: d.fallas_identificadas || d.tipo_servicio || "",
+      hallazgos: d.fallas_identificadas || "",
+      notas: d.observaciones || "",
+      tiempo_estimado: cot?.tiempo_estimado || "",
+      terminado: String(d.estado || "").toUpperCase() === "COMPLETADO"
+              || String(d.estado || "").toUpperCase() === "TERMINADO",
+    };
+  });
+
+  const cotizacionesPendientes = cotizaciones.filter(
     (c) => !c.aprobado && String(c.estado || "").toUpperCase() === "PENDIENTE"
+  );
+
+  // Mantenimiento: solo los activos, comparando sin distinguir mayúsculas
+  // porque el CRM ha guardado 'ACTIVO' y 'Activo' según el módulo.
+  const mantenimiento = (mantRes.data || []).filter(
+    (m) => String(m.estado || "ACTIVO").toUpperCase() === "ACTIVO"
   );
 
   // Mantenimiento vencido o por vencer en 30 días (mejora #5 del análisis).
   const en30dias = new Date(Date.now() + 30 * 86400_000);
-  const recordatorios = (mantRes.data || []).filter(
+  const recordatorios = mantenimiento.filter(
     (m) => m.proximo_fecha && new Date(m.proximo_fecha) <= en30dias
   );
 
@@ -693,50 +765,136 @@ router.get("/estado", requiereSesion, ruta(async (req, res) => {
     orden_actual: ordenActual,
     linea_tiempo: linea,
     ordenes,
-    diagnosticos: diagRes.data || [],
-    cotizaciones: cotRes.data || [],
+    diagnosticos,
+    cotizaciones,
     cotizaciones_pendientes: cotizacionesPendientes,
-    mantenimiento: mantRes.data || [],
+    mantenimiento,
     recordatorios,
+    // Visible a propósito: si una consulta falla, que se note en vez de
+    // parecer que el vehículo no tiene datos.
+    ...(avisos.length ? { avisos } : {}),
   });
 }));
 
-/** GET /portal/historial — historial permanente del vehículo de la sesión. */
+/**
+ * Reutiliza los endpoints de historial que ya existen en server.mjs.
+ *
+ * Esos endpoints arman el expediente completo (avances, cotización, factura,
+ * inspección, línea de tiempo, snapshots JSONB) y son ~200 líneas de lógica.
+ * Leer las tablas en crudo desde aquí, como se hacía antes, devolvía solo la
+ * fila base: la interfaz mostraba el vehículo y la impresión salía vacía,
+ * porque los campos que consume (`avances_data`, `cotizacion_data`,
+ * `numero_orden`…) los construye el endpoint, no la tabla.
+ *
+ * Duplicar esa lógica aquí garantizaría que las dos copias se desincronicen.
+ * Se llama al propio servidor por loopback: misma salida siempre, y la
+ * comprobación de pertenencia se hace antes, en la capa del portal.
+ */
+const PUERTO_INTERNO = process.env.PORT || 4000;
+
+async function pedirInterno(ruta) {
+  const control = new AbortController();
+  const cronometro = setTimeout(() => control.abort(), 15000);
+  try {
+    const r = await fetch(`http://127.0.0.1:${PUERTO_INTERNO}${ruta}`, {
+      signal: control.signal,
+    });
+    const cuerpo = await r.json().catch(() => null);
+    return { ok: r.ok, status: r.status, cuerpo };
+  } finally {
+    clearTimeout(cronometro);
+  }
+}
+
+/**
+ * GET /portal/historial
+ * Historial del vehículo, incluyendo las órdenes activas que todavía no están
+ * en `vehiculo_historial` (el endpoint interno las convierte al mismo formato).
+ */
 router.get("/historial", requiereSesion, ruta(async (req, res) => {
   const { vehiculoId } = req.portal;
 
   const { data: veh } = await supabase
     .from("vehiculos").select("placa").eq("id", vehiculoId).maybeSingle();
 
-  // vehiculo_historial guarda placa además de vehiculo_id (snapshot histórico):
-  // buscamos por ambos para no perder registros de vehículos re-creados.
-  const { data, error } = await supabase
-    .from("vehiculo_historial")
-    .select("*")
-    .or(`vehiculo_id.eq.${vehiculoId}${veh?.placa ? `,placa.eq.${veh.placa}` : ""}`)
-    .order("fecha_servicio", { ascending: false })
-    .limit(100);
+  if (!veh?.placa) return res.json({ error: false, historial: [] });
 
-  if (error) return fallo(res, 500, "No se pudo cargar el historial.");
-  res.json({ error: false, historial: data || [] });
-}));
+  const r = await pedirInterno(
+    `/vehiculo-historial/placa/${encodeURIComponent(veh.placa)}`
+  );
 
-/** GET /portal/historial/:id — detalle de un servicio, validando pertenencia. */
-router.get("/historial/:id", requiereSesion, ruta(async (req, res) => {
-  const { vehiculoId } = req.portal;
-
-  const { data, error } = await supabase
-    .from("vehiculo_historial").select("*").eq("id", req.params.id).maybeSingle();
-
-  if (error || !data) return fallo(res, 404, "Registro no encontrado.");
-
-  // Validación de pertenencia del lado servidor: sin esto, cambiar el :id en la
-  // URL dejaría ver el historial de otro cliente.
-  if (data.vehiculo_id && data.vehiculo_id !== vehiculoId) {
-    return fallo(res, 403, "Ese registro no pertenece a tu vehículo.");
+  if (!r.ok) {
+    console.error("[portal] /historial interno:", r.status, JSON.stringify(r.cuerpo).slice(0, 200));
+    return fallo(res, 502, "No se pudo cargar el historial.");
   }
 
-  res.json({ error: false, ...data });
+  res.json({
+    error: false,
+    historial: r.cuerpo?.historial || [],
+    vehiculo: r.cuerpo?.vehiculo || null,
+  });
+}));
+
+/**
+ * GET /portal/historial/:id — expediente de un servicio ya cerrado.
+ *
+ * El parámetro se restringe a dígitos: sin `(\\d+)`, una petición a
+ * /historial/orden/123 haría match aquí con id="orden" y nunca llegaría a la
+ * ruta de abajo, porque Express evalúa en orden de declaración.
+ */
+router.get("/historial/:id(\\d+)", requiereSesion, ruta(async (req, res) => {
+  const { vehiculoId } = req.portal;
+
+  // Pertenencia PRIMERO: sin esto, cambiar el :id en la URL mostraría el
+  // expediente de otro cliente.
+  const { data: fila } = await supabase
+    .from("vehiculo_historial")
+    .select("id, vehiculo_id, placa")
+    .eq("id", req.params.id)
+    .maybeSingle();
+
+  if (!fila) return fallo(res, 404, "Registro no encontrado.");
+
+  if (fila.vehiculo_id && fila.vehiculo_id !== vehiculoId) {
+    return fallo(res, 403, "Ese registro no pertenece a tu vehículo.");
+  }
+  // Registros antiguos sin vehiculo_id: se valida por placa.
+  if (!fila.vehiculo_id) {
+    const { data: veh } = await supabase
+      .from("vehiculos").select("placa").eq("id", vehiculoId).maybeSingle();
+    if (normalizarPlaca(veh?.placa) !== normalizarPlaca(fila.placa)) {
+      return fallo(res, 403, "Ese registro no pertenece a tu vehículo.");
+    }
+  }
+
+  const r = await pedirInterno(`/vehiculo-historial/${req.params.id}/detalle`);
+  if (!r.ok) return fallo(res, 502, "No se pudo cargar el detalle.");
+
+  res.json({ error: false, ...r.cuerpo });
+}));
+
+/**
+ * GET /portal/historial/orden/:ordenId
+ * Expediente de una orden todavía abierta, que aún no pasó a vehiculo_historial.
+ */
+router.get("/historial/orden/:ordenId", requiereSesion, ruta(async (req, res) => {
+  const { vehiculoId } = req.portal;
+
+  const { data: orden } = await supabase
+    .from("ordenes_trabajo")
+    .select("id, vehiculo_id")
+    .eq("id", req.params.ordenId)
+    .maybeSingle();
+
+  if (!orden) return fallo(res, 404, "Orden no encontrada.");
+  if (orden.vehiculo_id !== vehiculoId) {
+    return fallo(res, 403, "Esa orden no pertenece a tu vehículo.");
+  }
+
+  const r = await pedirInterno(`/vehiculo-historial/orden/${orden.id}/detalle`);
+  if (!r.ok) return fallo(res, 502, "No se pudo cargar el detalle.");
+
+  res.json({ error: false, ...r.cuerpo });
 }));
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -1050,24 +1208,41 @@ router.get("/salud", ruta(async (req, res) => {
 
   const faltantes = Object.entries(estadoTablas).filter(([, v]) => v !== "ok").map(([k]) => k);
 
+  const tieneSecreto = Boolean(process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET);
+  const tieneAdmin = Boolean(process.env.PORTAL_ADMIN_SECRET);
+
+  // Lista concreta de lo que falta, en orden de importancia. Sin esto hay que
+  // ir cruzando campos a mano para entender por qué el portal no funciona.
+  const pendientes = [];
+  if (!tieneSecreto)
+    pendientes.push(
+      "FALTA PORTAL_JWT_SECRET en Railway — sin esto nadie puede iniciar sesión. " +
+        "Genérala: node -e \"console.log(require('crypto').randomBytes(48).toString('base64url'))\""
+    );
+  if (faltantes.length)
+    pendientes.push(
+      `FALTAN ${faltantes.length} tabla(s) (${faltantes.join(", ")}) — corre ` +
+        "crm-backend/sql/portal_cliente.sql y crm-backend/sql/notificaciones_cliente.sql en Supabase."
+    );
+  if (!tieneAdmin)
+    pendientes.push(
+      "FALTA PORTAL_ADMIN_SECRET en Railway — la secretaria no puede generar códigos de mostrador."
+    );
+  if (!req.app.get("trust proxy"))
+    pendientes.push("FALTA app.set('trust proxy', 1) — el límite de intentos no distingue IPs.");
+
   res.json({
     error: false,
-    token_configurado: Boolean(process.env.PORTAL_JWT_SECRET || process.env.JWT_SECRET),
-    admin_configurado: Boolean(process.env.PORTAL_ADMIN_SECRET),
+    listo: pendientes.length === 0,
+    pendientes,
+    token_configurado: tieneSecreto,
+    admin_configurado: tieneAdmin,
     canal_correo: hayCanalDeCorreo(),
     canal_push: await hayPush(),
     canal_whatsapp: hayCanalDeWhatsApp(),
-    trust_proxy: req.app.get("trust proxy") ? "activo" : "INACTIVO — actívalo en Railway",
+    trust_proxy: req.app.get("trust proxy") ? "activo" : "INACTIVO",
     ip_detectada: ipDe(req),
     tablas: estadoTablas,
-    listo: faltantes.length === 0,
-    ...(faltantes.length
-      ? {
-          accion_requerida:
-            `Faltan ${faltantes.length} tabla(s). Corre en el SQL Editor de Supabase: ` +
-            `crm-backend/sql/portal_cliente.sql y crm-backend/sql/notificaciones_cliente.sql`,
-        }
-      : {}),
   });
 }));
 
@@ -1080,31 +1255,45 @@ router.get("/salud", ruta(async (req, res) => {
 // Con `ruta()` arriba, todos los errores terminan aquí.
 
 router.use((err, req, res, next) => {
-  // 42P01 = "relation does not exist": no se corrió el SQL del portal.
   const codigo = err?.code || "";
   const texto = String(err?.message || err || "");
-  const faltaTabla = codigo === "42P01" || /does not exist|schema cache/i.test(texto);
 
   console.error("[portal] error no controlado:", codigo, texto);
 
-  if (faltaTabla) {
+  if (res.headersSent) return next(err);
+
+  // ── Falta la clave de firma ──────────────────────────────────────────────
+  // Síntoma típico: buscar la placa funciona, pero al verificar el teléfono
+  // falla — porque ahí es donde se emite el token de sesión.
+  if (codigo === "PORTAL_SIN_SECRETO") {
     return res.status(503).json({
       error: true,
-      mensaje:
-        "El portal aún no está instalado en la base de datos. Avísale al taller.",
-      // Detalle solo para quien lee los logs o llama al endpoint directo:
-      detalle_tecnico:
-        "Faltan las tablas del portal. Corre crm-backend/sql/portal_cliente.sql " +
-        "y crm-backend/sql/notificaciones_cliente.sql en el SQL Editor de Supabase. " +
-        "Revisa GET /portal/salud para ver cuáles faltan.",
+      mensaje: "El portal todavía no está listo. Avísale al taller.",
+      detalle_tecnico: texto,
+      accion_requerida: "Define PORTAL_JWT_SECRET en Railway y redespliega.",
     });
   }
 
-  if (res.headersSent) return next(err);
+  // ── Faltan las tablas (42P01 = relation does not exist) ──────────────────
+  if (codigo === "42P01" || /does not exist|schema cache/i.test(texto)) {
+    return res.status(503).json({
+      error: true,
+      mensaje: "El portal aún no está instalado en la base de datos. Avísale al taller.",
+      detalle_tecnico: texto,
+      accion_requerida:
+        "Corre crm-backend/sql/portal_cliente.sql y crm-backend/sql/notificaciones_cliente.sql " +
+        "en el SQL Editor de Supabase. GET /portal/salud dice cuáles faltan.",
+    });
+  }
 
+  // ── Cualquier otra cosa ──────────────────────────────────────────────────
+  // Se incluye el detalle técnico a propósito: sin él, diagnosticar exige
+  // acceso a los logs de Railway, y el mensaje genérico no orienta a nadie.
   res.status(500).json({
     error: true,
     mensaje: "Ocurrió un problema en el servidor. Intenta de nuevo en un momento.",
+    detalle_tecnico: texto.slice(0, 300),
+    ...(codigo ? { codigo } : {}),
   });
 });
 

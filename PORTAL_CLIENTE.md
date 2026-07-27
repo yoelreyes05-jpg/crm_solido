@@ -238,23 +238,69 @@ Ese último punto es el que cierra el hueco original.
 
 ---
 
-## Si el portal dice "no pudimos comunicarnos con el servidor"
+## Diagnóstico: el portal falla al verificar el teléfono
 
-**Lo primero: abre `GET /portal/salud`.** Ahora lista tabla por tabla si existe:
+**Siempre empieza por `GET /portal/salud`.** Devuelve una lista de lo que falta, en orden de importancia:
 
 ```json
 {
   "listo": false,
-  "tablas": { "portal_sesiones": "FALTA (42P01)", "portal_otp": "ok" },
-  "accion_requerida": "Faltan 1 tabla(s). Corre en el SQL Editor de Supabase: ..."
+  "pendientes": [
+    "FALTA PORTAL_JWT_SECRET en Railway — sin esto nadie puede iniciar sesión. Genérala: ...",
+    "FALTAN 2 tabla(s) (portal_sesiones, portal_otp) — corre ... en Supabase."
+  ],
+  "tablas": { "portal_sesiones": "FALTA (42P01)", "portal_otp": "ok" }
 }
 ```
 
-Casi siempre la causa es que **faltó correr el SQL**, no la red.
+Si `listo` es `true`, el portal está bien instalado y el problema es otro.
 
-El síntoma engaña: buscar la placa funciona (ese endpoint solo lee `vehiculos` y `clientes`, que ya existen) pero al escribir los 4 dígitos falla, porque ahí es donde se crea la sesión en `portal_sesiones`. Si esa tabla no existe, la consulta falla.
+### Por qué el síntoma engaña
 
-Antes eso se veía como un error de wifi por un detalle de Express 4: **no captura los rechazos de promesas en handlers `async`**. La petición se quedaba sin respuesta, el navegador la reportaba como fallo de red, y en Node 15+ el proceso se caía. Corregido: los 21 handlers van envueltos en `ruta()` y hay un manejador de errores que traduce "tabla inexistente" a un 503 con instrucciones.
+Buscar la placa **siempre funciona**: ese endpoint solo lee `vehiculos` y `clientes`, que ya existían. El fallo aparece al escribir los 4 dígitos, porque ahí es donde se crea la sesión — y eso necesita dos cosas que la búsqueda de placa no necesita: la tabla `portal_sesiones` y la variable `PORTAL_JWT_SECRET`.
+
+Por eso parece "el portal encontró mi carro pero no me deja entrar".
+
+### Los tres errores y qué significan
+
+| Lo que ves | Causa | Solución |
+|---|---|---|
+| "No pudimos comunicarnos con el servidor" | El backend no responde, o CORS bloqueó la petición | Revisa que la cabecera que envías esté en `allowedHeaders` de `server.mjs` |
+| "El portal aún no está instalado en la base de datos" | Faltan tablas (`42P01`) | Corre los dos archivos SQL |
+| "El portal todavía no está listo" | Falta `PORTAL_JWT_SECRET` | Defínela en Railway y redespliega |
+| "Ocurrió un problema en el servidor" | Otra cosa | El campo `detalle_tecnico` de la respuesta dice cuál |
+
+### Dos fallos corregidos en el camino
+
+**Express 4 no captura rechazos de promesas en handlers `async`.** La petición se quedaba sin respuesta, el navegador lo reportaba como fallo de wifi, y en Node 15+ el proceso se caía. Los 21 handlers van ahora envueltos en `ruta()`.
+
+**La cabecera `x-portal-admin` no estaba en `allowedHeaders`.** El navegador bloqueaba el preflight de CORS y el botón de la secretaria fallaba con un error de red genérico, sin llegar nunca al servidor. Si añades cabeceras nuevas al frontend, tienes que añadirlas también ahí.
+
+---
+
+## El error de fondo: los endpoints del CRM enriquecen los datos
+
+Este fue el fallo más costoso de todos, y conviene entenderlo antes de tocar el portal.
+
+`GET /ordenes` y `GET /diagnosticos` **no devuelven las filas de la tabla tal cual**. Les añaden campos calculados que la interfaz da por hechos:
+
+| Endpoint | Añade |
+|---|---|
+| `/ordenes` | `estado` con valor por defecto `"RECIBIDO"`, `numero_orden` de respaldo, `vehiculo_info`, `cliente_nombre` |
+| `/diagnosticos` | `descripcion`, `hallazgos`, `notas`, `mano_obra`, `repuestos`, `total` |
+| `/vehiculo-historial/placa/:placa` | Convierte las **órdenes abiertas** al formato del historial, con `avances_data`, `cotizacion_data`, `factura_data`, `timeline_data` |
+
+Al construir `/portal/estado` leyendo las tablas en crudo, todo eso se perdió. Los síntomas eran engañosos porque cada uno parecía un problema distinto:
+
+- **No se veía el estado** — `estado` llegaba nulo y `ESTADO_INFO[null]` no encuentra nada. En la tabla la columna existe pero su valor por defecto es `'pendiente'` en minúsculas, mientras la interfaz espera `RECIBIDO` en mayúsculas.
+- **La impresión salía en blanco** — los datos estaban ahí, pero con otro nombre: la función de impresión lee `d.descripcion` y la tabla guarda `fallas_identificadas`.
+- **El servicio en curso no abría** — las órdenes abiertas todavía no están en `vehiculo_historial`; el endpoint interno las inyecta con id `orden_<n>` y yo había borrado esa rama.
+
+**La corrección.** `/portal/estado` replica la normalización de órdenes y diagnósticos, y los endpoints de historial **delegan por loopback en los del CRM** en vez de duplicar ~200 líneas de lógica que se desincronizarían. La comprobación de pertenencia se hace antes, en la capa del portal.
+
+**Regla para el futuro:** si el portal necesita datos que el CRM ya expone, delega en ese endpoint. No leas la tabla directamente, o volverás a perder el enriquecimiento.
+
+Un detalle relacionado: las consultas fallidas se resolvían con `|| []`, así que un error se veía como "este vehículo no tiene órdenes". Ahora se registran en el log y viajan en el campo `avisos` de la respuesta.
 
 ---
 

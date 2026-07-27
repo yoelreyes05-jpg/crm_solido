@@ -688,9 +688,11 @@ export default function ClienteApp() {
     setTab("histperm");
     setLoadingDetalle(true);
     try {
-      // El endpoint del portal valida del lado servidor que el registro sea de
-      // este vehículo: cambiar el id en la URL ya no muestra el de otro cliente.
-      const data = await cargarDetalleHistorial(h.id);
+      // Se pasa el registro completo, no solo el id: las órdenes activas usan
+      // otra ruta (llevan id "orden_XX" y aún no están en vehiculo_historial).
+      // El backend valida que el registro sea de este vehículo, así que cambiar
+      // el id en la URL no muestra el de otro cliente.
+      const data = await cargarDetalleHistorial(h);
       setHistDetalleCompleto(data);
     } catch (e: any) {
       if (e?.status === 401) { setSesion(null); setResultado(null); }

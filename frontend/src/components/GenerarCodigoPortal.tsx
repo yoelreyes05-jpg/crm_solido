@@ -58,13 +58,20 @@ export default function GenerarCodigoPortal({
       setCodigo(r.codigo);
       setAbierto(true);
     } catch (e) {
-      setError(
-        e instanceof ErrorPortal
-          ? e.status === 403
-            ? "No autorizado. Falta NEXT_PUBLIC_PORTAL_ADMIN_SECRET en el frontend o no coincide con la del backend."
-            : e.message
-          : "No se pudo generar el código."
-      );
+      // Mostrar el motivo real: "No se pudo generar" no le dice nada a nadie,
+      // ni a la secretaria ni a quien tenga que arreglarlo.
+      let msg: string;
+      if (e instanceof ErrorPortal) {
+        msg =
+          e.status === 403
+            ? "No autorizado. NEXT_PUBLIC_PORTAL_ADMIN_SECRET (Vercel) no coincide con PORTAL_ADMIN_SECRET (Railway)."
+            : e.status === 503
+            ? "Faltan las tablas del portal en la base de datos. Corre crm-backend/sql/portal_cliente.sql en Supabase."
+            : e.message;
+      } else {
+        msg = (e as Error)?.message || "Error desconocido al generar el código.";
+      }
+      setError(msg);
       setAbierto(true);
     } finally {
       setCargando(false);
