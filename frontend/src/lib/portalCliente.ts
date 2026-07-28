@@ -297,6 +297,101 @@ export async function salir() {
   borrarSesion();
 }
 
+// ─── Citas ───────────────────────────────────────────────────────────────────
+
+export type Cita = {
+  id: number;
+  fecha: string;          // YYYY-MM-DD
+  hora: string;           // HH:MM
+  tipo_servicio?: string;
+  descripcion?: string;
+  estado: "PENDIENTE" | "CONFIRMADA" | "COMPLETADA" | "CANCELADA" | "NO_ASISTIO";
+  origen?: string;
+  notas?: string;
+  created_at?: string;
+};
+
+export type OpcionesCita = {
+  fecha?: string;
+  cerrado?: boolean;
+  tipos: string[];
+  fecha_min: string;
+  fecha_max: string;
+  horas: { hora: string; disponible: boolean }[];
+};
+
+/** Las citas del cliente: próximas y pasadas. */
+export function cargarCitas() {
+  return pedir<{ proximas: Cita[]; pasadas: Cita[] }>("/citas");
+}
+
+/**
+ * Qué horas quedan libres ese día.
+ * Sin fecha devuelve solo el rango de fechas válido y los tipos de servicio.
+ */
+export function opcionesCita(fecha?: string) {
+  return pedir<OpcionesCita>(`/citas/opciones${fecha ? `?fecha=${fecha}` : ""}`);
+}
+
+export function agendarCita(datos: {
+  fecha: string;
+  hora: string;
+  tipo_servicio: string;
+  descripcion: string;
+}) {
+  return pedir<{ cita: Cita; mensaje: string }>("/citas", {
+    method: "POST",
+    body: JSON.stringify(datos),
+  });
+}
+
+export function cancelarCita(id: number, motivo?: string) {
+  return pedir<{ mensaje: string }>(`/citas/${id}/cancelar`, {
+    method: "POST",
+    body: JSON.stringify({ motivo: motivo || "" }),
+  });
+}
+
+/** Etiqueta legible del tipo de servicio, que en base viaja en MAYUSCULAS_CON_GUION. */
+export const ETIQUETA_SERVICIO: Record<string, string> = {
+  MANTENIMIENTO:      "Mantenimiento / cambio de aceite",
+  DIAGNOSTICO:        "Diagnóstico computarizado",
+  FRENOS:             "Frenos",
+  SUSPENSION:         "Suspensión y dirección",
+  ELECTRICO:          "Sistema eléctrico",
+  AIRE_ACONDICIONADO: "Aire acondicionado",
+  ALINEACION:         "Alineación y balanceo",
+  MOTOR:              "Motor y transmisión",
+  CARWASH:            "Car wash",
+  OTRO:               "Otro",
+};
+
+const DIAS_ES  = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+const MESES_ES = ["enero", "febrero", "marzo", "abril", "mayo", "junio",
+                  "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
+
+/**
+ * "2026-08-03" → "lunes 3 de agosto".
+ *
+ * Se parte el string a mano en vez de usar `new Date("2026-08-03")`: ese
+ * constructor lo interpreta como UTC y en República Dominicana (UTC-4) la
+ * fecha se muestra un día antes.
+ */
+export function fechaBonita(iso: string): string {
+  const [a, m, d] = String(iso || "").split("-").map(Number);
+  if (!a || !m || !d) return String(iso || "");
+  return `${DIAS_ES[new Date(a, m - 1, d).getDay()]} ${d} de ${MESES_ES[m - 1]}`;
+}
+
+/** "14:30" → "2:30 PM". */
+export function horaBonita(hora: string): string {
+  const [h, m = "00"] = String(hora || "").split(":");
+  const n = Number(h);
+  if (Number.isNaN(n)) return String(hora || "");
+  const h12 = n % 12 === 0 ? 12 : n % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${n >= 12 ? "PM" : "AM"}`;
+}
+
 // ─── Notificaciones push (PWA) ───────────────────────────────────────────────
 
 export type Preferencias = { correo: boolean; push: boolean; whatsapp: boolean };

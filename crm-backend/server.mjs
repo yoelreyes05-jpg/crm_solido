@@ -5,6 +5,18 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import portalCliente from "./routes/portalCliente.mjs";
 import { notificarCambioEstado, esEventoNotificable } from "./services/notificarCliente.mjs";
+import {
+  notificarCita, avisarTallerNuevaCita, eventoDesdeEstado,
+  enviarRecordatoriosPendientes,
+  fechaLarga as fechaLargaCita, hora12 as hora12Cita,
+} from "./services/notificarCita.mjs";
+import {
+  iniciarFlujoCita, manejarMensajeCita, hayCitaEnCurso,
+} from "./services/telegramCitas.mjs";
+// Las URLs públicas viven en un solo módulo. Estaban escritas a mano en varios
+// puntos del bot apuntando a `railway.app/cita`, una ruta que no existe: todo
+// cliente que pedía cita por Telegram recibía un enlace roto.
+import { URL_WEB, URL_APP, URL_CITA, TEL_TALLER } from "./services/enlaces.mjs";
 
 const app = express();
 
@@ -56,83 +68,24 @@ const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY
 // =====================================================
 // Railway bloquea los puertos SMTP salientes, por eso el envío directo por
 // Gmail daba "Connection timeout". Brevo envía por su API HTTPS (puerto 443),
-// que nunca se bloquea. Se puede seguir usando el correo de Gmail como
-// remitente si se verifica como "sender" en Brevo.
+// que nunca se bloquea.
+//
+// El envío en sí vive ahora en los servicios:
+//   · services/notificarCita.mjs     — todo lo de citas (agendada, confirmada,
+//                                      cancelada, recordatorios) + aviso al taller
+//   · services/notificarCliente.mjs  — cambios de estado de la orden
+//   · services/enviarCodigo.mjs      — códigos de acceso al portal
+//
+// Tenerlo en un solo sitio por tema es lo que evita que existan tres
+// plantillas distintas de "cita agendada" que se van desincronizando. Antes
+// este archivo tenía su propio `enviarCorreo` y su propia plantilla de cita,
+// usados solo por `POST /citas/publica`.
 //
 // Variables de entorno (Railway):
 //   BREVO_API_KEY   = la API key de Brevo (Brevo → SMTP & API → API Keys)
 //   MAIL_FROM_EMAIL = solidoautoservicio@gmail.com  (opcional; por defecto usa GMAIL_USER)
 //                     ⚠️ este correo debe estar verificado como remitente en Brevo.
-const MAIL_FROM_NAME  = "Sólido Auto Servicio";
-const MAIL_FROM_EMAIL = process.env.MAIL_FROM_EMAIL || process.env.GMAIL_USER || "solidoautoservicio@gmail.com";
-const BREVO_API_KEY   = process.env.BREVO_API_KEY || "";
-
-// Envía un correo por la API de Brevo. Nunca lanza: si falla o no está
-// configurado, registra una advertencia y devuelve false (no rompe la cita).
-async function enviarCorreo({ to, subject, html, replyTo }) {
-  if (!BREVO_API_KEY) {
-    console.warn("⚠️ Correo no configurado (falta BREVO_API_KEY). Se omite el envío.");
-    return false;
-  }
-  if (!to) return false;
-  try {
-    const r = await fetch("https://api.brevo.com/v3/smtp/email", {
-      method: "POST",
-      headers: {
-        "api-key": BREVO_API_KEY,
-        "Content-Type": "application/json",
-        "accept": "application/json",
-      },
-      body: JSON.stringify({
-        sender: { name: MAIL_FROM_NAME, email: MAIL_FROM_EMAIL },
-        to: [{ email: to }],
-        subject,
-        htmlContent: html,
-        ...(replyTo ? { replyTo: { email: replyTo } } : {}),
-      }),
-    });
-    if (!r.ok) {
-      const t = await r.text().catch(() => "");
-      console.warn(`⚠️ Error enviando correo (Brevo ${r.status}):`, t.slice(0, 300));
-      return false;
-    }
-    return true;
-  } catch (err) {
-    console.warn("⚠️ Error enviando correo:", err.message);
-    return false;
-  }
-}
-
-// Plantilla HTML de confirmación de cita (marca Sólido Auto Servicio).
-function plantillaCitaCliente({ nombre, fecha, hora, placa, modelo, motivo }) {
-  return `
-  <div style="font-family:Arial,Helvetica,sans-serif;max-width:560px;margin:auto;background:#f5f7fb;padding:24px;border-radius:14px">
-    <div style="background:#0f172a;color:#fff;text-align:center;padding:22px;border-radius:12px 12px 0 0">
-      <div style="font-size:22px;font-weight:900;letter-spacing:1px">SÓLIDO AUTO SERVICIO</div>
-      <div style="font-size:12px;opacity:.8;margin-top:4px">Más que un taller, una experiencia</div>
-    </div>
-    <div style="background:#fff;padding:24px;border-radius:0 0 12px 12px">
-      <h2 style="color:#16a34a;margin:0 0 8px">✅ ¡Cita agendada!</h2>
-      <p style="color:#334155;font-size:15px;line-height:1.6;margin:0 0 16px">
-        Hola <strong>${nombre || "cliente"}</strong>, recibimos tu solicitud de cita. Estos son los datos:
-      </p>
-      <table style="width:100%;border-collapse:collapse;font-size:14px;color:#334155">
-        <tr><td style="padding:8px 0;color:#64748b">📅 Fecha</td><td style="padding:8px 0;font-weight:700;text-align:right">${fecha}</td></tr>
-        <tr><td style="padding:8px 0;color:#64748b">🕐 Hora</td><td style="padding:8px 0;font-weight:700;text-align:right">${hora}</td></tr>
-        <tr><td style="padding:8px 0;color:#64748b">🚗 Vehículo</td><td style="padding:8px 0;font-weight:700;text-align:right">${modelo || "—"}</td></tr>
-        <tr><td style="padding:8px 0;color:#64748b">🔖 Placa</td><td style="padding:8px 0;font-weight:700;text-align:right">${placa || "—"}</td></tr>
-        <tr><td style="padding:8px 0;color:#64748b">🔧 Motivo</td><td style="padding:8px 0;font-weight:700;text-align:right">${motivo || "—"}</td></tr>
-      </table>
-      <div style="background:#fef3c7;color:#92400e;font-size:13px;padding:12px 14px;border-radius:9px;margin-top:16px;line-height:1.5">
-        Tu cita está <strong>pendiente de confirmación</strong>. Nuestro equipo se comunicará contigo para confirmarla.
-      </div>
-      <p style="color:#64748b;font-size:13px;margin-top:18px;line-height:1.6">
-        ¿Necesitas cambiar la fecha? Escríbenos por WhatsApp al <strong>849-569-2027</strong>.<br/>
-        Gracias por confiar en Sólido Auto Servicio. 🙌
-      </p>
-    </div>
-  </div>`;
-}
+//   MAIL_TALLER     = a dónde llegan los avisos internos de cita nueva.
 
 // =====================================================
 // 🕵️ AUDITORÍA — log_acciones
@@ -4424,23 +4377,25 @@ VISIÓN: Ser el taller automotriz de referencia en Santo Domingo, reconocido por
 CAFETERÍA: Contamos con Sólido Café Garage, donde los clientes pueden disfrutar de bebidas y comida mientras esperan su vehículo.
 
 CITAS Y AGENDAMIENTO:
-- Los clientes pueden agendar citas en línea en: https://crm-automotriz-3wde-production.up.railway.app/cita
-- Solo necesitan: placa, teléfono, tipo de servicio, fecha y hora deseada.
-- El taller confirma o cancela la cita. El cliente recibe una notificación push 1 hora antes.
-- También pueden llamar al 849-569-2027 para agendar.
+- La forma más cómoda es agendar AQUÍ MISMO, por este chat: el cliente toca el botón "📅 Agendar Cita" (o escribe "quiero una cita") y el bot le hace 4 preguntas rápidas. La cita queda registrada en el taller al instante y el cliente recibe la confirmación por este mismo chat.
+- También pueden agendar en el sitio web: ${URL_CITA}
+- Solo necesitan: placa, fecha, hora y qué necesita el vehículo.
+- El taller confirma o cancela la cita. El cliente recibe recordatorio el día anterior y una hora antes.
+- También pueden llamar al ${TEL_TALLER} para agendar.
 
 NOTIFICACIONES DE CAMBIO DE ACEITE:
 - El sistema envía alertas automáticas cuando se acerca la fecha del próximo cambio de aceite.
-- El cliente debe activar las notificaciones en: https://crm-automotriz-3wde-production.up.railway.app/cliente
+- El cliente debe activar las notificaciones en la app: ${URL_APP}
 - Las alertas llegan directamente al teléfono como notificaciones de la app.
 
 REGLAS PARA RESPONDER:
 - Responde siempre en español, de forma amable, breve y profesional.
 - Si el cliente pregunta por el estado de su vehículo, pídele que escriba su placa (ej: A123456).
-- Si preguntan por agendar una cita, dales el enlace: https://crm-automotriz-3wde-production.up.railway.app/cita
+- Si preguntan por agendar una cita, dile que puede hacerlo aquí mismo escribiendo "quiero una cita" o tocando el botón "📅 Agendar Cita". Como alternativa, el sitio web: ${URL_CITA}
+- NUNCA inventes direcciones web. Los únicos enlaces válidos son ${URL_WEB} y ${URL_APP}.
 - Si preguntan por presupuestos específicos o reparaciones complejas, diles que un técnico los contactará pronto.
 - No inventes precios exactos. Puedes decir que los precios varían según el vehículo y el diagnóstico.
-- Si no sabes algo con certeza, sugiere llamar al 849-569-2027.
+- Si no sabes algo con certeza, sugiere llamar al ${TEL_TALLER}.
 - Respuestas máximo 3 párrafos cortos.
 `.trim();
 
@@ -4546,6 +4501,14 @@ app.post("/telegram/webhook", async (req, res) => {
 
     await tgTyping(chatId);
 
+    // ── ¿Está a media conversación de agendar cita? ────────────────────────
+    // Va PRIMERO a propósito. Durante el flujo, "A123456" es la respuesta a
+    // "¿cuál es tu placa?", no una consulta de estado; y "mañana" es una
+    // fecha, no una pregunta para la IA. Si esto se evaluara más abajo, el
+    // detector de placas de más adelante se comería la respuesta y el cliente
+    // recibiría el estado de su vehículo en medio del agendamiento.
+    if (await manejarMensajeCita(chatId, texto, nombre, tgSend)) return;
+
     // ── Comando /debug PLACA — diagnóstico visible en Telegram ────────────
     const debugMatch = texto.match(/^\/debug\s+(.+)$/i);
     if (debugMatch) {
@@ -4598,7 +4561,8 @@ app.post("/telegram/webhook", async (req, res) => {
         `👋 ¡Hola, <b>${nombre}</b>! Soy <b>SólidoBot</b>, el asistente virtual de Sólido Auto Servicio.\n\n` +
         `¿En qué puedo ayudarte hoy?\n\n` +
         `🚗 <b>Estado de tu vehículo</b>\n   → Escríbeme tu placa (ej: <code>A123456</code>)\n\n` +
-        `📅 <b>Agendar una cita</b>\n   → Usa el botón <b>📅 Agendar Cita</b>\n\n` +
+        `📅 <b>Agendar una cita</b>\n   → Usa el botón <b>📅 Agendar Cita</b> y te la registro aquí mismo\n\n` +
+        `🗓️ <b>Ver tus citas</b>\n   → Escribe <b>mis citas</b>\n\n` +
         `🔩 <b>Repuestos disponibles</b>\n   → Usa el botón <b>🔩 Repuestos</b>\n\n` +
         `☕ <b>Menú cafetería</b>\n   → Usa el botón <b>☕ Menú</b>\n\n` +
         `🛠️ <b>Nuestros servicios</b>\n   → Usa el botón <b>🛠️ Servicios</b>\n\n` +
@@ -4630,23 +4594,47 @@ app.post("/telegram/webhook", async (req, res) => {
     }
 
     // ── Botón / intención "Agendar Cita" ────────────────────────────────────
+    // Antes esto solo mandaba un enlace, y el enlace estaba roto. Ahora abre
+    // el cuestionario y la cita se guarda en `citas_taller` sin que el cliente
+    // salga de Telegram. Ver crm-backend/services/telegramCitas.mjs.
     if (
       /^📅 agendar cita$/i.test(texto) ||
       /\b(agendar|reservar|cita|appointment|quiero una cita|necesito una cita|sacar turno|turno|agendarme)\b/i.test(texto)
     ) {
-      const PWA_URL = "https://crm-automotriz-3wde-production.up.railway.app/cita";
-      await tgSend(chatId,
-        `📅 <b>Agendar tu cita en Sólido Auto Servicio</b>\n\n` +
-        `Puedes reservar tu cita directamente desde nuestro portal en línea:\n\n` +
-        `👉 <a href="${PWA_URL}">Agendar mi cita aquí</a>\n\n` +
-        `Solo necesitas:\n` +
-        `• Tu número de placa\n` +
-        `• Tu teléfono de contacto\n` +
-        `• El tipo de servicio que necesitas\n` +
-        `• Fecha y hora de tu preferencia\n\n` +
-        `⏰ Te recordaremos tu cita <b>1 hora antes</b> por notificación.\n\n` +
-        `También puedes llamarnos directamente al <b>849-569-2027</b> para reservar. 😊`
-      );
+      await iniciarFlujoCita(chatId, nombre, tgSend);
+      return;
+    }
+
+    // ── "Mis citas" — consultar lo que ya agendó por aquí ───────────────────
+    if (/^(mis citas|ver mis citas|mi cita|tengo cita)/i.test(texto)) {
+      const hoyISO = new Date(Date.now() - 4 * 3600_000).toISOString().slice(0, 10);
+      const { data: mias } = await supabase
+        .from("citas_taller")
+        .select("id, fecha, hora, descripcion, estado, placa_texto, modelo_texto")
+        .eq("telegram_chat_id", String(chatId))
+        .gte("fecha", hoyISO)
+        .not("estado", "in", '("CANCELADA","COMPLETADA")')
+        .order("fecha", { ascending: true }).order("hora", { ascending: true })
+        .limit(5);
+
+      if (!mias?.length) {
+        await tgSend(chatId,
+          `No tienes citas próximas agendadas por aquí.\n\n` +
+          `¿Quieres agendar una? Toca <b>📅 Agendar Cita</b>.`
+        );
+        return;
+      }
+
+      const ICONO = { PENDIENTE: "🕐", CONFIRMADA: "✅", NO_ASISTIO: "⚠️" };
+      let msg = `📅 <b>Tus próximas citas</b>\n`;
+      for (const c of mias) {
+        msg += `\n${ICONO[c.estado] || "•"} <b>${fechaLargaCita(c.fecha)}</b> a las ${hora12Cita(c.hora)}\n` +
+               `   ${c.modelo_texto || "Vehículo"}${c.placa_texto ? ` (${c.placa_texto})` : ""}\n` +
+               `   ${c.descripcion || "—"}\n` +
+               `   Estado: <b>${c.estado === "PENDIENTE" ? "Pendiente de confirmación" : c.estado.toLowerCase()}</b> · Ref #${c.id}\n`;
+      }
+      msg += `\n📞 Para cambiar o cancelar, llámanos al <b>${TEL_TALLER}</b>.`;
+      await tgSend(chatId, msg);
       return;
     }
 
@@ -4655,12 +4643,11 @@ app.post("/telegram/webhook", async (req, res) => {
       await tgSend(chatId,
         `🛢️ <b>Cambio de Aceite y Mantenimiento</b>\n\n` +
         `Nuestro sistema monitorea el historial de tu vehículo y te enviará una <b>notificación automática</b> cuando se acerque la fecha de tu próximo cambio de aceite. 🔔\n\n` +
-        `Para activar estas alertas, visita nuestra app:\n` +
-        `👉 <a href="https://crm-automotriz-3wde-production.up.railway.app/cliente">Ver estado de mi vehículo</a>\n` +
-        `y presiona el botón <b>🔔 Activar Notificaciones</b>.\n\n` +
-        `Si ya se te acercó el mantenimiento, <b>agenda tu cita ahora</b>:\n` +
-        `📅 <a href="https://crm-automotriz-3wde-production.up.railway.app/cita">Reservar cita</a>\n\n` +
-        `📞 También puedes llamarnos al <b>849-569-2027</b>.`
+        `Para activar estas alertas, entra a la app con tu placa:\n` +
+        `👉 <a href="${URL_APP}">Ver estado de mi vehículo</a>\n` +
+        `y activa el interruptor de <b>🔔 Avisos de tu vehículo</b>.\n\n` +
+        `Si ya se te acercó el mantenimiento, <b>agenda tu cita aquí mismo</b>: toca <b>📅 Agendar Cita</b> y en 4 preguntas queda lista.\n\n` +
+        `📞 También puedes llamarnos al <b>${TEL_TALLER}</b>.`
       );
       return;
     }
@@ -4924,7 +4911,13 @@ app.post("/telegram/webhook", async (req, res) => {
 // Visitar: https://crm-automotriz-3wde-production.up.railway.app/telegram/setup
 app.get("/telegram/setup", async (req, res) => {
   if (!TG_TOKEN) return res.json({ error: "TELEGRAM_TOKEN no configurado" });
-  const webhookUrl = "https://crm-automotriz-3wde-production.up.railway.app/telegram/webhook";
+  // Esta URL sí es la del backend (Railway sirve la API, no páginas). Se toma
+  // del host de la petición para que siga funcionando si cambia el dominio:
+  // basta con abrir /telegram/setup desde el dominio nuevo.
+  const base = process.env.BACKEND_URL
+    || `${req.protocol}://${req.get("host")}`
+    || "https://crm-automotriz-3wde-production.up.railway.app";
+  const webhookUrl = `${base.replace(/\/+$/, "")}/telegram/webhook`;
   const r    = await fetch(`${TG_API}/setWebhook`, {
     method:  "POST",
     headers: { "Content-Type": "application/json" },
@@ -10880,34 +10873,19 @@ app.post("/citas/publica", async (req, res) => {
     }]).select().single();
     if (error) return res.status(400).json({ error: error.message });
 
-    // Correo de confirmación al cliente (no bloquea la respuesta si falla).
-    enviarCorreo({
-      to: email,
-      subject: "✅ Tu cita en Sólido Auto Servicio fue agendada",
-      html: plantillaCitaCliente({ nombre, fecha, hora, placa, modelo, motivo }),
-    });
-
-    // Aviso interno al taller para que la secretaria lo vea también por correo.
-    enviarCorreo({
-      to: process.env.GMAIL_USER || "solidoautoservicio@gmail.com",
-      replyTo: email,
-      subject: `📅 Nueva cita web — ${nombre} (${fecha} ${hora})`,
-      html: `
-        <div style="font-family:Arial,sans-serif;font-size:14px;color:#334155">
-          <h3 style="color:#0f172a">Nueva cita agendada desde la web</h3>
-          <p><strong>Cliente:</strong> ${nombre}<br/>
-          <strong>Correo:</strong> ${email}<br/>
-          <strong>Teléfono:</strong> ${telefono || "—"}<br/>
-          <strong>Vehículo:</strong> ${modelo} — placa ${placa}<br/>
-          <strong>Fecha:</strong> ${fecha} a las ${hora}<br/>
-          <strong>Motivo:</strong> ${motivo}</p>
-          <p style="color:#64748b">Revísala y confírmala en el CRM → módulo Citas.</p>
-        </div>`,
-    });
-
     logAccion(req, { accion: "CREAR", modulo: "citas", registroId: data.id,
       descripcion: `Cita web #${data.id} — ${nombre} para ${fecha} ${hora}`,
       detalle: { origen: "WEB", email } });
+
+    // Confirmación al cliente + aviso al taller.
+    //
+    // Antes esto eran dos `enviarCorreo` escritos aquí mismo. Ahora pasa por
+    // `notificarCita`, que es el mismo camino que usan la app y Telegram: un
+    // solo formato de correo, y el envío queda anotado en
+    // `notificaciones_cita`. Eso es lo que permite responderle a un cliente
+    // que dice "nunca me llegó nada" mirando una tabla en vez de adivinar.
+    notificarCita(data.id, "AGENDADA").catch(() => {});
+    avisarTallerNuevaCita(data).catch(() => {});
 
     res.json({ ok: true, id: data.id });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -10916,11 +10894,38 @@ app.post("/citas/publica", async (req, res) => {
 // PATCH /citas/:id — cambiar estado, fecha, hora, etc.
 app.patch("/citas/:id", async (req, res) => {
   try {
+    // Estado anterior: sin él no se puede distinguir "la secretaria confirmó"
+    // de "la secretaria abrió la cita y guardó sin cambiar nada", y el cliente
+    // recibiría un aviso cada vez que alguien toca la fila.
+    const { data: antes } = await supabase.from("citas_taller")
+      .select("estado, fecha, hora").eq("id", req.params.id).maybeSingle();
+
     const updates = { ...req.body, updated_at: new Date().toISOString() };
     delete updates.id;
+
+    // Si cambia la fecha o la hora, los recordatorios ya enviados dejan de ser
+    // válidos: hay que volver a habilitarlos para la fecha nueva.
+    const cambioFecha = (req.body.fecha && req.body.fecha !== antes?.fecha) ||
+                        (req.body.hora  && req.body.hora  !== antes?.hora);
+    if (cambioFecha) {
+      updates.recordatorio_dia_enviado  = false;
+      updates.recordatorio_hora_enviado = false;
+    }
+
     const { data, error } = await supabase.from("citas_taller")
       .update(updates).eq("id", req.params.id).select().single();
     if (error) return res.status(400).json({ error: error.message });
+
+    // ── Avisar al cliente ──
+    // Fire-and-forget: que Brevo tarde no puede dejar a la secretaria
+    // esperando con el botón en gris.
+    const estadoNuevo = req.body.estado;
+    if (estadoNuevo && estadoNuevo !== antes?.estado) {
+      const evento = eventoDesdeEstado(estadoNuevo);
+      if (evento) notificarCita(data.id, evento).catch(() => {});
+    } else if (cambioFecha && ["PENDIENTE", "CONFIRMADA"].includes(data.estado)) {
+      notificarCita(data.id, "REPROGRAMADA", { forzar: true }).catch(() => {});
+    }
 
     if (req.body.estado && data.cliente_id) {
       const u = usuarioDesdeReq(req);
@@ -11231,7 +11236,54 @@ app.post("/recordatorios/enviado", async (req, res) => {
 // ══════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
 // ══════════════════════════════════════════════════════════════════════════════
+// ═════════════════════════════════════════════════════════════════════════════
+// ⏰ RECORDATORIOS DE CITAS — el día anterior y una hora antes
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Los avisos salen por los tres canales que ya funcionan: push a la app,
+// mensaje de Telegram si la cita nació ahí, y correo. La lógica está en
+// crm-backend/services/notificarCita.mjs.
+//
+// Corre dentro del propio proceso en vez de depender de un cron externo: es
+// una consulta a Supabase cada 15 minutos y no justifica otro servicio que
+// mantener. Si algún día hay más de una instancia del backend, se apaga con
+// RECORDATORIOS_AUTOMATICOS=0 y se llama el endpoint desde un cron único.
+// (Aunque las banderas `recordatorio_*_enviado` de cada fila ya harían que un
+// doble disparo fuera inofensivo.)
+
+const RECORDATORIOS_ACTIVOS = process.env.RECORDATORIOS_AUTOMATICOS !== "0";
+const RECORDATORIOS_CADA_MS = 15 * 60 * 1000;
+
+/**
+ * GET /citas/recordatorios/ejecutar
+ * Dispara la pasada a mano: sirve para probar sin esperar 15 minutos, y como
+ * enganche por si alguna vez se prefiere un cron externo.
+ */
+app.get("/citas/recordatorios/ejecutar", async (req, res) => {
+  const r = await enviarRecordatoriosPendientes();
+  res.json(r);
+});
+
+if (RECORDATORIOS_ACTIVOS) {
+  const reloj = setInterval(() => {
+    enviarRecordatoriosPendientes().catch((e) =>
+      console.warn("[recordatorios] fallo en la pasada:", e.message)
+    );
+  }, RECORDATORIOS_CADA_MS);
+  // `unref()` para que el temporizador no impida que el proceso termine cuando
+  // Railway manda la señal de apagado en un redespliegue.
+  reloj.unref?.();
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 🚀 SERVIDOR
+// ═════════════════════════════════════════════════════════════════════════════
 const PORT = process.env.PORT || 4000;
 app.listen(PORT, () => {
-  console.log(`\ud83d\udd25 SÓLIDO AUTO SERVICIO — Servidor activo en puerto \${PORT}`);
+  // El `\${PORT}` estaba escapado, así que el log imprimía el texto literal
+  // "${PORT}" en lugar del puerto real — inútil para diagnosticar.
+  console.log(`🔥 SÓLIDO AUTO SERVICIO — Servidor activo en puerto ${PORT}`);
+  console.log(
+    `⏰ Recordatorios de citas: ${RECORDATORIOS_ACTIVOS ? "activos (cada 15 min)" : "desactivados"}`
+  );
 });

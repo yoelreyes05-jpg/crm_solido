@@ -28,6 +28,7 @@ import {
   enviarCodigoPorCorreo, hayCanalDeCorreo, hayCanalDeWhatsApp,
 } from "../services/enviarCodigo.mjs";
 import { clavePublicaVapid, suscripcionValida, enviarPush, hayPush } from "../services/webPush.mjs";
+import { notificarCita, avisarTallerNuevaCita } from "../services/notificarCita.mjs";
 
 const router = express.Router();
 
@@ -1031,6 +1032,295 @@ router.post("/cotizaciones/:id/responder", requiereSesion, ruta(async (req, res)
 }));
 
 // ═════════════════════════════════════════════════════════════════════════════
+// CITAS desde la app del cliente
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Diferencia con `POST /citas/publica` (el formulario del sitio web): allí el
+// cliente es un desconocido y hay que pedirle nombre, correo, placa y modelo,
+// y la cita entra suelta para que la secretaria la vincule a mano.
+//
+// Aquí el cliente ya se identificó, así que la cita se guarda con `cliente_id`
+// y `vehiculo_id` reales. Entra al CRM ya conectada a su ficha, aparece en su
+// historial y las notificaciones push le llegan sin trabajo extra de nadie.
+
+/** Horas que el taller ofrece. Media hora de resolución, sin la hora de almuerzo. */
+const HORAS_DISPONIBLES = [
+  "08:00", "08:30", "09:00", "09:30", "10:00", "10:30", "11:00", "11:30",
+  "13:00", "13:30", "14:00", "14:30", "15:00", "15:30", "16:00", "16:30",
+];
+
+/** Cuántas citas caben a la misma hora (bahías de trabajo en paralelo). */
+const CUPO_POR_HORA = Number(process.env.CITAS_CUPO_POR_HORA || 3);
+
+/** Con cuántos días de anticipación se puede agendar. */
+const DIAS_MAX_ANTICIPACION = 60;
+
+const TIPOS_SERVICIO = [
+  "MANTENIMIENTO", "DIAGNOSTICO", "FRENOS", "SUSPENSION", "ELECTRICO",
+  "AIRE_ACONDICIONADO", "ALINEACION", "MOTOR", "CARWASH", "OTRO",
+];
+
+/** Fecha de hoy en hora local del taller (Railway corre en UTC). */
+function hoyLocalISO() {
+  const desfase = Number(process.env.TZ_OFFSET_HORAS ?? -4);
+  return new Date(Date.now() + desfase * 3600_000).toISOString().slice(0, 10);
+}
+
+/**
+ * GET /portal/citas
+ * Las citas del cliente de la sesión: próximas primero, luego el historial.
+ */
+router.get("/citas", requiereSesion, ruta(async (req, res) => {
+  const { clienteId } = req.portal;
+  const hoy = hoyLocalISO();
+
+  const { data, error } = await supabase
+    .from("citas_taller")
+    .select("id, fecha, hora, tipo_servicio, descripcion, estado, origen, notas, created_at")
+    .eq("cliente_id", clienteId)
+    .order("fecha", { ascending: false })
+    .order("hora", { ascending: false })
+    .limit(50);
+
+  if (error) return fallo(res, 500, "No se pudieron cargar tus citas.", { detalle_tecnico: error.message });
+
+  const todas = data || [];
+  res.json({
+    error: false,
+    proximas: todas
+      .filter((c) => c.fecha >= hoy && !["CANCELADA", "COMPLETADA", "NO_ASISTIO"].includes(c.estado))
+      .sort((a, b) => (a.fecha + a.hora).localeCompare(b.fecha + b.hora)),
+    pasadas: todas.filter(
+      (c) => c.fecha < hoy || ["CANCELADA", "COMPLETADA", "NO_ASISTIO"].includes(c.estado)
+    ),
+  });
+}));
+
+/**
+ * GET /portal/citas/opciones?fecha=YYYY-MM-DD
+ * Qué horas quedan libres ese día y qué tipos de servicio se pueden pedir.
+ *
+ * Sin esto el cliente elige una hora a ciegas, el taller la rechaza y la
+ * experiencia termina peor que si hubiera llamado por teléfono.
+ */
+router.get("/citas/opciones", requiereSesion, ruta(async (req, res) => {
+  const hoy = hoyLocalISO();
+  const fecha = String(req.query.fecha || "").trim();
+
+  const limite = new Date(Date.now() + DIAS_MAX_ANTICIPACION * 86400_000)
+    .toISOString().slice(0, 10);
+
+  if (!fecha) {
+    return res.json({
+      error: false, tipos: TIPOS_SERVICIO, horas: [],
+      fecha_min: hoy, fecha_max: limite,
+    });
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return fallo(res, 400, "Fecha inválida.");
+
+  // Domingo: el taller abre, pero no se toman citas de taller.
+  const [a, m, d] = fecha.split("-").map(Number);
+  const diaSemana = new Date(a, m - 1, d).getDay();
+
+  const { data: ocupadas } = await supabase
+    .from("citas_taller")
+    .select("hora")
+    .eq("fecha", fecha)
+    .in("estado", ["PENDIENTE", "CONFIRMADA"]);
+
+  const conteo = {};
+  for (const c of ocupadas || []) {
+    const h = String(c.hora || "").slice(0, 5);
+    conteo[h] = (conteo[h] || 0) + 1;
+  }
+
+  // Sábado: media jornada, hasta las 12.
+  const horasDelDia = diaSemana === 6
+    ? HORAS_DISPONIBLES.filter((h) => h < "12:00")
+    : HORAS_DISPONIBLES;
+
+  res.json({
+    error: false,
+    fecha,
+    cerrado: diaSemana === 0,
+    tipos: TIPOS_SERVICIO,
+    fecha_min: hoy,
+    fecha_max: limite,
+    horas: horasDelDia.map((h) => ({
+      hora: h,
+      disponible: (conteo[h] || 0) < CUPO_POR_HORA,
+    })),
+  });
+}));
+
+/**
+ * POST /portal/citas   { fecha, hora, tipo_servicio, descripcion }
+ * Agenda una cita a nombre del cliente de la sesión.
+ */
+router.post("/citas", requiereSesion, ruta(async (req, res) => {
+  const { clienteId, vehiculoId } = req.portal;
+
+  const fecha  = String(req.body?.fecha || "").trim();
+  const hora   = String(req.body?.hora || "").trim().slice(0, 5);
+  const tipo   = String(req.body?.tipo_servicio || "OTRO").trim().toUpperCase();
+  const motivo = String(req.body?.descripcion || "").trim().slice(0, 500);
+
+  // ── Validación ──
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return fallo(res, 400, "Elige una fecha válida.");
+  if (!/^\d{2}:\d{2}$/.test(hora))        return fallo(res, 400, "Elige una hora válida.");
+  if (!motivo)                            return fallo(res, 400, "Cuéntanos brevemente qué necesitas.");
+
+  const hoy = hoyLocalISO();
+  if (fecha < hoy) return fallo(res, 400, "Esa fecha ya pasó. Elige otra.");
+
+  const limite = new Date(Date.now() + DIAS_MAX_ANTICIPACION * 86400_000)
+    .toISOString().slice(0, 10);
+  if (fecha > limite)
+    return fallo(res, 400, `Solo se pueden agendar citas hasta ${DIAS_MAX_ANTICIPACION} días por adelantado.`);
+
+  const [a, m, d] = fecha.split("-").map(Number);
+  if (new Date(a, m - 1, d).getDay() === 0)
+    return fallo(res, 400, "Los domingos no tomamos citas de taller. Elige otro día.");
+
+  if (!TIPOS_SERVICIO.includes(tipo))
+    return fallo(res, 400, "Tipo de servicio no reconocido.");
+
+  // ── Ya tiene una cita ese día ──
+  // Duplicar la cita es el error más común: el cliente toca el botón dos veces
+  // porque la primera respuesta tardó, y la secretaria ve dos turnos iguales.
+  const { data: existente } = await supabase
+    .from("citas_taller")
+    .select("id, fecha, hora")
+    .eq("cliente_id", clienteId)
+    .eq("fecha", fecha)
+    .in("estado", ["PENDIENTE", "CONFIRMADA"])
+    .limit(1)
+    .maybeSingle();
+
+  if (existente) {
+    return fallo(res, 409, `Ya tienes una cita ese día a las ${existente.hora}. Cancélala primero si quieres cambiarla.`, {
+      cita_existente: existente,
+    });
+  }
+
+  // ── Cupo de la hora ──
+  const { count } = await supabase
+    .from("citas_taller")
+    .select("id", { count: "exact", head: true })
+    .eq("fecha", fecha)
+    .eq("hora", hora)
+    .in("estado", ["PENDIENTE", "CONFIRMADA"]);
+
+  if ((count || 0) >= CUPO_POR_HORA)
+    return fallo(res, 409, "Esa hora ya se llenó. Elige otra, por favor.");
+
+  // ── Datos de contacto, copiados a la cita ──
+  // Se guardan también en las columnas de texto para que el módulo Citas del
+  // CRM muestre nombre y placa sin tener que cruzar tablas, igual que hace con
+  // las citas del sitio web.
+  const [{ data: cliente }, { data: vehiculo }] = await Promise.all([
+    supabase.from("clientes").select("nombre, email, telefono").eq("id", clienteId).maybeSingle(),
+    supabase.from("vehiculos").select("marca, modelo, placa").eq("id", vehiculoId).maybeSingle(),
+  ]);
+
+  const { data: cita, error } = await supabase.from("citas_taller").insert([{
+    cliente_id:        clienteId,
+    vehiculo_id:       vehiculoId,
+    fecha,
+    hora,
+    tipo_servicio:     tipo,
+    descripcion:       motivo,
+    origen:            "APP",
+    estado:            "PENDIENTE",
+    nombre_contacto:   cliente?.nombre || null,
+    email_contacto:    cliente?.email || null,
+    telefono_contacto: cliente?.telefono || null,
+    placa_texto:       vehiculo?.placa || null,
+    modelo_texto:      [vehiculo?.marca, vehiculo?.modelo].filter(Boolean).join(" ") || null,
+  }]).select().single();
+
+  if (error) {
+    console.warn("[portal] crear cita:", error.message);
+    return fallo(res, 500, "No se pudo guardar la cita. Intenta de nuevo.", {
+      detalle_tecnico: error.message,
+    });
+  }
+
+  // ── Efectos secundarios, todos sin bloquear la respuesta ──
+  // El cliente ya tiene su confirmación en pantalla; que el correo tarde tres
+  // segundos no es razón para dejarlo mirando un spinner.
+  notificarCita(cita.id, "AGENDADA").catch(() => {});
+  avisarTallerNuevaCita(cita).catch(() => {});
+
+  supabase.from("cliente_interacciones").insert([{
+    cliente_id: clienteId,
+    vehiculo_id: vehiculoId,
+    tipo: "SISTEMA",
+    descripcion: `Cita agendada desde la app para ${fecha} ${hora} — ${motivo}`,
+    referencia: `cita:${cita.id}`,
+    usuario_nombre: "Cliente (app)",
+  }]).then(() => {}, () => {});
+
+  supabase.from("log_acciones").insert([{
+    usuario_nombre: `Cliente #${clienteId} (app)`,
+    accion: "CREAR", modulo: "citas", registro_id: String(cita.id),
+    descripcion: `Cita #${cita.id} agendada desde la app para ${fecha} ${hora}`,
+    detalle: { origen: "APP", nivel_acceso: req.portal.nivel },
+    ip: ipDe(req),
+  }]).then(() => {}, () => {});
+
+  res.json({
+    error: false,
+    cita,
+    mensaje: "¡Listo! Tu cita quedó registrada. Te avisamos en cuanto el taller la confirme.",
+  });
+}));
+
+/**
+ * POST /portal/citas/:id/cancelar   { motivo? }
+ *
+ * Que el cliente pueda cancelar solo es lo que hace que el cupo se libere.
+ * Sin esta opción, quien no puede venir simplemente no viene, y el turno se
+ * pierde porque nadie se enteró a tiempo.
+ */
+router.post("/citas/:id(\\d+)/cancelar", requiereSesion, ruta(async (req, res) => {
+  const { clienteId } = req.portal;
+  const citaId = Number(req.params.id);
+
+  const { data: cita } = await supabase
+    .from("citas_taller")
+    .select("id, cliente_id, fecha, hora, estado")
+    .eq("id", citaId)
+    .maybeSingle();
+
+  if (!cita) return fallo(res, 404, "Esa cita no existe.");
+  // El filtro de pertenencia es del lado servidor a propósito: cambiar el id
+  // en la URL no puede dejar a nadie cancelar la cita de otro.
+  if (cita.cliente_id !== clienteId) return fallo(res, 403, "Esa cita no es tuya.");
+  if (["CANCELADA", "COMPLETADA"].includes(cita.estado))
+    return fallo(res, 400, `La cita ya está ${cita.estado.toLowerCase()}.`);
+
+  const motivo = String(req.body?.motivo || "").trim().slice(0, 300);
+
+  const { error } = await supabase.from("citas_taller").update({
+    estado: "CANCELADA",
+    cancelada_por: "CLIENTE",
+    notas: motivo ? `Cancelada por el cliente: ${motivo}` : "Cancelada por el cliente desde la app",
+    updated_at: new Date().toISOString(),
+  }).eq("id", citaId);
+
+  if (error) return fallo(res, 500, "No se pudo cancelar. Intenta de nuevo.");
+
+  supabase.from("cliente_interacciones").insert([{
+    cliente_id: clienteId, tipo: "SISTEMA",
+    descripcion: `Cita #${citaId} (${cita.fecha} ${cita.hora}) cancelada por el cliente desde la app${motivo ? ` — ${motivo}` : ""}`,
+    referencia: `cita:${citaId}`, usuario_nombre: "Cliente (app)",
+  }]).then(() => {}, () => {});
+
+  res.json({ error: false, mensaje: "Cita cancelada. Puedes agendar otra cuando quieras." });
+}));
+
+// ═════════════════════════════════════════════════════════════════════════════
 // Notificaciones push de la PWA
 // ═════════════════════════════════════════════════════════════════════════════
 
@@ -1116,6 +1406,7 @@ router.post("/push/prueba", requiereSesion, ruta(async (req, res) => {
   if (!subs?.length) return fallo(res, 404, "No hay dispositivos suscritos.");
 
   let enviados = 0;
+  const fallos = [];
   for (const s of subs) {
     const r = await enviarPush(s, {
       titulo: "🔔 Notificaciones activadas",
@@ -1124,10 +1415,80 @@ router.post("/push/prueba", requiereSesion, ruta(async (req, res) => {
       etiqueta: "prueba",
     });
     if (r.ok) enviados++;
+    else fallos.push(r.error || "error desconocido");
   }
 
-  if (!enviados) return fallo(res, 502, "No se pudo entregar la notificación de prueba.");
+  if (!enviados) {
+    // El detalle importa: "no se pudo entregar" a secas obliga a abrir los
+    // logs de Railway para saber si es una suscripción caducada, VAPID mal
+    // configurado o el push service del navegador rechazando.
+    return fallo(res, 502, "No se pudo entregar la notificación de prueba.", {
+      detalle_tecnico: fallos.join(" | ").slice(0, 500),
+      dispositivos: subs.length,
+    });
+  }
   res.json({ error: false, enviados });
+}));
+
+/**
+ * GET /portal/push/diagnostico
+ *
+ * Responde la pregunta "¿por qué no me llegan las notificaciones?" sin tener
+ * que abrir los logs de Railway ni la consola del navegador. Devuelve, en
+ * orden, dónde se corta la cadena: llaves VAPID → paquete web-push → tablas →
+ * dispositivos suscritos → preferencia del cliente → últimos envíos.
+ */
+router.get("/push/diagnostico", requiereSesion, ruta(async (req, res) => {
+  const { clienteId } = req.portal;
+
+  const [{ data: subs }, { data: prefs }, { data: ultimos }] = await Promise.all([
+    supabase.from("portal_push_suscripciones")
+      .select("id, endpoint, activa, fallos, creado_en, ultimo_uso_en, user_agent")
+      .eq("cliente_id", clienteId).order("creado_en", { ascending: false }).limit(10),
+    supabase.from("portal_preferencias_notif").select("correo, push")
+      .eq("cliente_id", clienteId).maybeSingle(),
+    supabase.from("notificaciones_cliente")
+      .select("evento, canal, estado, detalle_error, creado_en")
+      .eq("cliente_id", clienteId).order("creado_en", { ascending: false }).limit(10),
+  ]);
+
+  const activas = (subs || []).filter((s) => s.activa);
+  const disponible = await hayPush();
+  const problemas = [];
+
+  if (!clavePublicaVapid())
+    problemas.push("El servidor no tiene VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY. Genéralas con `npx web-push generate-vapid-keys` y ponlas en Railway.");
+  else if (!disponible)
+    problemas.push("Falta el paquete `web-push` en el backend. Corre `npm i web-push --prefix crm-backend` y redespliega.");
+
+  if (!activas.length)
+    problemas.push("Este cliente no tiene ningún dispositivo suscrito. Hay que abrir la app, entrar con la placa y activar el interruptor de avisos. En iPhone, además, la app tiene que estar instalada en la pantalla de inicio.");
+
+  if (prefs?.push === false)
+    problemas.push("El cliente apagó las notificaciones push desde sus preferencias.");
+
+  const fallidos = (ultimos || []).filter((n) => n.estado === "fallido");
+  if (fallidos.length)
+    problemas.push(`Los últimos envíos fallaron: ${fallidos[0].detalle_error || "sin detalle"}`);
+
+  res.json({
+    error: false,
+    listo: problemas.length === 0,
+    problemas,
+    vapid_configurado: Boolean(clavePublicaVapid()),
+    paquete_web_push: disponible,
+    dispositivos_activos: activas.length,
+    dispositivos_totales: (subs || []).length,
+    preferencias: prefs || { correo: true, push: true },
+    // El endpoint completo identifica al dispositivo: se recorta a propósito.
+    dispositivos: (subs || []).map((s) => ({
+      activa: s.activa, fallos: s.fallos,
+      creado_en: s.creado_en, ultimo_uso_en: s.ultimo_uso_en,
+      navegador: String(s.user_agent || "").slice(0, 120),
+      servicio: (() => { try { return new URL(s.endpoint).host; } catch { return "?"; } })(),
+    })),
+    ultimos_avisos: ultimos || [],
+  });
 }));
 
 /** GET /portal/preferencias */

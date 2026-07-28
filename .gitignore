@@ -31,3 +31,12 @@ Thumbs.db
 # Prisma local DB
 prisma/dev.db
 prisma/*.db
+# Service worker generado por next-pwa en cada build.
+# Estuvo versionado y eso escondió un fallo: el sw.js del repo tenía
+# `importScripts()` vacío (sin el manejador de push) y se servía tal cual.
+# Se regenera solo; no debe versionarse.
+frontend/public/sw.js
+frontend/public/sw.js.map
+frontend/public/workbox-*.js
+frontend/public/workbox-*.js.map
+frontend/public/worker-*.js

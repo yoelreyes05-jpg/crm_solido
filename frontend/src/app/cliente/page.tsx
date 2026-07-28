@@ -3,6 +3,7 @@ import { useState, useEffect } from "react";
 import { API_URL as API } from "@/config";
 import PortalAcceso from "@/components/PortalAcceso";
 import ActivarNotificaciones from "@/components/ActivarNotificaciones";
+import MisCitas from "@/components/MisCitas";
 import {
   cargarEstado, cargarHistorial, cargarDetalleHistorial,
   responderCotizacion, revalidarSesion, salir,
@@ -1396,6 +1397,11 @@ export default function ClienteApp() {
                 {/* Avisos automáticos: sin esto el cliente solo se entera del
                     estado si entra a mirar. */}
                 <ActivarNotificaciones />
+
+                {/* Agendar cita sin salir de la app. Como el cliente ya se
+                    identificó con su placa, la cita entra al CRM vinculada a
+                    su ficha en vez de suelta como las del formulario web. */}
+                <MisCitas />
 
                 {/* ── COTIZACIONES PENDIENTES ──
                     Aprobar desde el celular sin llamada ni visita: el taller lo
