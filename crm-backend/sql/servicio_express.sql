@@ -70,7 +70,7 @@ commit;
 -- join ordenes_trabajo o on o.id = d.orden_id
 -- left join clientes c on c.id = d.cliente_id
 -- left join vehiculos v on v.id = d.vehiculo_id
--- where d.es_cortesia
+-- where (d.es_cortesia or o.es_express)
 --   and d.fallas_identificadas is not null
 --   and length(trim(d.fallas_identificadas)) > 20
 --   and d.created_at > now() - interval '180 days'

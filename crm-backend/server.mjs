@@ -2142,14 +2142,18 @@ app.post("/diagnosticos", async (req, res) => {
       console.warn(`⚠️ Transición DIAGNOSTICO para orden ${ordenId}: ${r1.error}`);
     }
 
-    // Paso 2: si el técnico cierra en el mismo POST (terminado=true) → ESPERANDO_APROBACION
+    // Paso 2: el técnico cierra en el mismo POST (terminado=true).
+    // Express → LISTO (no hay nada que aprobar). Normal → ESPERANDO_APROBACION.
     if (req.body.terminado === true) {
-      const r2 = await transicionarEstado(Number(ordenId), "ESPERANDO_APROBACION", {
+      const destino = await estadoTrasDiagnostico(ordenId);
+      const r2 = await transicionarEstado(Number(ordenId), destino, {
         usuarioId:     req.body.usuario_id    || null,
         usuarioNombre: req.body.usuario_nombre || "Técnico",
-        motivo: "Técnico cerró el diagnóstico",
+        motivo: destino === "LISTO"
+          ? "Servicio express completado — listo para entrega"
+          : "Técnico cerró el diagnóstico",
       });
-      if (!r2.ok) console.warn(`⚠️ Transición ESPERANDO_APROBACION orden ${ordenId}: ${r2.error}`);
+      if (!r2.ok) console.warn(`⚠️ Transición ${destino} orden ${ordenId}: ${r2.error}`);
     }
   }
 
@@ -2233,15 +2237,19 @@ app.patch("/diagnosticos/:id", async (req, res) => {
     }
   }
 
-  // ── Cuando el técnico cierra el diagnóstico → orden pasa a ESPERANDO_APROBACION ──
+  // ── El técnico cierra el diagnóstico ──
+  // Express → LISTO directo. Normal → ESPERANDO_APROBACION.
   if (req.body.estado === "TERMINADO" || req.body.terminado === true) {
     if (diag?.orden_id) {
-      const r = await transicionarEstado(Number(diag.orden_id), "ESPERANDO_APROBACION", {
+      const destino = await estadoTrasDiagnostico(diag.orden_id);
+      const r = await transicionarEstado(Number(diag.orden_id), destino, {
         usuarioId:     req.body.usuario_id     || null,
         usuarioNombre: req.body.usuario_nombre || "Técnico",
-        motivo: "Técnico cerró el diagnóstico — esperando aprobación del cliente",
+        motivo: destino === "LISTO"
+          ? "Servicio express completado — listo para entrega"
+          : "Técnico cerró el diagnóstico — esperando aprobación del cliente",
       });
-      if (!r.ok) console.warn(`⚠️ Transición ESPERANDO_APROBACION orden ${diag.orden_id}: ${r.error}`);
+      if (!r.ok) console.warn(`⚠️ Transición ${destino} orden ${diag.orden_id}: ${r.error}`);
     }
   }
 
@@ -2455,9 +2463,16 @@ app.post("/avances", async (req, res) => {
   // (NO desde ESPERANDO_APROBACION — esa transición requiere aprobación explícita del cliente)
   const oid = ordenIdResuelto || (diagId ? (await supabase.from("diagnosticos").select("orden_id").eq("id", diagId).single()).data?.orden_id : null);
   if (oid) {
-    const { data: ordenActualAvance } = await supabase.from("ordenes_trabajo").select("estado").eq("id", oid).maybeSingle();
+    const { data: ordenActualAvance } = await supabase
+      .from("ordenes_trabajo").select("estado, es_express").eq("id", oid).maybeSingle();
     const estadoParaAvance = ordenActualAvance?.estado;
-    if (estadoParaAvance === "DIAGNOSTICO") {
+
+    // En una orden express, anotar un avance NO debe empujarla a REPARACION:
+    // el técnico está documentando el cambio de aceite, no abriendo una
+    // reparación. Se queda en DIAGNOSTICO hasta que cierre y pase a LISTO.
+    // Este era el motivo real por el que el express seguía cayendo en el
+    // camino largo aunque la máquina de estados ya permitía el atajo.
+    if (estadoParaAvance === "DIAGNOSTICO" && !ordenActualAvance?.es_express) {
       const r = await transicionarEstado(Number(oid), "REPARACION", {
         usuarioId:     usuario_id    || null,
         usuarioNombre: tecnico_nombre || "Técnico",
@@ -6828,6 +6843,26 @@ const TRANSICIONES_VALIDAS = {
 const TRANSICIONES_EXPRESS = {
   DIAGNOSTICO: ["LISTO"],
 };
+
+/** ¿Esta orden está marcada como servicio express? */
+async function esOrdenExpress(ordenId) {
+  if (!ordenId) return false;
+  const { data } = await supabase
+    .from("ordenes_trabajo").select("es_express").eq("id", Number(ordenId)).maybeSingle();
+  return data?.es_express === true;
+}
+
+/**
+ * Estado al que debe ir la orden cuando el técnico cierra el diagnóstico.
+ *
+ * Permitir el salto en TRANSICIONES_EXPRESS no basta: la máquina de estados
+ * solo valida, no elige. Quien elige es el código que cierra el diagnóstico, y
+ * ese estaba mandando todo a ESPERANDO_APROBACION sin mirar si era express.
+ * Por eso la orden seguía cayendo en el camino largo.
+ */
+async function estadoTrasDiagnostico(ordenId) {
+  return (await esOrdenExpress(ordenId)) ? "LISTO" : "ESPERANDO_APROBACION";
+}
 
 /**
  * transicionarEstado — cambia el estado de una orden de forma controlada

@@ -163,7 +163,9 @@ function generarHTML(
   <div class="dos-col">
     <div class="info-box">
       <h3>${(factura.ncf_tipo && ["B01","B14","B15"].includes(factura.ncf_tipo)) ? "Comprobante Fiscal" : "Cliente"}</h3>
-      <p><strong>${factura.cliente_nombre || clienteExtra?.nombre || (factura.cliente_rnc ? "—" : "Consumidor Final")}</strong></p>
+      <!-- Nombre siempre en mayúscula: se captura de formas distintas según
+           quién digite, y en un comprobante fiscal debe verse uniforme. -->
+      <p><strong style="text-transform:uppercase">${factura.cliente_nombre || clienteExtra?.nombre || (factura.cliente_rnc ? "—" : "Consumidor Final")}</strong></p>
       ${(factura.cliente_rnc || clienteExtra?.rnc) ? `<p>RNC/Cédula: ${factura.cliente_rnc || clienteExtra.rnc}</p>` : ""}
       ${clienteExtra?.telefono ? `<p>Tel: ${clienteExtra.telefono}</p>` : ""}
       ${clienteExtra?.direccion ? `<p>${clienteExtra.direccion}</p>` : ""}
@@ -1485,7 +1487,7 @@ export default function FacturaPage() {
                   <tr key={f.id}>
                     <td style={td}><b>FAC-{String(f.id).padStart(5,"0")}</b></td>
                     <td style={{ ...td, fontSize: 11, fontFamily: "monospace" }}>{f.ncf}</td>
-                    <td style={td}>{f.cliente_nombre}</td>
+                    <td style={{ ...td, textTransform: "uppercase" }}>{f.cliente_nombre}</td>
                     <td style={td}>{f.metodo_pago}</td>
                     <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(f.total).toFixed(2)}</td>
                     <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{f.creado_por || "—"}</td>
@@ -1543,7 +1545,7 @@ export default function FacturaPage() {
                       <td style={td}><b>FAC-{String(f.id).padStart(5,"0")}</b></td>
                       <td style={{ ...td, fontSize: 11, fontFamily: "monospace" }}>{f.ncf}</td>
                       <td style={td}>{f.ncf_tipo}</td>
-                      <td style={td}>{f.cliente_nombre}</td>
+                      <td style={{ ...td, textTransform: "uppercase" }}>{f.cliente_nombre}</td>
                       <td style={{ ...td, fontSize: 12, color: "#888" }}>{f.cliente_rnc || "—"}</td>
                       <td style={td}>{f.metodo_pago}</td>
                       <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(f.total).toFixed(2)}</td>
@@ -1731,7 +1733,7 @@ export default function FacturaPage() {
                     </td>
                     <td style={{ ...td, fontFamily: "monospace", fontSize: 11, color: "#6b7280" }}>{f.ncf || "—"}</td>
                     <td style={td}>{f.ncf_tipo || "—"}</td>
-                    <td style={td}>{f.cliente_nombre || "Consumidor Final"}</td>
+                    <td style={{ ...td, textTransform: "uppercase" }}>{f.cliente_nombre || "Consumidor Final"}</td>
                     <td style={{ ...td, fontSize: 12, color: "#9ca3af" }}>{f.cliente_rnc || "—"}</td>
                     <td style={{ ...td, fontSize: 12, color: "#6b7280" }}>{f.vehiculo_info || "—"}</td>
                     <td style={td}>{f.metodo_pago || "—"}</td>

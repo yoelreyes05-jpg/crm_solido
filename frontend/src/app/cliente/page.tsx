@@ -309,13 +309,21 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   Expediente de Servicio — ${h.tipo_servicio || "Servicio"}
 </div>
 
+<!-- ══ Motivo de entrada ══
+     Destacado y en mayúsculas: es el dato que más se consulta de un vistazo,
+     y antes se perdía entre las demás filas del bloque de datos. -->
+${h.motivo_entrada ? `
+<div style="background:#eff6ff;border:2px solid #1e40af;border-radius:10px;padding:14px 16px;margin-bottom:14px">
+  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#1e40af;margin-bottom:5px">Motivo de entrada</div>
+  <div style="font-size:20px;font-weight:900;color:#1e3a8a;text-transform:uppercase;line-height:1.3;letter-spacing:.5px">${h.motivo_entrada}</div>
+</div>` : ""}
+
 <!-- ══ Datos generales ══ -->
 <div class="card">
   <div class="row"><span class="label">Fecha de servicio</span><span>${fmtDate(h.fecha_servicio)}</span></div>
   ${h.tecnico_nombre ? `<div class="row"><span class="label">Técnico asignado</span><span>${h.tecnico_nombre}</span></div>` : ""}
-  ${h.cliente_nombre ? `<div class="row"><span class="label">Cliente</span><span>${h.cliente_nombre}</span></div>` : ""}
+  ${h.cliente_nombre ? `<div class="row"><span class="label">Cliente</span><span style="text-transform:uppercase;font-weight:700">${h.cliente_nombre}</span></div>` : ""}
   ${h.cliente_telefono ? `<div class="row"><span class="label">Teléfono</span><span>${h.cliente_telefono}</span></div>` : ""}
-  ${h.motivo_entrada ? `<div class="row"><span class="label">Motivo de entrada</span><span>${h.motivo_entrada}</span></div>` : ""}
 </div>
 
 <!-- ══ Trabajo solicitado ══ -->
@@ -1053,7 +1061,12 @@ export default function ClienteApp() {
         .orden-header { display:flex; justify-content:space-between; align-items:center; margin-bottom:8px; }
         .orden-id    { font-family:'Syne',sans-serif; font-weight:800; font-size:15px; color:#f1f5f9; }
         .orden-badge { padding:4px 14px; border-radius:100px; font-size:11px; font-weight:700; }
-        .orden-desc  { font-size:13px; color:#64748b; line-height:1.6; }
+        /* El motivo del servicio en mayúscula y más grande: es lo que el
+           cliente busca de un vistazo al abrir la tarjeta. */
+        .orden-desc  {
+          font-size:15px; color:#e2e8f0; line-height:1.45; font-weight:700;
+          text-transform:uppercase; letter-spacing:.4px;
+        }
         .btn-wa-card {
           margin-top:14px; width:100%; padding:12px;
           background:linear-gradient(135deg,#14532d,#16a34a);
@@ -1377,7 +1390,7 @@ export default function ClienteApp() {
             {resultado && (
               <div>
                 <button onClick={cerrarSesion} className="btn-volver">
-                  ← Salir{sesion?.nombre ? ` (${sesion.nombre.split(" ")[0]})` : ""}
+                  ← Salir{sesion?.nombre ? ` (${sesion.nombre.split(" ")[0].toUpperCase()})` : ""}
                 </button>
 
                 {/* Avisos automáticos: sin esto el cliente solo se entera del
@@ -1796,7 +1809,7 @@ export default function ClienteApp() {
                           )}
                           {/* Cliente — disponible inmediatamente sin esperar el fetch async */}
                           {(histDetalle.cliente_nombre || histDetalleCompleto?.cliente?.nombre) && (
-                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:4 }}>
+                            <div style={{ fontSize:12, color:"#94a3b8", marginTop:4, textTransform:"uppercase" }}>
                               👤 {histDetalle.cliente_nombre || histDetalleCompleto?.cliente?.nombre}
                               {(histDetalle.cliente_telefono || histDetalleCompleto?.cliente?.telefono) && (
                                 <span style={{ marginLeft:6, color:"#60a5fa" }}>
