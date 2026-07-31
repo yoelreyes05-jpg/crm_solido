@@ -955,13 +955,31 @@ app.get("/vehiculos", async (req, res) => {
 });
 
 app.post("/vehiculos", async (req, res) => {
-  const { cliente_id, marca, modelo, ano, placa, color, vin, motor, combustible, vin_data } = req.body;
+  const { cliente_id, marca, modelo, ano, placa, color, vin, motor, combustible, vin_data,
+          cilindros, tipo_aceite, km_actual } = req.body;
   const { data, error } = await supabase.from("vehiculos")
     .insert([{ cliente_id, marca, modelo, ano, placa, color,
       vin: vin || null, motor: motor || null,
-      combustible: combustible || null, vin_data: vin_data || null }])
+      combustible: combustible || null, vin_data: vin_data || null,
+      cilindros: cilindros ?? null, tipo_aceite: tipo_aceite || null }])
     .select();
   if (error) return res.json({ error: error.message });
+
+  // El kilometraje se captura al registrar el vehículo, no en la inspección.
+  // Esta es la lectura inicial del odómetro: a partir de ella el sistema
+  // calcula el ritmo de uso y avisa cuándo toca el cambio de aceite.
+  if (km_actual != null && Number(km_actual) > 0 && data?.[0]?.id) {
+    const { error: errKm } = await supabase.from("vehiculo_odometro").insert([{
+      vehiculo_id: data[0].id,
+      km: Number(km_actual),
+      origen: "REGISTRO",
+      usuario: usuarioDesdeReq(req).nombre,
+      notas: "Lectura inicial al registrar el vehículo",
+    }]);
+    // Un fallo aquí no debe tumbar el registro del vehículo: se avisa y ya.
+    if (errKm) console.warn("[odometro] no se guardó la lectura inicial:", errKm.message);
+  }
+
   res.json(data[0]);
 });
 
@@ -982,13 +1000,77 @@ app.delete("/vehiculos/:id", async (req, res) => {
 
 app.patch("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
-  const campos = ["cliente_id","marca","modelo","ano","placa","color","vin","motor","combustible","vin_data"].reduce((o, k) => {
+  const campos = ["cliente_id","marca","modelo","ano","placa","color","vin","motor","combustible","vin_data",
+                  "cilindros","tipo_aceite"].reduce((o, k) => {
     if (req.body[k] !== undefined) o[k] = req.body[k];
     return o;
   }, {});
   const { data, error } = await supabase.from("vehiculos").update(campos).eq("id", id).select();
   if (error) return res.json({ error: error.message });
+
+  // km_actual no es una columna del vehículo: es una lectura nueva del
+  // odómetro. Solo se agrega si la escribieron en el formulario.
+  if (req.body.km_actual != null && Number(req.body.km_actual) > 0) {
+    const { error: errKm } = await supabase.rpc("vehiculo_registrar_km", {
+      p_vehiculo_id: Number(id),
+      p_km: Number(req.body.km_actual),
+      p_usuario: usuarioDesdeReq(req).nombre,
+      p_notas: "Lectura registrada al editar el vehículo",
+    });
+    // La función rechaza lecturas que retroceden — eso se le informa al usuario.
+    if (errKm) return res.json({ ...data[0], aviso_km: errKm.message });
+  }
+
   res.json(data[0]);
+});
+
+// ── Odómetro ────────────────────────────────────────────────────────────────
+// Historial de lecturas de kilometraje. Alimenta la proyección de uso y las
+// alertas de mantenimiento vencido (ver migracion_v24).
+
+app.get("/vehiculos/:id/odometro", async (req, res) => {
+  const { id } = req.params;
+  const [{ data: lecturas, error }, { data: est }] = await Promise.all([
+    supabase.from("vehiculo_odometro").select("*")
+      .eq("vehiculo_id", id).order("fecha", { ascending: false }).limit(50),
+    supabase.rpc("vehiculo_km_estimado", { p_vehiculo_id: Number(id) }),
+  ]);
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  res.json({ lecturas: lecturas || [], estimado: est?.[0] || null });
+});
+
+app.post("/vehiculos/:id/odometro", async (req, res) => {
+  const { id } = req.params;
+  const { km, notas } = req.body;
+  if (km == null || Number(km) <= 0) {
+    return res.status(400).json({ error: true, mensaje: "El kilometraje es requerido" });
+  }
+  const { data, error } = await supabase.rpc("vehiculo_registrar_km", {
+    p_vehiculo_id: Number(id),
+    p_km: Number(km),
+    p_usuario: usuarioDesdeReq(req).nombre,
+    p_notas: notas || null,
+  });
+  if (error) return res.status(400).json({ error: true, mensaje: error.message });
+  logAccion(req, { accion: "CREAR", modulo: "vehiculos", registroId: id,
+    descripcion: `Registró kilometraje ${km} km` });
+  res.json(data);
+});
+
+// Vehículos con el cambio de aceite vencido o próximo según kilometraje
+// proyectado. Este es el caso del cliente que vino por otra cosa y su aceite
+// ya había vencido — antes esa venta se perdía.
+app.get("/mantenimiento/alertas-km", async (req, res) => {
+  const estados = req.query.estado
+    ? String(req.query.estado).split(",")
+    : ["VENCIDO", "POR_VENCER"];
+  const { data, error } = await supabase
+    .from("v_alertas_mantenimiento_km")
+    .select("*")
+    .in("estado", estados)
+    .order("km_restantes", { ascending: true });
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  res.json(data || []);
 });
 
 // =====================================================
@@ -10108,6 +10190,27 @@ app.get("/planes", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Cotizador de membresía ─────────────────────────────────────────────────
+// El precio de un plan NO es único: depende del cilindraje, porque un V8
+// consume 7 cuartos de aceite y un L4 consume 4.5. Esta ruta recibe el
+// vehículo y devuelve el precio correcto, cuántos cuartos lleva, qué aceite
+// exacto se le pone y cuánto ahorra el cliente.
+app.get("/planes/cotizar", async (req, res) => {
+  const { plan_id, vehiculo_id } = req.query;
+  if (!plan_id || !vehiculo_id) {
+    return res.status(400).json({ error: true, mensaje: "plan_id y vehiculo_id son requeridos" });
+  }
+  const { data, error } = await supabase.rpc("plan_cotizar_membresia", {
+    p_plan_id: Number(plan_id),
+    p_vehiculo_id: Number(vehiculo_id),
+  });
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  if (!data || !data.length) {
+    return res.status(404).json({ error: true, mensaje: "No se pudo cotizar ese plan para ese vehículo" });
+  }
+  res.json(data[0]);
+});
+
 app.post("/planes", async (req, res) => {
   try {
     const { nombre, emoji, color, descripcion, precio_mensual, precio_anual, orden } = req.body;
@@ -10287,7 +10390,27 @@ app.post("/planes/membresias", async (req, res) => {
       return res.status(400).json({ error: `${plan.nombre} cubre máximo ${vmax} vehículo(s); seleccionaste ${vehIds.length}` });
 
     const esAnual = String(ciclo || "MENSUAL").toUpperCase() === "ANUAL";
-    const monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+
+    // El precio depende del cilindraje del vehículo: un V8 consume 7 cuartos
+    // de aceite y un L4 consume 4.5, así que no pueden pagar lo mismo. Se
+    // cotiza contra el primer vehículo amarrado; si no hay ninguno, se cae al
+    // precio de catálogo (que es el de referencia, 4 cilindros).
+    let monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+    let cotizado = false;
+    if (vehIds.length) {
+      const { data: cot, error: errCot } = await supabase.rpc("plan_cotizar_membresia", {
+        p_plan_id: Number(plan_id),
+        p_vehiculo_id: vehIds[0],
+      });
+      if (!errCot && cot?.[0]) {
+        const c = cot[0];
+        const m = esAnual ? Number(c.precio_anual || 0) : Number(c.precio_mensual || 0);
+        if (m > 0) { monto = m; cotizado = true; }
+      } else if (errCot) {
+        console.warn("[planes] no se pudo cotizar por cilindraje:", errCot.message);
+      }
+    }
+
     const inicio = hoyPlanRD();
     const renov = new Date(`${inicio}T12:00:00Z`);
     if (esAnual) renov.setUTCFullYear(renov.getUTCFullYear() + 1);
@@ -10313,7 +10436,8 @@ app.post("/planes/membresias", async (req, res) => {
       await supabase.from("plan_pagos").insert([{
         membresia_id: memb[0].id, cliente_id: Number(cliente_id), monto,
         metodo: metodo_pago || "EFECTIVO",
-        concepto: `Inscripción ${plan.nombre} (${esAnual ? "anual" : "mensual"})`,
+        concepto: `Inscripción ${plan.nombre} (${esAnual ? "anual" : "mensual"})`
+          + (cotizado ? " — tarifa según cilindraje del vehículo" : ""),
         usuario: usuario || "Sistema",
       }]);
       await supabase.from("caja_movimientos").insert([{

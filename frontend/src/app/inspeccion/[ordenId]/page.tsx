@@ -63,6 +63,9 @@ export default function InspeccionPage() {
 
   // Formulario
   const [kmEntrada, setKmEntrada]     = useState("");
+  // Última lectura conocida del odómetro, para sugerir el km en vez de pedirlo
+  // en blanco. Se captura al registrar el vehículo (ver /vehiculos).
+  const [odometro, setOdometro]       = useState<any>(null);
   const [combustible, setCombustible] = useState(50);
   const [condicion, setCondicion]     = useState("Buena");
   const [zonas, setZonas]             = useState<ZonaDanio[]>([]);
@@ -99,6 +102,11 @@ export default function InspeccionPage() {
   // ── Cargar datos ──────────────────────────────────────────────────────────
   useEffect(() => {
     const cargar = async () => {
+      // Se guarda aquí porque los dos caminos de carga (endpoint directo y
+      // fallback por lista) lo resuelven en scopes distintos, y más abajo
+      // hace falta para traer el kilometraje del vehículo.
+      let vehiculoId: any = null;
+
       try {
         const [oRes, iRes] = await Promise.all([
           fetch(`${API}/ordenes/${ordenId}`),
@@ -112,9 +120,11 @@ export default function InspeccionPage() {
             // El endpoint /ordenes/:id devuelve { orden, cliente, vehiculo, ... }
             if (json?.orden) {
               setOrden(json); // ya tiene la estructura esperada
+              vehiculoId = json.vehiculo?.id ?? json.orden?.vehiculo_id ?? null;
             } else if (json?.id) {
               // respuesta directa sin wrapper
               setOrden({ orden: json, cliente: null, vehiculo: null, diagnostico: null, log: [], inspeccion: null });
+              vehiculoId = json.vehiculo_id ?? null;
             }
           } catch (_e) { /* JSON parse error */ }
         }
@@ -131,6 +141,7 @@ export default function InspeccionPage() {
                 found.vehiculo_id ? fetch(`${API}/vehiculos/${found.vehiculo_id}`).then(r => r.ok ? r.json() : null).catch(() => null) : Promise.resolve(null),
               ]);
               setOrden({ orden: found, cliente: cliRes, vehiculo: vehRes, diagnostico: null, log: [], inspeccion: null });
+              vehiculoId = found.vehiculo_id ?? null;
             }
           } catch (_e) { /* fallback silencioso */ }
         }
@@ -187,6 +198,26 @@ export default function InspeccionPage() {
             }
           } catch (_e) { /* JSON parse error inspeccion */ }
         }
+
+        // ── Kilometraje: ya no se pide en blanco ───────────────────────────
+        // El km se captura al registrar el vehículo y en cada visita, así que
+        // aquí se muestra la última lectura conocida (o la proyección de uso)
+        // como sugerencia. El recepcionista solo confirma o corrige.
+        try {
+          if (vehiculoId) {
+            const r = await fetch(`${API}/vehiculos/${vehiculoId}/odometro`);
+            if (r.ok) {
+              const odo = await r.json();
+              setOdometro(odo);
+              // Solo sugerir si el usuario no tiene ya un valor cargado
+              setKmEntrada(prev => {
+                if (prev) return prev;
+                const sug = odo?.estimado?.km_estimado_hoy ?? odo?.estimado?.km_ultima_lectura;
+                return sug ? String(sug) : "";
+              });
+            }
+          }
+        } catch (_e) { /* si falla, el campo queda vacío y se teclea a mano */ }
       } catch (err) { console.error(err); }
       setLoading(false);
     };
@@ -366,6 +397,21 @@ export default function InspeccionPage() {
             <label style={sty.label}>Kilómetros al recibir</label>
             <input type="number" value={kmEntrada} onChange={e => setKmEntrada(e.target.value)}
               placeholder="Ej: 85000" style={sty.input} />
+            {/* El dato ya viene del registro del vehículo y de visitas
+                anteriores: aquí solo se confirma o se corrige. */}
+            {odometro?.estimado?.km_ultima_lectura != null && (
+              <p style={{ fontSize: 11, color: "#93c5fd", marginTop: -8 }}>
+                Última lectura: <strong>{Number(odometro.estimado.km_ultima_lectura).toLocaleString("es-DO")} km</strong>
+                {odometro.estimado.fecha_ultima && ` (${new Date(odometro.estimado.fecha_ultima).toLocaleDateString("es-DO")})`}
+                {odometro.estimado.km_por_mes ? ` · rueda ~${Number(odometro.estimado.km_por_mes).toLocaleString("es-DO")} km/mes` : ""}
+              </p>
+            )}
+            {kmEntrada && odometro?.estimado?.km_ultima_lectura != null &&
+             Number(kmEntrada) < Number(odometro.estimado.km_ultima_lectura) && (
+              <p style={{ fontSize: 11, color: "#f87171", marginTop: -4 }}>
+                ⚠️ Es menor que la última lectura ({Number(odometro.estimado.km_ultima_lectura).toLocaleString("es-DO")} km). Verifica el dato.
+              </p>
+            )}
           </div>
           <div>
             <label style={sty.label}>Condición general</label>

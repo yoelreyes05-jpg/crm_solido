@@ -315,6 +315,27 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
     setVehSel([...vehSel, id]);
   };
 
+  // ── Cotización por vehículo ───────────────────────────────────────────────
+  // El precio del plan NO es único: un V6 consume más aceite que un L4, así que
+  // paga más. Antes la pantalla mostraba el precio de catálogo (el de 4
+  // cilindros) sin importar el vehículo, y esa era la cifra que se cobraba.
+  // Ahora, al elegir plan + vehículo, el backend devuelve el precio real.
+  const [cotizacion, setCotizacion] = useState<any>(null);
+  const [cotizando, setCotizando]   = useState(false);
+
+  useEffect(() => {
+    const primerVeh = vehSel[0];
+    if (!form.plan_id || !primerVeh) { setCotizacion(null); return; }
+    let cancelado = false;
+    setCotizando(true);
+    fetch(`${API}/planes/cotizar?plan_id=${form.plan_id}&vehiculo_id=${primerVeh}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelado) setCotizacion(d && !d.error ? d : null); })
+      .catch(() => { if (!cancelado) setCotizacion(null); })
+      .finally(() => { if (!cancelado) setCotizando(false); });
+    return () => { cancelado = true; };
+  }, [form.plan_id, vehSel]);
+
   const inscribir = async () => {
     if (!form.cliente_id || !form.plan_id) return alert("Selecciona cliente y plan");
     if (vehiculosDelCliente.length > 0 && vehSel.length === 0 &&
@@ -572,7 +593,51 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
           <option value="TRANSFERENCIA">🏦 Transferencia</option>
         </select>
 
-        {form.plan_id && (
+        {/* ── Cotización según el vehículo ────────────────────────────────
+            Si hay vehículo seleccionado, el precio sale del cilindraje real.
+            Si no, se muestra el de catálogo advirtiendo que es referencial. */}
+        {form.plan_id && cotizacion && (
+          <div style={{ background: "#eef2ff", border: "1px solid #c7d2fe", borderRadius: 9, padding: "12px 14px", fontSize: 13, marginBottom: 12, color: "#1e1b4b" }}>
+            <div style={{ fontWeight: 800, marginBottom: 6 }}>
+              🚗 {cotizacion.vehiculo} · {cotizacion.cilindros} cilindros
+            </div>
+
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+              <span>Cobro hoy</span>
+              <b style={{ color: "#4f46e5", fontSize: 15 }}>
+                {fmt(form.ciclo === "ANUAL" ? cotizacion.precio_anual : cotizacion.precio_mensual)}
+              </b>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+              <span>Mantenimientos al año</span>
+              <b>{Number(cotizacion.mantenimientos_ano)} · cada {Number(cotizacion.intervalo_km).toLocaleString("es-DO")} km</b>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+              <span>Aceite por servicio</span>
+              <b>{Number(cotizacion.cuartos)} cuartos · {cotizacion.aceite_nombre}</b>
+            </div>
+
+            <div style={{ borderTop: "1px solid #c7d2fe", marginTop: 8, paddingTop: 8, display: "flex", justifyContent: "space-between" }}>
+              <span>El cliente ahorra</span>
+              <b style={{ color: "#059669" }}>
+                {fmt(cotizacion.ahorro_ano)} al año ({Number(cotizacion.ahorro_pct)}%)
+              </b>
+            </div>
+
+            {cotizacion.precio_es_sugerido && (
+              <div style={{ marginTop: 8, fontSize: 11, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 8px" }}>
+                ⚠️ Precio calculado automáticamente: no hay tarifa fijada para {cotizacion.cilindros} cilindros.
+              </div>
+            )}
+            {cotizacion.aviso && (
+              <div style={{ marginTop: 6, fontSize: 11, color: "#92400e", background: "#fef3c7", borderRadius: 6, padding: "6px 8px" }}>
+                ⚠️ {cotizacion.aviso}
+              </div>
+            )}
+          </div>
+        )}
+
+        {form.plan_id && !cotizacion && (
           <div style={{ background: "#f8fafc", borderRadius: 9, padding: "10px 12px", fontSize: 13, marginBottom: 12, color: "#334155" }}>
             Cobro hoy: <b style={{ color: "#6366f1" }}>
               {(() => {
@@ -580,7 +645,12 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                 if (!p) return "—";
                 return fmt(form.ciclo === "ANUAL" ? p.precio_anual : p.precio_mensual);
               })()}
-            </b> · entra a caja y a ingresos del plan automáticamente.
+            </b>
+            {cotizando
+              ? " · calculando precio del vehículo…"
+              : vehSel.length === 0
+                ? " · precio de referencia. Selecciona el vehículo para el precio real según su cilindraje."
+                : " · entra a caja y a ingresos del plan automáticamente."}
           </div>
         )}
 

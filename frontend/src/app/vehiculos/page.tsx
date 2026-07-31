@@ -14,10 +14,14 @@ export default function Vehiculos() {
 
   const [form, setForm] = useState({
     cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "",
-    vin: "", motor: "", combustible: ""
+    vin: "", motor: "", combustible: "",
+    // Datos que alimentan los planes de mantenimiento y las alertas por uso.
+    // Se piden AQUI, al registrar el vehiculo, para que la inspeccion ya los
+    // tenga listos y nadie tenga que teclearlos dos veces.
+    cilindros: "", tipo_aceite: "", km_actual: ""
   });
   const [editVehiculo, setEditVehiculo] = useState<any>(null);
-  const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "", vin: "", motor: "", combustible: "" });
+  const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "", vin: "", motor: "", combustible: "", cilindros: "", tipo_aceite: "", km_actual: "" });
   const [savingEdit, setSavingEdit] = useState(false);
   const [decodandoVIN, setDecodandoVIN] = useState(false);
   const [vinEstado, setVinEstado] = useState<"ok"|"error"|"">("");
@@ -67,7 +71,19 @@ export default function Vehiculos() {
     if (!form.modelo) return "Selecciona un modelo";
     if (!form.ano) return "Selecciona el año";
     if (!form.placa.trim()) return "Ingresa la placa";
+    if (form.km_actual !== "" && (Number(form.km_actual) < 0 || Number(form.km_actual) > 2000000))
+      return "El kilometraje no parece válido";
     return null;
+  };
+
+  // El motor viene del decodificador de VIN como texto ("3.5L V6", "1.5L L4").
+  // De ahí se saca el cilindraje sin que nadie lo teclee.
+  const cilindrosDesdeMotor = (motor: string): string => {
+    const m = String(motor || "").toUpperCase();
+    const hit = m.match(/\b[VLIH]-?(\d{1,2})\b/) || m.match(/(\d{1,2})\s*CIL/);
+    if (!hit) return "";
+    const n = Number(hit[1]);
+    return [3, 4, 5, 6, 8, 10, 12].includes(n) ? String(n) : "";
   };
 
   const crearVehiculo = async () => {
@@ -88,12 +104,16 @@ export default function Vehiculos() {
           vin:         form.vin.trim().toUpperCase() || null,
           motor:       form.motor || null,
           combustible: form.combustible || null,
+          cilindros:   form.cilindros ? Number(form.cilindros) : null,
+          tipo_aceite: form.tipo_aceite || null,
+          // El backend crea la primera lectura de odómetro con este valor.
+          km_actual:   form.km_actual !== "" ? Number(form.km_actual) : null,
         })
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
       alert("✅ Vehículo registrado correctamente");
-      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "", vin: "", motor: "", combustible: "" });
+      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "", vin: "", motor: "", combustible: "", cilindros: "", tipo_aceite: "", km_actual: "" });
       setVinEstado("");
       await getVehiculos();
     } catch { alert("Error al guardar"); }
@@ -112,7 +132,7 @@ export default function Vehiculos() {
 
   const abrirEdicion = (v: any) => {
     setEditVehiculo(v);
-    setEditForm({ marca: v.marca, modelo: v.modelo, ano: String(v.ano), placa: v.placa, color: v.color || "", cliente_id: String(v.cliente_id || ""), vin: v.vin || "", motor: v.motor || "", combustible: v.combustible || "" });
+    setEditForm({ marca: v.marca, modelo: v.modelo, ano: String(v.ano), placa: v.placa, color: v.color || "", cliente_id: String(v.cliente_id || ""), vin: v.vin || "", motor: v.motor || "", combustible: v.combustible || "", cilindros: v.cilindros ? String(v.cilindros) : "", tipo_aceite: v.tipo_aceite || "", km_actual: "" });
   };
 
   const guardarEdicion = async () => {
@@ -122,7 +142,17 @@ export default function Vehiculos() {
       const res = await fetch(`${API}/vehiculos/${editVehiculo.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ ...editForm, ano: Number(editForm.ano), cliente_id: Number(editForm.cliente_id), placa: editForm.placa.toUpperCase().trim() }),
+        body: JSON.stringify({
+          ...editForm,
+          ano: Number(editForm.ano),
+          cliente_id: Number(editForm.cliente_id),
+          placa: editForm.placa.toUpperCase().trim(),
+          cilindros: editForm.cilindros ? Number(editForm.cilindros) : null,
+          tipo_aceite: editForm.tipo_aceite || null,
+          // Solo se manda si la escribieron: es una lectura nueva de odómetro,
+          // no un campo del vehículo que se sobreescriba en cada edición.
+          km_actual: editForm.km_actual !== "" ? Number(editForm.km_actual) : undefined,
+        }),
       });
       const data = await res.json();
       if (data.error) return alert("Error: " + data.error);
@@ -259,7 +289,13 @@ export default function Vehiculos() {
             <div>
               <label style={label}>Motor</label>
               <input placeholder="Ej: 1.5L L4" value={form.motor}
-                onChange={e => setForm({ ...form, motor: e.target.value })}
+                onChange={e => {
+                  const motor = e.target.value;
+                  // Si el cilindraje aún está vacío, se deduce del texto del
+                  // motor. Si ya lo eligieron a mano, no se pisa.
+                  const auto = cilindrosDesdeMotor(motor);
+                  setForm(f => ({ ...f, motor, cilindros: f.cilindros || auto }));
+                }}
                 style={{ ...input, marginBottom: 0 }} />
             </div>
             <div>
@@ -277,6 +313,57 @@ export default function Vehiculos() {
             </div>
           </div>
           <div style={{ height: 10 }} />
+
+          {/* ── Mantenimiento: cilindraje, aceite y kilometraje ──────────────
+              Estos tres datos se piden al REGISTRAR el vehículo. Con ellos el
+              sistema calcula solo el precio de la membresía, cuántos cuartos
+              de aceite lleva, y cuándo le toca el próximo cambio. La hoja de
+              inspección ya no tiene que pedir el kilometraje en blanco. */}
+          <div style={{ background: "#0b2545", border: "1px solid #1e3a5f", borderRadius: 10, padding: 12, marginBottom: 10 }}>
+            <label style={{ ...label, color: "#93c5fd", marginBottom: 6 }}>🔧 Datos de mantenimiento</label>
+            <p style={{ fontSize: 11, color: "#93c5fd", marginTop: 0, marginBottom: 10 }}>
+              Con esto se calcula el plan de mantenimiento y las alertas por kilometraje.
+            </p>
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={label}>Cilindros</label>
+                <select value={form.cilindros}
+                  onChange={e => setForm({ ...form, cilindros: e.target.value })}
+                  style={{ ...input, marginBottom: 0 }}>
+                  <option value="">— Seleccionar —</option>
+                  <option value="3">3 cilindros</option>
+                  <option value="4">4 cilindros</option>
+                  <option value="5">5 cilindros</option>
+                  <option value="6">6 cilindros (V6)</option>
+                  <option value="8">8 cilindros (V8)</option>
+                  <option value="10">10 cilindros</option>
+                  <option value="12">12 cilindros</option>
+                </select>
+              </div>
+              <div>
+                <label style={label}>Tipo de aceite</label>
+                <select value={form.tipo_aceite}
+                  onChange={e => setForm({ ...form, tipo_aceite: e.target.value })}
+                  style={{ ...input, marginBottom: 0 }}>
+                  <option value="">— Seleccionar —</option>
+                  <option value="MINERAL">Mineral (cada 3,000 km)</option>
+                  <option value="SEMISINTETICO">Semisintético (cada 5,000 km)</option>
+                  <option value="SINTETICO">Sintético (cada 8,000 km)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ height: 10 }} />
+            <label style={label}>Kilometraje actual</label>
+            <input type="number" min={0} placeholder="Ej: 87500" value={form.km_actual}
+              onChange={e => setForm({ ...form, km_actual: e.target.value })}
+              style={{ ...input, marginBottom: 0 }} />
+            <p style={{ fontSize: 11, color: "#93c5fd", marginTop: 6, marginBottom: 0 }}>
+              Se guarda como la primera lectura del odómetro. A partir de aquí el
+              sistema estima cuánto rueda al mes y avisa cuándo toca el aceite.
+            </p>
+          </div>
 
           <button onClick={crearVehiculo} disabled={loading} style={btnPrimary}>
             {loading ? "Guardando..." : "💾 Guardar Vehículo"}
@@ -402,6 +489,47 @@ export default function Vehiculos() {
                   <option>Híbrido Enchufable</option><option>Gas Natural</option>
                 </select>
               </div>
+            </div>
+
+            {/* ── Mantenimiento ─────────────────────────────────────────── */}
+            <div style={{ borderTop: "1px solid #1e3a5f", marginTop: 14, paddingTop: 12 }}>
+              <label style={{ ...label, color: "#93c5fd", marginBottom: 8 }}>🔧 Datos de mantenimiento</label>
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+                <div>
+                  <label style={label}>Cilindros</label>
+                  <select value={editForm.cilindros}
+                    onChange={e => setEditForm(f => ({ ...f, cilindros: e.target.value }))}
+                    style={{ ...input, marginBottom: 0 }}>
+                    <option value="">—</option>
+                    <option value="3">3</option><option value="4">4</option>
+                    <option value="5">5</option><option value="6">6 (V6)</option>
+                    <option value="8">8 (V8)</option><option value="10">10</option>
+                    <option value="12">12</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={label}>Tipo de aceite</label>
+                  <select value={editForm.tipo_aceite}
+                    onChange={e => setEditForm(f => ({ ...f, tipo_aceite: e.target.value }))}
+                    style={{ ...input, marginBottom: 0 }}>
+                    <option value="">—</option>
+                    <option value="MINERAL">Mineral</option>
+                    <option value="SEMISINTETICO">Semisintético</option>
+                    <option value="SINTETICO">Sintético</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{ height: 10 }} />
+              <label style={label}>Nueva lectura de kilometraje (opcional)</label>
+              <input type="number" min={0} placeholder="Dejar vacío si no cambió"
+                value={editForm.km_actual}
+                onChange={e => setEditForm(f => ({ ...f, km_actual: e.target.value }))}
+                style={{ ...input, marginBottom: 0 }} />
+              <p style={{ fontSize: 11, color: "#93c5fd", marginTop: 6, marginBottom: 0 }}>
+                Agrega una lectura nueva al historial. No borra las anteriores.
+              </p>
             </div>
 
             <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
