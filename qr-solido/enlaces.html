@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Sólido Auto Servicio — Enlaces</title>
+<meta name="theme-color" content="#080c14">
+<meta name="description" content="Consulta el estado de tu vehículo, agenda tu cita y contáctanos.">
+
+<!-- Al compartir el enlace por WhatsApp aparece con imagen y descripción en vez
+     de como una URL pelada. -->
+<meta property="og:title" content="Sólido Auto Servicio">
+<meta property="og:description" content="Consulta tu vehículo, agenda tu cita y escríbenos.">
+<meta property="og:image" content="https://solidoautoservicio.online/logo.png">
+<meta property="og:type" content="website">
+
+<link rel="icon" href="/logo.png">
+<link rel="apple-touch-icon" href="/logo.png">
+
+<style>
+  :root {
+    --fondo:  #080c14;
+    --carta:  rgba(255,255,255,.04);
+    --borde:  rgba(255,255,255,.09);
+    --texto:  #e8edf5;
+    --suave:  #8b98ac;
+    --oro:    #d9a441;
+  }
+
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    padding: 32px 20px 40px;
+    background:
+      radial-gradient(900px 500px at 50% -10%, rgba(217,164,65,.10), transparent 60%),
+      var(--fondo);
+    color: var(--texto);
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Arial, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .marco { width: 100%; max-width: 420px; }
+
+  /* ── Cabecera ── */
+  .logo {
+    display: block;
+    width: 104px; height: 104px;
+    margin: 0 auto 18px;
+    border-radius: 24px;
+    object-fit: cover;
+    box-shadow: 0 10px 34px rgba(0,0,0,.55);
+  }
+  h1 {
+    margin: 0;
+    text-align: center;
+    font-size: 21px;
+    font-weight: 800;
+    letter-spacing: .6px;
+  }
+  .lema {
+    margin: 7px 0 30px;
+    text-align: center;
+    font-size: 13px;
+    color: var(--suave);
+  }
+
+  /* ── Botones ── */
+  .opcion {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    width: 100%;
+    padding: 17px 18px;
+    margin-bottom: 12px;
+    background: var(--carta);
+    border: 1px solid var(--borde);
+    border-radius: 17px;
+    color: var(--texto);
+    text-decoration: none;
+    transition: transform .14s ease, background .14s ease, border-color .14s ease;
+  }
+  .opcion:active { transform: scale(.985); background: rgba(255,255,255,.07); }
+
+  /* Destacada: es la que resuelve la consulta más frecuente ("¿ya está mi
+     carro?"), así que se separa visualmente de las demás. */
+  .opcion.principal {
+    background: linear-gradient(135deg, rgba(217,164,65,.16), rgba(217,164,65,.05));
+    border-color: rgba(217,164,65,.34);
+  }
+
+  .icono {
+    flex: none;
+    width: 46px; height: 46px;
+    display: grid; place-items: center;
+    border-radius: 13px;
+    font-size: 22px;
+    background: rgba(255,255,255,.06);
+  }
+  .opcion.principal .icono { background: rgba(217,164,65,.18); }
+
+  .txt { flex: 1; min-width: 0; }
+  .txt b { display: block; font-size: 15px; font-weight: 700; }
+  .txt span { display: block; margin-top: 3px; font-size: 12.5px; color: var(--suave); line-height: 1.45; }
+  .flecha { flex: none; color: var(--suave); font-size: 19px; }
+
+  /* ── Contacto ── */
+  .directo {
+    display: flex;
+    gap: 10px;
+    margin-top: 22px;
+  }
+  .directo a {
+    flex: 1;
+    padding: 13px 8px;
+    text-align: center;
+    background: var(--carta);
+    border: 1px solid var(--borde);
+    border-radius: 14px;
+    color: var(--texto);
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 600;
+  }
+
+  .pie {
+    margin-top: 26px;
+    text-align: center;
+    font-size: 11.5px;
+    color: var(--suave);
+    line-height: 1.75;
+  }
+  .pie strong { color: var(--texto); font-weight: 600; }
+</style>
+</head>
+
+<body>
+<div class="marco">
+
+  <img class="logo" src="/logo.png" alt="Sólido Auto Servicio">
+  <h1>SÓLIDO AUTO SERVICIO</h1>
+  <p class="lema">Más que un taller, una experiencia</p>
+
+  <!-- ── App del cliente ── -->
+  <a class="opcion principal" href="https://crm-solido.vercel.app/cliente">
+    <span class="icono">🚗</span>
+    <span class="txt">
+      <b>Estado de mi vehículo</b>
+      <span>Mira en qué va tu reparación, agenda tu cita y activa los avisos</span>
+    </span>
+    <span class="flecha">›</span>
+  </a>
+
+  <!-- ── Telegram ── -->
+  <a class="opcion" href="https://t.me/solidoautoservicios_bot">
+    <span class="icono">💬</span>
+    <span class="txt">
+      <b>Chatear por Telegram</b>
+      <span>Consulta por placa y agenda tu cita desde el chat</span>
+    </span>
+    <span class="flecha">›</span>
+  </a>
+
+  <!-- ── Sitio web ── -->
+  <a class="opcion" href="https://solidoautoservicio.online">
+    <span class="icono">🌐</span>
+    <span class="txt">
+      <b>Nuestro sitio web</b>
+      <span>Servicios, precios de referencia y agendar cita</span>
+    </span>
+    <span class="flecha">›</span>
+  </a>
+
+  <!-- ── Contacto directo ── -->
+  <div class="directo">
+    <a href="https://wa.me/18495692027">WhatsApp</a>
+    <a href="tel:+18495692027">Llamar</a>
+  </div>
+
+  <p class="pie">
+    <strong>849-569-2027</strong><br>
+    Lun a Vie 8:00 AM – 6:00 PM<br>
+    Sábados 8:00 AM – 4:00 PM<br>
+    Santo Domingo, República Dominicana
+  </p>
+
+</div>
+</body>
+</html>
