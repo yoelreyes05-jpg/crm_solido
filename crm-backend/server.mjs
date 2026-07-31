@@ -11343,7 +11343,10 @@ app.post("/recordatorios/enviado", async (req, res) => {
     }
 
     if (cliente_id) {
-      const refPrefix = tipo === "seguimiento" ? "seguimiento" : (tipo === "cita" ? "recordatorio-cita" : "recordatorio-mant");
+      const refPrefix = tipo === "seguimiento" ? "seguimiento"
+        : tipo === "cita" ? "recordatorio-cita"
+        : tipo === "km"   ? "alerta-km"          // aviso por kilometraje vencido
+        : "recordatorio-mant";
       await supabase.from("cliente_interacciones").insert([{
         cliente_id, vehiculo_id: vehiculo_id || null, tipo: "WHATSAPP",
         descripcion: mensaje ? `WhatsApp enviado: "${String(mensaje).slice(0, 300)}"` : `WhatsApp de ${tipo} enviado`,

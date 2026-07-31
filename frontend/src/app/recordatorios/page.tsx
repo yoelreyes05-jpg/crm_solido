@@ -26,6 +26,16 @@ const PLANTILLAS: Record<string, { id: string; nombre: string; texto: string }[]
     { id: "promo", nombre: "🎁 Con incentivo",
       texto: "Hola {nombre} 👋, ¡de *Sólido Auto Servicio* para usted!\n\nSu *{vehiculo}* está listo para su *{servicio}* ({fecha}). Este mes, al realizarlo con nosotros, el *lavado va por la casa* 🚿✨.\n\nAgende respondiendo este mensaje o al " + TELEFONO_TALLER + "." },
   ],
+  // Alertas por kilometraje. Además de {nombre} y {vehiculo}, estas plantillas
+  // usan {km} (kilometraje estimado hoy) y {faltan} (km de más o de menos).
+  km: [
+    { id: "vencido_km", nombre: "🔴 Aceite vencido por km",
+      texto: "Hola {nombre} 👋, le saludamos de *Sólido Auto Servicio*.\n\nSegún nuestro registro, su *{vehiculo}* ya alcanzó los *{km} km* aproximadamente, y el cambio de aceite estaba programado para los *{proximo} km*.\n\nRodar con el aceite vencido desgasta el motor y termina saliendo mucho más caro. 🛡️\n\n¿Le agendamos esta semana? Responda este mensaje o llámenos al " + TELEFONO_TALLER + "." },
+    { id: "por_vencer_km", nombre: "🟡 Le faltan pocos km",
+      texto: "Hola {nombre} 👋, de *Sólido Auto Servicio*.\n\nSu *{vehiculo}* va por los *{km} km* y le faltan apenas *{faltan} km* para el próximo cambio de aceite.\n\nSi quiere, le apartamos el espacio desde ya para que no se le pase. 🗓️\n\nResponda este mensaje o llámenos al " + TELEFONO_TALLER + "." },
+    { id: "aprovechar_visita", nombre: "🔧 Aprovechar su visita",
+      texto: "Hola {nombre} 👋, le saludamos de *Sólido Auto Servicio*.\n\nRevisando el historial de su *{vehiculo}* notamos que el cambio de aceite ya está vencido (va por los *{km} km*).\n\nComo ya nos visitó hace poco, si nos lo trae esta semana se lo hacemos de una vez y le ahorramos el viaje. 🚗\n\nResponda este mensaje o llámenos al " + TELEFONO_TALLER + "." },
+  ],
   cita: [
     { id: "confirmacion", nombre: "📅 Confirmar cita",
       texto: "Hola {nombre} 👋, le saludamos de *Sólido Auto Servicio*.\n\nLe recordamos su cita:\n📅 *{fecha}* a las *{hora}*\n🚗 {vehiculo}\n🔧 {servicio}\n\nSi necesita reprogramar, responda este mensaje o llámenos al " + TELEFONO_TALLER + ". ¡Le esperamos!" },
@@ -46,13 +56,17 @@ function armarMensaje(plantilla: string, datos: Record<string, string>) {
     .replace(/\{vehiculo\}/g, datos.vehiculo || "su vehículo")
     .replace(/\{servicio\}/g, datos.servicio || "mantenimiento")
     .replace(/\{fecha\}/g,    datos.fecha    || "próximamente")
-    .replace(/\{hora\}/g,     datos.hora     || "");
+    .replace(/\{hora\}/g,     datos.hora     || "")
+    // Solo se usan en las alertas por kilometraje
+    .replace(/\{km\}/g,       datos.km       || "—")
+    .replace(/\{proximo\}/g,  datos.proximo  || "—")
+    .replace(/\{faltan\}/g,   datos.faltan   || "—");
 }
 
-type Seccion = "mantenimiento" | "cita" | "seguimiento";
+type Seccion = "mantenimiento" | "km" | "cita" | "seguimiento";
 
 export default function RecordatoriosPage() {
-  const [data, setData]       = useState<any>({ mantenimientos: [], citas: [], seguimientos: [] });
+  const [data, setData]       = useState<any>({ mantenimientos: [], km: [], citas: [], seguimientos: [] });
   const [loading, setLoading] = useState(true);
   const [seccion, setSeccion] = useState<Seccion>("mantenimiento");
   const [plantillaSel, setPlantillaSel] = useState<Record<string, string>>({});
@@ -62,10 +76,31 @@ export default function RecordatoriosPage() {
   const cargar = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await fetch(`${API}/recordatorios`);
+      // Las alertas por kilometraje viven en otra ruta porque salen de una
+      // vista distinta (proyección de uso), no de mantenimiento_preventivo.
+      const [r, rKm] = await Promise.all([
+        fetch(`${API}/recordatorios`),
+        fetch(`${API}/mantenimiento/alertas-km`).catch(() => null),
+      ]);
       const d = await r.json();
+
+      let alertasKm: any[] = [];
+      if (rKm && rKm.ok) {
+        const crudo = await rKm.json();
+        // La vista trae otros nombres de campo. Se normalizan aquí para que la
+        // tabla de abajo funcione igual que con las demás secciones.
+        alertasKm = (Array.isArray(crudo) ? crudo : []).map((a: any) => ({
+          ...a,
+          id:               a.vehiculo_id,
+          cliente_nombre:   a.cliente,
+          cliente_telefono: a.telefono,
+          vehiculo_info:    [a.vehiculo, a.placa].filter(Boolean).join(" · "),
+        }));
+      }
+
       setData({
         mantenimientos: d.mantenimientos || [],
+        km:             alertasKm,
         citas:          d.citas || [],
         seguimientos:   d.seguimientos || [],
       });
@@ -75,17 +110,33 @@ export default function RecordatoriosPage() {
 
   useEffect(() => { cargar(); }, [cargar]);
 
+  const miles = (n: any) => Number(n || 0).toLocaleString("es-DO");
+
   const datosDe = (tipo: Seccion, item: any): Record<string, string> => ({
     nombre:   item.cliente_nombre,
     vehiculo: item.vehiculo_info,
-    servicio: TIPO_LABEL[item.tipo_servicio] || item.tipo_servicio || item.descripcion || "mantenimiento",
-    fecha:    fmtDate(tipo === "cita" ? item.fecha : item.proximo_fecha),
+    servicio: tipo === "km"
+      ? "cambio de aceite"
+      : (TIPO_LABEL[item.tipo_servicio] || item.tipo_servicio || item.descripcion || "mantenimiento"),
+    fecha:    fmtDate(tipo === "cita" ? item.fecha : tipo === "km" ? item.fecha_ultimo_cambio : item.proximo_fecha),
     hora:     item.hora || "",
+    // Solo aplican a las alertas por kilometraje
+    km:       miles(item.km_estimado_hoy),
+    proximo:  miles(item.km_proximo_cambio),
+    faltan:   miles(Math.abs(Number(item.km_restantes || 0))),
   });
+
+  // Plantilla sugerida por defecto. En las alertas de kilometraje depende del
+  // semáforo: no se le escribe igual a quien ya está vencido que a quien le
+  // faltan 300 km.
+  const plantillaPorDefecto = (tipo: Seccion, item: any) => {
+    if (tipo === "km") return item.estado === "POR_VENCER" ? "por_vencer_km" : "vencido_km";
+    return PLANTILLAS[tipo][0].id;
+  };
 
   const mensajeDe = (tipo: Seccion, item: any) => {
     const lista = PLANTILLAS[tipo];
-    const sel = plantillaSel[`${tipo}-${item.id}`] || lista[0].id;
+    const sel = plantillaSel[`${tipo}-${item.id}`] || plantillaPorDefecto(tipo, item);
     const pl = lista.find(p => p.id === sel) || lista[0];
     return armarMensaje(pl.texto, datosDe(tipo, item));
   };
@@ -107,6 +158,7 @@ export default function RecordatoriosPage() {
 
   const items: any[] =
     seccion === "mantenimiento" ? data.mantenimientos :
+    seccion === "km" ? data.km :
     seccion === "cita" ? data.citas : data.seguimientos;
 
   const pendientes = (arr: any[], flag: string) => arr.filter((x: any) => !x[flag]).length;
@@ -123,6 +175,7 @@ export default function RecordatoriosPage() {
 
       <div style={S.kpiRow}>
         <KpiCard icon="🔧" label="Mantenimientos por avisar" value={pendientes(data.mantenimientos, "notificado")} color="#ef4444" />
+        <KpiCard icon="🛣️" label="Aceite vencido por km"     value={data.km.filter((x: any) => x.estado === "VENCIDO").length} color="#dc2626" />
         <KpiCard icon="📅" label="Citas por recordar (48h)"  value={pendientes(data.citas, "recordatorio_enviado")} color="#f59e0b" />
         <KpiCard icon="⭐" label="Seguimientos post-entrega" value={data.seguimientos.length} color="#3b82f6" />
       </div>
@@ -135,6 +188,7 @@ export default function RecordatoriosPage() {
       <div style={{ display: "flex", gap: 8, marginBottom: 16, flexWrap: "wrap" }}>
         {([
           { key: "mantenimiento", label: `🔧 Mantenimientos (${data.mantenimientos.length})` },
+          { key: "km",            label: `🛣️ Por kilometraje (${data.km.length})` },
           { key: "cita",          label: `📅 Citas próximas (${data.citas.length})` },
           { key: "seguimiento",   label: `⭐ Seguimiento (${data.seguimientos.length})` },
         ] as const).map(t => (
@@ -149,6 +203,7 @@ export default function RecordatoriosPage() {
         ) : items.length === 0 ? (
           <p style={S.empty}>
             {seccion === "mantenimiento" && "🎉 No hay mantenimientos vencidos ni próximos por avisar."}
+            {seccion === "km" && "🎉 Ningún vehículo tiene el aceite vencido por kilometraje. (Requiere kilometraje registrado en la ficha del vehículo.)"}
             {seccion === "cita" && "No hay citas en las próximas 48 horas por recordar."}
             {seccion === "seguimiento" && "No hay entregas recientes pendientes de seguimiento."}
           </p>
@@ -156,7 +211,9 @@ export default function RecordatoriosPage() {
           <div style={{ overflowX: "auto" }}>
             <table style={S.table}>
               <thead>
-                <tr>{["Cliente", "Vehículo", "Motivo", seccion === "cita" ? "Cita" : "Fecha", "Plantilla", "Estado", ""].map((h, i) =>
+                <tr>{["Cliente", "Vehículo", "Motivo",
+                      seccion === "cita" ? "Cita" : seccion === "km" ? "Kilometraje" : "Fecha",
+                      "Plantilla", "Estado", ""].map((h, i) =>
                   <th key={i} style={S.th}>{h}</th>)}
                 </tr>
               </thead>
@@ -166,7 +223,9 @@ export default function RecordatoriosPage() {
                   const yaEnviado = enviados.has(key) ||
                     (seccion === "mantenimiento" && item.notificado) ||
                     (seccion === "cita" && item.recordatorio_enviado);
-                  const vencido = seccion === "mantenimiento" && item.dias_restantes !== null && item.dias_restantes < 0;
+                  const vencido =
+                    (seccion === "mantenimiento" && item.dias_restantes !== null && item.dias_restantes < 0) ||
+                    (seccion === "km" && item.estado === "VENCIDO");
                   return (
                     <tr key={key} style={{ background: vencido && !yaEnviado ? "#fff5f5" : "transparent" }}>
                       <td style={S.td}>
@@ -186,6 +245,19 @@ export default function RecordatoriosPage() {
                             </div>
                           </>
                         )}
+                        {seccion === "km" && (
+                          <>
+                            <div>Cambio de aceite</div>
+                            <div style={{ fontSize: 11, fontWeight: 700, color: vencido ? "#dc2626" : "#d97706" }}>
+                              {vencido
+                                ? `🔴 ${miles(Math.abs(item.km_restantes))} km pasado`
+                                : `🟡 faltan ${miles(item.km_restantes)} km`}
+                            </div>
+                            {item.tiene_membresia && (
+                              <div style={{ fontSize: 10, color: "#7c3aed", fontWeight: 700 }}>💎 Tiene membresía</div>
+                            )}
+                          </>
+                        )}
                         {seccion === "cita" && (TIPO_LABEL[item.tipo_servicio] || item.tipo_servicio || item.descripcion || "Cita")}
                         {seccion === "seguimiento" && (
                           <>
@@ -195,13 +267,26 @@ export default function RecordatoriosPage() {
                         )}
                       </td>
                       <td style={S.td}>
-                        {seccion === "cita" ? `${fmtDate(item.fecha)} · ${item.hora}`
+                        {seccion === "km" ? (
+                          <>
+                            <div style={{ fontWeight: 700 }}>~{miles(item.km_estimado_hoy)} km hoy</div>
+                            <div style={{ fontSize: 11, color: "#888" }}>
+                              toca a los {miles(item.km_proximo_cambio)} km
+                            </div>
+                            <div style={{ fontSize: 10, color: item.confianza === "ALTA" ? "#16a34a" : "#d97706" }}>
+                              {item.confianza === "ALTA" ? "✓ estimado con 2+ lecturas"
+                                : item.confianza === "MEDIA" ? "≈ estimado con 1 lectura"
+                                : "? sin lecturas"}
+                              {item.km_por_mes ? ` · ~${miles(item.km_por_mes)} km/mes` : ""}
+                            </div>
+                          </>
+                        ) : seccion === "cita" ? `${fmtDate(item.fecha)} · ${item.hora}`
                           : seccion === "seguimiento" ? fmtDate(item.entregado_el)
                           : fmtDate(item.proximo_fecha)}
                       </td>
                       <td style={S.td}>
                         <select
-                          value={plantillaSel[key] || PLANTILLAS[seccion][0].id}
+                          value={plantillaSel[key] || plantillaPorDefecto(seccion, item)}
                           onChange={e => setPlantillaSel(p => ({ ...p, [key]: e.target.value }))}
                           style={{ padding: "6px 8px", borderRadius: 8, border: "1px solid #e2e8f0", fontSize: 12, background: "#fafafa", maxWidth: 190 }}>
                           {PLANTILLAS[seccion].map(p => <option key={p.id} value={p.id}>{p.nombre}</option>)}
