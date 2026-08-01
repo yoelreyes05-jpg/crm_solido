@@ -954,32 +954,85 @@ app.get("/vehiculos", async (req, res) => {
   }
 });
 
+// Columnas de `vehiculos` que agregan las migraciones v23, v25 y v26. Si esas
+// migraciones todavía no se ejecutaron, PostgREST rechaza el INSERT completo
+// con "column ... does not exist" y NO se guarda absolutamente nada — ni el
+// vehículo. Por eso se detectan y se reintenta sin ellas, avisando qué falta.
+const COLUMNAS_VEHICULO_NUEVAS = [
+  "cilindros", "tipo_aceite",                          // v23
+  "cuartos_aceite", "viscosidad", "spec_id", "spec_confianza", // v25
+  "km_actual", "km_actual_fecha",                      // v26
+];
+
+/** Detecta el error de columna inexistente y devuelve su nombre. */
+function columnaFaltante(error) {
+  if (!error) return null;
+  const m = String(error.message || "").match(
+    /column ["']?(?:vehiculos\.)?([a-z_]+)["']? (?:of relation .* )?does not exist/i
+  );
+  if (m) return m[1];
+  // PostgREST usa PGRST204 cuando la columna no está en su caché de esquema
+  if (error.code === "PGRST204") {
+    const m2 = String(error.message || "").match(/'([a-z_]+)'/);
+    return m2 ? m2[1] : null;
+  }
+  return null;
+}
+
 app.post("/vehiculos", async (req, res) => {
   const { cliente_id, marca, modelo, ano, placa, color, vin, motor, combustible, vin_data,
           cilindros, tipo_aceite, km_actual } = req.body;
-  const { data, error } = await supabase.from("vehiculos")
-    .insert([{ cliente_id, marca, modelo, ano, placa, color,
-      vin: vin || null, motor: motor || null,
-      combustible: combustible || null, vin_data: vin_data || null,
-      cilindros: cilindros ?? null, tipo_aceite: tipo_aceite || null,
-      cuartos_aceite: req.body.cuartos_aceite ?? null,
-      viscosidad: req.body.viscosidad || null,
-      spec_id: req.body.spec_id ?? null,
-      spec_confianza: req.body.spec_confianza || "ESTIMADO",
-      // El kilometraje se guarda en la ficha (para que se vea en listas y
-      // en la inspección) y el trigger de v26 crea la fila del historial.
-      km_actual: km_actual != null && Number(km_actual) > 0 ? Number(km_actual) : null,
-      km_actual_fecha: km_actual != null && Number(km_actual) > 0
-        ? new Date().toISOString().slice(0, 10) : null }])
-    .select();
+
+  const tieneKm = km_actual != null && Number(km_actual) > 0;
+
+  const fila = {
+    cliente_id, marca, modelo, ano, placa, color,
+    vin: vin || null, motor: motor || null,
+    combustible: combustible || null, vin_data: vin_data || null,
+    cilindros: cilindros ?? null,
+    tipo_aceite: tipo_aceite || null,
+    cuartos_aceite: req.body.cuartos_aceite ?? null,
+    viscosidad: req.body.viscosidad || null,
+    spec_id: req.body.spec_id ?? null,
+    spec_confianza: req.body.spec_confianza || "ESTIMADO",
+    // El kilometraje se guarda en la ficha (para que se vea en las listas y
+    // en la inspección) y el trigger de v26 crea la fila del historial.
+    km_actual: tieneKm ? Number(km_actual) : null,
+    km_actual_fecha: tieneKm ? new Date().toISOString().slice(0, 10) : null,
+  };
+
+  // Intentar guardar; si falla por una columna que aún no existe, quitarla y
+  // reintentar. Así el vehículo se guarda igual y el usuario sabe qué correr.
+  let data, error, intentos = 0;
+  const omitidas = [];
+  do {
+    ({ data, error } = await supabase.from("vehiculos").insert([fila]).select());
+    const col = columnaFaltante(error);
+    if (!col || !COLUMNAS_VEHICULO_NUEVAS.includes(col)) break;
+    delete fila[col];
+    omitidas.push(col);
+    intentos++;
+  } while (intentos <= COLUMNAS_VEHICULO_NUEVAS.length);
+
   if (error) return res.json({ error: error.message });
 
-  // Respaldo: si la migración v26 (con su trigger) todavía no se ejecutó, se
-  // crea la lectura del historial a mano para no perder el dato.
-  if (km_actual != null && Number(km_actual) > 0 && data?.[0]?.id) {
-    const { data: yaHay } = await supabase.from("vehiculo_odometro")
+  if (omitidas.length) {
+    console.warn(`[vehiculos] columnas inexistentes omitidas: ${omitidas.join(", ")}. ` +
+      "Ejecuta las migraciones v23 a v26 en Supabase.");
+  }
+
+  // Registrar la lectura inicial del odómetro. Con v26 lo hace un trigger; esto
+  // es el respaldo por si todavía no se ejecutó.
+  let avisoKm = null;
+  if (tieneKm && data?.[0]?.id) {
+    const { data: yaHay, error: errLee } = await supabase.from("vehiculo_odometro")
       .select("id").eq("vehiculo_id", data[0].id).limit(1);
-    if (!yaHay || yaHay.length === 0) {
+
+    if (errLee) {
+      avisoKm = "No se pudo guardar el kilometraje: falta ejecutar la migración v24 " +
+                "(tabla vehiculo_odometro) en Supabase.";
+      console.warn("[odometro]", errLee.message);
+    } else if (!yaHay || yaHay.length === 0) {
       const { error: errKm } = await supabase.from("vehiculo_odometro").insert([{
         vehiculo_id: data[0].id,
         km: Number(km_actual),
@@ -987,11 +1040,42 @@ app.post("/vehiculos", async (req, res) => {
         usuario: usuarioDesdeReq(req).nombre,
         notas: "Lectura inicial al registrar el vehículo",
       }]);
-      if (errKm) console.warn("[odometro] no se guardó la lectura inicial:", errKm.message);
+      if (errKm) {
+        avisoKm = "El vehículo se guardó, pero no el kilometraje: " + errKm.message;
+        console.warn("[odometro] no se guardó la lectura inicial:", errKm.message);
+      }
     }
   }
 
-  res.json(data[0]);
+  if (omitidas.includes("km_actual") && !avisoKm) {
+    avisoKm = "El vehículo se guardó, pero el kilometraje no se ve en la lista: " +
+              "falta ejecutar la migración v26 en Supabase.";
+  }
+
+  res.json(avisoKm ? { ...data[0], aviso: avisoKm } : data[0]);
+});
+
+// Diagnóstico rápido desde el navegador: GET /vehiculos/diagnostico
+// Dice si las columnas de las migraciones nuevas ya existen.
+app.get("/diagnostico/migraciones", async (req, res) => {
+  const faltan = [];
+  for (const col of COLUMNAS_VEHICULO_NUEVAS) {
+    const { error } = await supabase.from("vehiculos").select(col).limit(1);
+    if (error) faltan.push(col);
+  }
+  const tablas = {};
+  for (const t of ["vehiculo_odometro", "vehiculo_spec_servicio", "plan_motor_config", "plan_precios"]) {
+    const { error } = await supabase.from(t).select("*").limit(1);
+    tablas[t] = !error;
+  }
+  res.json({
+    ok: faltan.length === 0 && Object.values(tablas).every(Boolean),
+    columnas_faltantes_en_vehiculos: faltan,
+    tablas,
+    siguiente_paso: faltan.length || Object.values(tablas).some(v => !v)
+      ? "Ejecuta en Supabase, en orden: migracion_v23, v24, v25 y v26. Luego recarga."
+      : "Todo aplicado.",
+  });
 });
 
 app.delete("/vehiculos/:id", async (req, res) => {
@@ -1016,7 +1100,18 @@ app.patch("/vehiculos/:id", async (req, res) => {
     if (req.body[k] !== undefined) o[k] = req.body[k];
     return o;
   }, {});
-  const { data, error } = await supabase.from("vehiculos").update(campos).eq("id", id).select();
+
+  // Misma tolerancia que en POST: si una columna nueva aún no existe, se quita
+  // y se reintenta, para no perder la edición completa por eso.
+  let data, error, intentos = 0;
+  do {
+    ({ data, error } = await supabase.from("vehiculos").update(campos).eq("id", id).select());
+    const col = columnaFaltante(error);
+    if (!col || !COLUMNAS_VEHICULO_NUEVAS.includes(col)) break;
+    delete campos[col];
+    intentos++;
+  } while (intentos <= COLUMNAS_VEHICULO_NUEVAS.length && Object.keys(campos).length);
+
   if (error) return res.json({ error: error.message });
 
   // km_actual no es una columna del vehículo: es una lectura nueva del
