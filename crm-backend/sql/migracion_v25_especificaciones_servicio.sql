@@ -154,8 +154,8 @@ BEGIN
   LIMIT 1;
 
   IF FOUND THEN
-    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad, v.tipo_aceite, v.intervalo_km,
-      v.filtro_aceite, v.filtro_aire, v.filtro_cabina, v.bujias, v.cilindros, v.confianza,
+    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad::TEXT, v.tipo_aceite::VARCHAR, v.intervalo_km,
+      v.filtro_aceite::TEXT, v.filtro_aire::TEXT, v.filtro_cabina::TEXT, v.bujias::TEXT, v.cilindros::SMALLINT, v.confianza::VARCHAR,
       ('Ficha exacta: ' || v.marca || ' ' || v.modelo || ' ' || COALESCE(v.motor,'') ||
        ' (' || COALESCE(v.ano_desde::TEXT,'?') || '-' || COALESCE(v.ano_hasta::TEXT,'?') || ')')::TEXT,
       v.notas;
@@ -173,8 +173,8 @@ BEGIN
   LIMIT 1;
 
   IF FOUND THEN
-    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad, v.tipo_aceite, v.intervalo_km,
-      v.filtro_aceite, v.filtro_aire, v.filtro_cabina, v.bujias, v.cilindros, v.confianza,
+    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad::TEXT, v.tipo_aceite::VARCHAR, v.intervalo_km,
+      v.filtro_aceite::TEXT, v.filtro_aire::TEXT, v.filtro_cabina::TEXT, v.bujias::TEXT, v.cilindros::SMALLINT, v.confianza::VARCHAR,
       ('Ficha del modelo (motor no coincide exacto): ' || v.marca || ' ' || v.modelo)::TEXT,
       v.notas;
     RETURN;
@@ -189,8 +189,8 @@ BEGIN
   LIMIT 1;
 
   IF FOUND THEN
-    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad, v.tipo_aceite, v.intervalo_km,
-      v.filtro_aceite, v.filtro_aire, v.filtro_cabina, v.bujias, v.cilindros, 'ESTIMADO'::VARCHAR,
+    RETURN QUERY SELECT v.id, v.cuartos, v.viscosidad::TEXT, v.tipo_aceite::VARCHAR, v.intervalo_km,
+      v.filtro_aceite::TEXT, v.filtro_aire::TEXT, v.filtro_cabina::TEXT, v.bujias::TEXT, v.cilindros::SMALLINT, 'ESTIMADO'::VARCHAR,
       ('Otro año del mismo modelo (' || COALESCE(v.ano_desde::TEXT,'?') || '-' ||
        COALESCE(v.ano_hasta::TEXT,'?') || '). VERIFICAR con el vehiculo.')::TEXT,
       v.notas;
@@ -200,7 +200,7 @@ BEGIN
   -- ── 4. Sin ficha: estimar por cilindraje ────────────────────────────────
   v_cil := COALESCE(p_cilindros, 4);
   RETURN QUERY
-  SELECT NULL::BIGINT, mc.cuartos, NULL::TEXT, mc.tipo_aceite, mc.intervalo_km,
+  SELECT NULL::BIGINT, mc.cuartos, NULL::TEXT, mc.tipo_aceite::VARCHAR, mc.intervalo_km,
          NULL::TEXT, NULL::TEXT, NULL::TEXT, NULL::TEXT, v_cil, 'ESTIMADO'::VARCHAR,
          ('Sin ficha para este modelo. Estimado por ' || v_cil ||
           ' cilindros. El tecnico debe verificar y guardar la ficha.')::TEXT,
@@ -547,10 +547,14 @@ BEGIN
 
   -- Reajustar el valor si los cuartos reales difieren del generico usado por
   -- plan_calcular_ahorro, para que el ahorro mostrado sea el verdadero.
+  -- Columnas calificadas con alias: `cilindros` y `tipo_aceite` también son
+  -- nombres de salida de esta función, y sin calificar PostgreSQL aborta con
+  -- "column reference is ambiguous".
   v_precio_mant := ROUND(v_cuartos * COALESCE(v_mc.ac_price, 0)
                        + COALESCE(v_mc.fi_price, 0)
-                       + COALESCE((SELECT mano_obra FROM plan_motor_config
-                                   WHERE cilindros = v_cil AND tipo_aceite = v_tipo LIMIT 1), 0), 2);
+                       + COALESCE((SELECT mc2.mano_obra FROM plan_motor_config mc2
+                                   WHERE mc2.cilindros = v_cil
+                                     AND mc2.tipo_aceite = v_tipo LIMIT 1), 0), 2);
 
   SELECT pp.precio_mensual, pp.precio_anual INTO v_pre
   FROM plan_precios pp WHERE pp.plan_id = p_plan_id AND pp.cilindros = v_cil;
