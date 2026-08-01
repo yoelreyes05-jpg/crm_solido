@@ -965,23 +965,30 @@ app.post("/vehiculos", async (req, res) => {
       cuartos_aceite: req.body.cuartos_aceite ?? null,
       viscosidad: req.body.viscosidad || null,
       spec_id: req.body.spec_id ?? null,
-      spec_confianza: req.body.spec_confianza || "ESTIMADO" }])
+      spec_confianza: req.body.spec_confianza || "ESTIMADO",
+      // El kilometraje se guarda en la ficha (para que se vea en listas y
+      // en la inspección) y el trigger de v26 crea la fila del historial.
+      km_actual: km_actual != null && Number(km_actual) > 0 ? Number(km_actual) : null,
+      km_actual_fecha: km_actual != null && Number(km_actual) > 0
+        ? new Date().toISOString().slice(0, 10) : null }])
     .select();
   if (error) return res.json({ error: error.message });
 
-  // El kilometraje se captura al registrar el vehículo, no en la inspección.
-  // Esta es la lectura inicial del odómetro: a partir de ella el sistema
-  // calcula el ritmo de uso y avisa cuándo toca el cambio de aceite.
+  // Respaldo: si la migración v26 (con su trigger) todavía no se ejecutó, se
+  // crea la lectura del historial a mano para no perder el dato.
   if (km_actual != null && Number(km_actual) > 0 && data?.[0]?.id) {
-    const { error: errKm } = await supabase.from("vehiculo_odometro").insert([{
-      vehiculo_id: data[0].id,
-      km: Number(km_actual),
-      origen: "REGISTRO",
-      usuario: usuarioDesdeReq(req).nombre,
-      notas: "Lectura inicial al registrar el vehículo",
-    }]);
-    // Un fallo aquí no debe tumbar el registro del vehículo: se avisa y ya.
-    if (errKm) console.warn("[odometro] no se guardó la lectura inicial:", errKm.message);
+    const { data: yaHay } = await supabase.from("vehiculo_odometro")
+      .select("id").eq("vehiculo_id", data[0].id).limit(1);
+    if (!yaHay || yaHay.length === 0) {
+      const { error: errKm } = await supabase.from("vehiculo_odometro").insert([{
+        vehiculo_id: data[0].id,
+        km: Number(km_actual),
+        origen: "REGISTRO",
+        usuario: usuarioDesdeReq(req).nombre,
+        notas: "Lectura inicial al registrar el vehículo",
+      }]);
+      if (errKm) console.warn("[odometro] no se guardó la lectura inicial:", errKm.message);
+    }
   }
 
   res.json(data[0]);
