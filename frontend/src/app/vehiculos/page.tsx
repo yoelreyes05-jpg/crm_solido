@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { CUARTOS_OPCIONES, VISCOSIDADES, CILINDROS_OPCIONES } from "@/lib/aceite";
 import { API_URL as API } from "@/config";
 import { decodificarVIN as decodeVIN, registrarConsultaVIN } from "@/lib/vin";
 import { usePermisos } from "@/lib/usePermisos";
@@ -18,8 +19,12 @@ export default function Vehiculos() {
     // Datos que alimentan los planes de mantenimiento y las alertas por uso.
     // Se piden AQUI, al registrar el vehiculo, para que la inspeccion ya los
     // tenga listos y nadie tenga que teclearlos dos veces.
-    cilindros: "", tipo_aceite: "", km_actual: ""
+    cilindros: "", tipo_aceite: "", km_actual: "",
+    cuartos_aceite: "", viscosidad: ""
   });
+  // Lo que el catálogo sabe de este modelo (ver migracion_v25)
+  const [spec, setSpec] = useState<any>(null);
+  const [buscandoSpec, setBuscandoSpec] = useState(false);
   const [editVehiculo, setEditVehiculo] = useState<any>(null);
   const [editForm, setEditForm] = useState({ marca: "", modelo: "", ano: "", placa: "", color: "", cliente_id: "", vin: "", motor: "", combustible: "", cilindros: "", tipo_aceite: "", km_actual: "" });
   const [savingEdit, setSavingEdit] = useState(false);
@@ -39,6 +44,39 @@ export default function Vehiculos() {
   };
 
   useEffect(() => { getClientes(); getVehiculos(); getCatalogo(); }, []);
+
+  // ── Autocompletar qué lleva este vehículo ─────────────────────────────────
+  // En cuanto hay marca y modelo, el sistema busca en el catálogo cuántos
+  // cuartos de aceite lleva, qué viscosidad y cada cuánto toca el cambio.
+  // Así nadie —ni el cliente ni la secretaria— tiene que saberlo de memoria.
+  useEffect(() => {
+    if (!form.marca || !form.modelo) { setSpec(null); return; }
+    let cancelado = false;
+    setBuscandoSpec(true);
+    const q = new URLSearchParams({
+      marca: form.marca, modelo: form.modelo,
+      ...(form.ano ? { ano: form.ano } : {}),
+      ...(form.motor ? { motor: form.motor } : {}),
+      ...(form.cilindros ? { cilindros: form.cilindros } : {}),
+    });
+    fetch(`${API}/vehiculos/spec/sugerir?${q}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelado || !d) return;
+        setSpec(d);
+        // Se rellenan solo los campos que el usuario no haya tocado.
+        setForm(f => ({
+          ...f,
+          cilindros:      f.cilindros      || (d.cilindros ? String(d.cilindros) : ""),
+          tipo_aceite:    f.tipo_aceite    || (d.tipo_aceite || ""),
+          cuartos_aceite: f.cuartos_aceite || (d.cuartos ? String(d.cuartos) : ""),
+          viscosidad:     f.viscosidad     || (d.viscosidad || ""),
+        }));
+      })
+      .catch(() => { if (!cancelado) setSpec(null); })
+      .finally(() => { if (!cancelado) setBuscandoSpec(false); });
+    return () => { cancelado = true; };
+  }, [form.marca, form.modelo, form.ano, form.motor]);
 
   const handleMarcaChange = (marca) => setForm({ ...form, marca, modelo: "" });
 
@@ -104,16 +142,25 @@ export default function Vehiculos() {
           vin:         form.vin.trim().toUpperCase() || null,
           motor:       form.motor || null,
           combustible: form.combustible || null,
-          cilindros:   form.cilindros ? Number(form.cilindros) : null,
-          tipo_aceite: form.tipo_aceite || null,
+          cilindros:      form.cilindros ? Number(form.cilindros) : null,
+          tipo_aceite:    form.tipo_aceite || null,
+          cuartos_aceite: form.cuartos_aceite ? Number(form.cuartos_aceite) : null,
+          viscosidad:     form.viscosidad || null,
+          spec_id:        spec?.spec_id ?? null,
+          spec_confianza: spec?.confianza || "ESTIMADO",
           // El backend crea la primera lectura de odómetro con este valor.
           km_actual:   form.km_actual !== "" ? Number(form.km_actual) : null,
         })
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
-      alert("✅ Vehículo registrado correctamente");
-      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "", vin: "", motor: "", combustible: "", cilindros: "", tipo_aceite: "", km_actual: "" });
+      // El backend avisa si algún dato no se pudo guardar por falta de una
+      // migración, en vez de fallar en silencio.
+      alert(data.aviso
+        ? `✅ Vehículo registrado.\n\n⚠️ ${data.aviso}`
+        : "✅ Vehículo registrado correctamente");
+      setForm({ cliente_id: "", marca: "", modelo: "", ano: "", placa: "", color: "", vin: "", motor: "", combustible: "", cilindros: "", tipo_aceite: "", km_actual: "", cuartos_aceite: "", viscosidad: "" });
+      setSpec(null);
       setVinEstado("");
       await getVehiculos();
     } catch { alert("Error al guardar"); }
@@ -325,6 +372,31 @@ export default function Vehiculos() {
               Con esto se calcula el plan de mantenimiento y las alertas por kilometraje.
             </p>
 
+            {/* Lo que el catálogo ya sabe de este modelo. El cliente no tiene
+                que saber qué aceite usa: el sistema lo sabe por él. */}
+            {buscandoSpec && (
+              <p style={{ fontSize: 11, color: "#93c5fd", marginBottom: 10 }}>⏳ Buscando especificaciones del modelo…</p>
+            )}
+            {spec && !buscandoSpec && (
+              <div style={{
+                background: spec.confianza === "VERIFICADO" ? "#052e16" : "#422006",
+                border: `1px solid ${spec.confianza === "VERIFICADO" ? "#16a34a" : "#a16207"}`,
+                borderRadius: 8, padding: "9px 11px", marginBottom: 10, fontSize: 12,
+              }}>
+                <div style={{ fontWeight: 700, color: spec.confianza === "VERIFICADO" ? "#4ade80" : "#fbbf24", marginBottom: 4 }}>
+                  {spec.confianza === "VERIFICADO" ? "✅ Ficha verificada por tu taller"
+                    : spec.confianza === "MANUAL" ? "📘 Según el manual del fabricante"
+                    : "⚠️ Estimado — un técnico debe confirmarlo"}
+                </div>
+                <div style={{ color: "#d1d5db", lineHeight: 1.6 }}>
+                  {spec.cuartos && <>Lleva <strong>{spec.cuartos} cuartos</strong>{spec.viscosidad ? <> de <strong>{spec.viscosidad}</strong></> : null}<br /></>}
+                  {spec.intervalo_km && <>Cambio cada <strong>{Number(spec.intervalo_km).toLocaleString("es-DO")} km</strong><br /></>}
+                  {spec.filtro_aceite && <>Filtro: <strong>{spec.filtro_aceite}</strong><br /></>}
+                  <span style={{ fontSize: 10, color: "#9ca3af" }}>{spec.origen}</span>
+                </div>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <div>
                 <label style={label}>Cilindros</label>
@@ -332,13 +404,9 @@ export default function Vehiculos() {
                   onChange={e => setForm({ ...form, cilindros: e.target.value })}
                   style={{ ...input, marginBottom: 0 }}>
                   <option value="">— Seleccionar —</option>
-                  <option value="3">3 cilindros</option>
-                  <option value="4">4 cilindros</option>
-                  <option value="5">5 cilindros</option>
-                  <option value="6">6 cilindros (V6)</option>
-                  <option value="8">8 cilindros (V8)</option>
-                  <option value="10">10 cilindros</option>
-                  <option value="12">12 cilindros</option>
+                  {CILINDROS_OPCIONES.map(c => (
+                    <option key={c.valor} value={c.valor}>{c.label}</option>
+                  ))}
                 </select>
               </div>
               <div>
@@ -350,6 +418,31 @@ export default function Vehiculos() {
                   <option value="MINERAL">Mineral (cada 3,000 km)</option>
                   <option value="SEMISINTETICO">Semisintético (cada 5,000 km)</option>
                   <option value="SINTETICO">Sintético (cada 8,000 km)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ height: 10 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <label style={label}>Cuartos de aceite</label>
+                {/* Lista cerrada: la secretaria elige, no teclea. */}
+                <select value={form.cuartos_aceite}
+                  onChange={e => setForm({ ...form, cuartos_aceite: e.target.value })}
+                  style={{ ...input, marginBottom: 0 }}>
+                  <option value="">— Seleccionar —</option>
+                  {CUARTOS_OPCIONES.map(c => (
+                    <option key={c} value={c}>{c} cuartos</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label style={label}>Viscosidad</label>
+                <select value={form.viscosidad}
+                  onChange={e => setForm({ ...form, viscosidad: e.target.value })}
+                  style={{ ...input, marginBottom: 0 }}>
+                  <option value="">— Seleccionar —</option>
+                  {VISCOSIDADES.map(v => <option key={v} value={v}>{v}</option>)}
                 </select>
               </div>
             </div>
@@ -382,14 +475,14 @@ export default function Vehiculos() {
             <table style={table}>
               <thead>
                 <tr>
-                  {["Cliente", "Marca", "Modelo", "Año", "Placa", "Motor", "Comb.", ""].map(h => (
+                  {["Cliente", "Marca", "Modelo", "Año", "Placa", "Motor", "Kilometraje", "Aceite", ""].map(h => (
                     <th key={h} style={th}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {vehiculosFiltrados.length === 0 ? (
-                  <tr><td colSpan={8} style={{ ...td, textAlign: "center", color: "#aaa" }}>Sin vehículos</td></tr>
+                  <tr><td colSpan={9} style={{ ...td, textAlign: "center", color: "#aaa" }}>Sin vehículos</td></tr>
                 ) : vehiculosFiltrados.map(v => (
                   <tr key={v.id}>
                     <td style={{ ...td, fontWeight: 700 }}>{v.cliente_nombre}</td>
@@ -401,8 +494,35 @@ export default function Vehiculos() {
                         {v.placa}
                       </span>
                     </td>
-                    <td style={{ ...td, fontSize: 12 }}>{v.motor || "—"}</td>
-                    <td style={{ ...td, fontSize: 12 }}>{v.combustible || "—"}</td>
+                    <td style={{ ...td, fontSize: 12 }}>
+                      {v.motor || "—"}
+                      {v.cilindros ? <div style={{ fontSize: 10, color: "#64748b" }}>{v.cilindros} cil.</div> : null}
+                    </td>
+                    {/* Kilometraje: viene de vehiculos.km_actual, que el trigger
+                        mantiene al día con la última lectura del odómetro. */}
+                    <td style={{ ...td, fontSize: 12 }}>
+                      {v.km_actual != null ? (
+                        <>
+                          <div style={{ fontWeight: 700 }}>{Number(v.km_actual).toLocaleString("es-DO")} km</div>
+                          {v.km_actual_fecha && (
+                            <div style={{ fontSize: 10, color: "#64748b" }}>
+                              {new Date(v.km_actual_fecha).toLocaleDateString("es-DO")}
+                            </div>
+                          )}
+                        </>
+                      ) : <span style={{ color: "#94a3b8" }}>—</span>}
+                    </td>
+                    <td style={{ ...td, fontSize: 12 }}>
+                      {v.cuartos_aceite ? (
+                        <>
+                          <div style={{ fontWeight: 700 }}>{v.cuartos_aceite} cuartos</div>
+                          <div style={{ fontSize: 10, color: "#64748b" }}>
+                            {v.viscosidad || "—"}
+                            {v.spec_confianza === "VERIFICADO" ? " ✓" : ""}
+                          </div>
+                        </>
+                      ) : <span style={{ color: "#94a3b8" }}>—</span>}
+                    </td>
                     <td style={td}>
                       <div style={{ display: "flex", gap: 6 }}>
                         {puedeEditar && (
@@ -522,8 +642,17 @@ export default function Vehiculos() {
               </div>
 
               <div style={{ height: 10 }} />
-              <label style={label}>Nueva lectura de kilometraje (opcional)</label>
-              <input type="number" min={0} placeholder="Dejar vacío si no cambió"
+              <label style={label}>
+                Kilometraje
+                {editVehiculo?.km_actual != null && (
+                  <span style={{ fontWeight: 400, color: "#93c5fd" }}>
+                    {" "}— actual: <strong>{Number(editVehiculo.km_actual).toLocaleString("es-DO")} km</strong>
+                    {editVehiculo.km_actual_fecha && ` (${new Date(editVehiculo.km_actual_fecha).toLocaleDateString("es-DO")})`}
+                  </span>
+                )}
+              </label>
+              <input type="number" min={0}
+                placeholder={editVehiculo?.km_actual != null ? "Nueva lectura (dejar vacío si no cambió)" : "Ej: 87500"}
                 value={editForm.km_actual}
                 onChange={e => setEditForm(f => ({ ...f, km_actual: e.target.value }))}
                 style={{ ...input, marginBottom: 0 }} />

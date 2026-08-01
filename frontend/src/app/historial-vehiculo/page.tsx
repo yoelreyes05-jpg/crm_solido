@@ -232,7 +232,7 @@ export default function HistorialVehiculoPage() {
 }
 
 // ── Función de impresión del expediente ───────────────
-function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDetalle: string, trabajosItems: any[], descripcionTrabajo: string, resolvedDiag?: { fallasIdentificadas: string; inspeccionMecanica: string; inspeccionElectrica: string; inspeccionElectronica: string; codigosFalla: string; observacionesDiag: string; resultadoQC: string; observacionesQC: string; }) {
+function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDetalle: string, trabajosItems: any[], descripcionTrabajo: string, resolvedDiag?: { fallasIdentificadas: string; inspeccionMecanica: string; inspeccionElectrica: string; inspeccionElectronica: string; codigosFalla: string; observacionesDiag: string; resultadoQC: string; observacionesQC: string; }, fichaVeh?: any) {
   const fmtD  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO", { year:"numeric", month:"short", day:"numeric" }) : "—";
   const fmtDH = (v: any) => v ? new Date(v).toLocaleString("es-DO", { month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const fmt$  = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO", { minimumFractionDigits:2 })}`;
@@ -473,7 +473,9 @@ function imprimirExpedienteHistorial(h: any, detalleCompleto: any, manoDeObraDet
     <div style="font-size:8.5px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:3px">🚗 Vehículo</div>
     <div style="font-weight:800;font-size:12px;color:#3b82f6;font-family:monospace">${h.placa}</div>
     <div style="font-size:10.5px;font-weight:600">${h.marca||""} ${h.modelo||""} ${h.ano?`(${h.ano})`:""}</div>
-    <div style="font-size:9.5px;color:#6b7280">${h.color||""}</div>
+    <div style="font-size:9.5px;color:#6b7280">${h.color||""}${fichaVeh?.cilindros?` · ${fichaVeh.cilindros} cil.`:""}</div>
+    ${fichaVeh?.cuartos_aceite ? `<div style="font-size:9px;color:#1e40af;margin-top:2px;font-weight:700">🛢️ ${fichaVeh.cuartos_aceite} cuartos${fichaVeh.viscosidad?` · ${fichaVeh.viscosidad}`:""}</div>` : ""}
+    ${fichaVeh?.filtro_aceite ? `<div style="font-size:9px;color:#6b7280">Filtro: <b>${fichaVeh.filtro_aceite}</b></div>` : ""}
   </div>
   <div style="border:1px solid #e5e7eb;border-radius:6px;padding:6px 10px;background:#f8fafc">
     <div style="font-size:8.5px;font-weight:700;color:#888;text-transform:uppercase;margin-bottom:3px">👤 Cliente</div>
@@ -527,6 +529,21 @@ const QC_CHECKLIST_LABELS: Record<string, string> = {
 
 function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
   const [detalleCompleto, setDetalleCompleto] = useState<any>(null);
+  // Ficha técnica del vehículo: cuartos de aceite, viscosidad, filtro e
+  // intervalo. Vive en la tabla `vehiculos` (ver migracion_v25), no en el
+  // registro de historial, porque es del vehículo y no de una visita puntual.
+  const [fichaVeh, setFichaVeh] = useState<any>(null);
+
+  useEffect(() => {
+    const vid = h.vehiculo_id ?? detalleCompleto?.vehiculo?.id;
+    if (!vid) return;
+    let cancelado = false;
+    fetch(`${API}/vehiculos/${vid}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (!cancelado && d && !d.error) setFichaVeh(d); })
+      .catch(() => {});
+    return () => { cancelado = true; };
+  }, [h.vehiculo_id, detalleCompleto?.vehiculo?.id]);
 
   useEffect(() => {
     // Si tiene id numérico de vehiculo_historial → endpoint de historial cerrado
@@ -647,7 +664,7 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
         <div style={{ display: "flex", gap: 10, alignItems: "center" }}>
           <Badge texto={h.estado || "ENTREGADO"} />
           <button
-            onClick={() => imprimirExpedienteHistorial(h, detalleCompleto, manoDeObraDetalle, trabajosItems, descripcionTrabajo, { fallasIdentificadas, inspeccionMecanica, inspeccionElectrica, inspeccionElectronica, codigosFalla, observacionesDiag, resultadoQC, observacionesQC })}
+            onClick={() => imprimirExpedienteHistorial(h, detalleCompleto, manoDeObraDetalle, trabajosItems, descripcionTrabajo, { fallasIdentificadas, inspeccionMecanica, inspeccionElectrica, inspeccionElectronica, codigosFalla, observacionesDiag, resultadoQC, observacionesQC }, fichaVeh)}
             style={{ padding: "9px 20px", background: "#111827", color: "#fff", border: "none", borderRadius: 10, cursor: "pointer", fontWeight: 700, fontSize: 13 }}>
             🖨️ Imprimir
           </button>
@@ -659,7 +676,7 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
       </div>
 
       {/* ── Fila superior: Vehículo · Servicio · Costos ── */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 16, marginBottom: 24 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(230px, 1fr))", gap: 16, marginBottom: 24 }}>
         <Card>
           <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>🚗 Vehículo</div>
           <Fila label="Placa"         valor={h.placa} destaca />
@@ -668,6 +685,33 @@ function Expediente({ h, onVolver }: { h: any; onVolver: () => void }) {
           <Fila label="Color"         valor={h.color} />
           <Fila label="Motivo de entrada" valor={h.motivo_entrada} />
         </Card>
+        {/* ── Ficha técnica ─────────────────────────────────────────────────
+            Todo lo que el taller sabe del vehículo: qué aceite lleva, cuánto,
+            qué filtro y cada cuánto toca. Se llena al registrar el vehículo y
+            lo confirma el técnico cuando lo tiene delante. */}
+        {(fichaVeh?.cuartos_aceite || fichaVeh?.viscosidad || fichaVeh?.cilindros) && (
+          <Card bg="#eff6ff" border="#bfdbfe">
+            <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10, color: "#1e40af" }}>
+              🛢️ Ficha técnica
+            </div>
+            <Fila label="Cilindros"    valor={fichaVeh.cilindros ? `${fichaVeh.cilindros} cilindros` : null} />
+            <Fila label="Aceite"       valor={[fichaVeh.viscosidad, fichaVeh.tipo_aceite ? String(fichaVeh.tipo_aceite).toLowerCase() : null].filter(Boolean).join(" · ") || null} destaca />
+            <Fila label="Cantidad"     valor={fichaVeh.cuartos_aceite ? `${fichaVeh.cuartos_aceite} cuartos` : null} destaca />
+            <Fila label="Filtro aceite" valor={fichaVeh.filtro_aceite} />
+            <Fila label="Motor"        valor={fichaVeh.motor} />
+            {fichaVeh.spec_confianza && (
+              <div style={{ marginTop: 8, fontSize: 11, fontWeight: 700,
+                color: fichaVeh.spec_confianza === "VERIFICADO" ? "#16a34a" : "#a16207" }}>
+                {fichaVeh.spec_confianza === "VERIFICADO"
+                  ? "✅ Verificado por el taller"
+                  : "⚠️ Estimado — falta verificar"}
+              </div>
+            )}
+            {fichaVeh.spec_notas && (
+              <div style={{ fontSize: 11, color: "#64748b", marginTop: 4 }}>{fichaVeh.spec_notas}</div>
+            )}
+          </Card>
+        )}
         <Card>
           <div style={{ fontWeight: 800, fontSize: 13, marginBottom: 10 }}>📋 Servicio</div>
           <Fila label="Tipo de servicio" valor={diagVivo?.tipo_servicio || h.tipo_servicio} destaca />

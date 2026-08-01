@@ -66,6 +66,8 @@ export default function InspeccionPage() {
   // Última lectura conocida del odómetro, para sugerir el km en vez de pedirlo
   // en blanco. Se captura al registrar el vehículo (ver /vehiculos).
   const [odometro, setOdometro]       = useState<any>(null);
+  // Ficha del vehículo: respaldo del kilometraje y datos de aceite/filtro.
+  const [vehiculoFicha, setVehiculoFicha] = useState<any>(null);
   const [combustible, setCombustible] = useState(50);
   const [condicion, setCondicion]     = useState("Buena");
   const [zonas, setZonas]             = useState<ZonaDanio[]>([]);
@@ -200,22 +202,35 @@ export default function InspeccionPage() {
         }
 
         // ── Kilometraje: ya no se pide en blanco ───────────────────────────
-        // El km se captura al registrar el vehículo y en cada visita, así que
-        // aquí se muestra la última lectura conocida (o la proyección de uso)
-        // como sugerencia. El recepcionista solo confirma o corrige.
+        // El km se captura al registrar el vehículo y en cada visita. Aquí solo
+        // se confirma o se corrige.
+        //
+        // Se piden dos cosas en paralelo:
+        //   · la ficha del vehículo → km_actual (siempre está si se registró)
+        //   · el odómetro           → proyección de uso, para sugerir el de hoy
+        // La ficha es el respaldo: si el historial fallara, el campo igual sale
+        // con dato en vez de quedar vacío.
         try {
           if (vehiculoId) {
-            const r = await fetch(`${API}/vehiculos/${vehiculoId}/odometro`);
-            if (r.ok) {
-              const odo = await r.json();
-              setOdometro(odo);
-              // Solo sugerir si el usuario no tiene ya un valor cargado
-              setKmEntrada(prev => {
-                if (prev) return prev;
-                const sug = odo?.estimado?.km_estimado_hoy ?? odo?.estimado?.km_ultima_lectura;
-                return sug ? String(sug) : "";
-              });
-            }
+            const [rVeh, rOdo] = await Promise.all([
+              fetch(`${API}/vehiculos/${vehiculoId}`).catch(() => null),
+              fetch(`${API}/vehiculos/${vehiculoId}/odometro`).catch(() => null),
+            ]);
+
+            const veh = rVeh && rVeh.ok ? await rVeh.json() : null;
+            const odo = rOdo && rOdo.ok ? await rOdo.json() : null;
+
+            if (veh && !veh.error) setVehiculoFicha(veh);
+            if (odo) setOdometro(odo);
+
+            setKmEntrada(prev => {
+              if (prev) return prev;   // ya venía de una inspección guardada
+              const sug =
+                odo?.estimado?.km_estimado_hoy ??
+                odo?.estimado?.km_ultima_lectura ??
+                veh?.km_actual ?? null;
+              return sug != null ? String(sug) : "";
+            });
           }
         } catch (_e) { /* si falla, el campo queda vacío y se teclea a mano */ }
       } catch (err) { console.error(err); }
@@ -399,17 +414,39 @@ export default function InspeccionPage() {
               placeholder="Ej: 85000" style={sty.input} />
             {/* El dato ya viene del registro del vehículo y de visitas
                 anteriores: aquí solo se confirma o se corrige. */}
-            {odometro?.estimado?.km_ultima_lectura != null && (
-              <p style={{ fontSize: 11, color: "#93c5fd", marginTop: -8 }}>
-                Última lectura: <strong>{Number(odometro.estimado.km_ultima_lectura).toLocaleString("es-DO")} km</strong>
-                {odometro.estimado.fecha_ultima && ` (${new Date(odometro.estimado.fecha_ultima).toLocaleDateString("es-DO")})`}
-                {odometro.estimado.km_por_mes ? ` · rueda ~${Number(odometro.estimado.km_por_mes).toLocaleString("es-DO")} km/mes` : ""}
-              </p>
-            )}
-            {kmEntrada && odometro?.estimado?.km_ultima_lectura != null &&
-             Number(kmEntrada) < Number(odometro.estimado.km_ultima_lectura) && (
-              <p style={{ fontSize: 11, color: "#f87171", marginTop: -4 }}>
-                ⚠️ Es menor que la última lectura ({Number(odometro.estimado.km_ultima_lectura).toLocaleString("es-DO")} km). Verifica el dato.
+            {(() => {
+              // La referencia sale del odómetro; si no hay historial, de la ficha.
+              const ultimo = odometro?.estimado?.km_ultima_lectura ?? vehiculoFicha?.km_actual ?? null;
+              const fecha  = odometro?.estimado?.fecha_ultima ?? vehiculoFicha?.km_actual_fecha ?? null;
+              const kmMes  = odometro?.estimado?.km_por_mes ?? null;
+              if (ultimo == null) {
+                return (
+                  <p style={{ fontSize: 11, color: "#fbbf24", marginTop: -8 }}>
+                    Este vehículo no tiene kilometraje registrado. El que anotes aquí queda como primera lectura.
+                  </p>
+                );
+              }
+              return (
+                <>
+                  <p style={{ fontSize: 11, color: "#93c5fd", marginTop: -8 }}>
+                    Última lectura: <strong>{Number(ultimo).toLocaleString("es-DO")} km</strong>
+                    {fecha && ` (${new Date(fecha).toLocaleDateString("es-DO")})`}
+                    {kmMes ? ` · rueda ~${Number(kmMes).toLocaleString("es-DO")} km/mes` : ""}
+                  </p>
+                  {kmEntrada && Number(kmEntrada) < Number(ultimo) && (
+                    <p style={{ fontSize: 11, color: "#f87171", marginTop: -4 }}>
+                      ⚠️ Es menor que la última lectura ({Number(ultimo).toLocaleString("es-DO")} km). Verifica el dato.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+            {/* Lo que el taller ya sabe del vehículo, a la vista del recepcionista */}
+            {(vehiculoFicha?.cuartos_aceite || vehiculoFicha?.filtro_aceite) && (
+              <p style={{ fontSize: 11, color: "#93c5fd", marginTop: 4 }}>
+                🛢️ {vehiculoFicha.cuartos_aceite ? `${vehiculoFicha.cuartos_aceite} cuartos` : ""}
+                {vehiculoFicha.viscosidad ? ` · ${vehiculoFicha.viscosidad}` : ""}
+                {vehiculoFicha.filtro_aceite ? ` · filtro ${vehiculoFicha.filtro_aceite}` : ""}
               </p>
             )}
           </div>

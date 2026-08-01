@@ -2,6 +2,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
+import FichaTecnicaVehiculo from "@/components/FichaTecnicaVehiculo";
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 interface Orden {
@@ -14,6 +15,7 @@ interface Orden {
   vehiculo_modelo?: string;
   vehiculo_placa?: string;
   vehiculo_ano?: string;
+  vehiculo_id?: number;
   descripcion: string;
   created_at: string;
 }
@@ -154,6 +156,7 @@ export default function ReparacionPage() {
             vehiculo_modelo:  veh.modelo   || ordenBase.vehiculo_modelo  || "",
             vehiculo_placa:   veh.placa    || ordenBase.vehiculo_placa   || "",
             vehiculo_ano:     String(veh.ano || ordenBase.vehiculo_ano   || ""),
+            vehiculo_id:      veh.id || ordenBase.vehiculo_id || undefined,
           });
         } else {
           setOrden(ordenBase);
@@ -385,6 +388,7 @@ export default function ReparacionPage() {
             vehiculo_modelo:  veh.modelo   || ordenBase.vehiculo_modelo  || "",
             vehiculo_placa:   veh.placa    || ordenBase.vehiculo_placa   || "",
             vehiculo_ano:     String(veh.ano || ordenBase.vehiculo_ano   || ""),
+            vehiculo_id:      veh.id || ordenBase.vehiculo_id || undefined,
           });
         } else {
           setOrden(ordenBase);
@@ -1194,6 +1198,20 @@ export default function ReparacionPage() {
               </div>
             </div>
           </div>
+
+          {/* Ficha técnica — el técnico anota el filtro y los cuartos reales.
+              Va justo antes de cerrar la reparación porque es cuando tiene el
+              vehículo delante y el filtro en la mano. Lo que anote aquí queda
+              para todos los del mismo modelo. */}
+          {orden.estado === "REPARACION" && orden.vehiculo_id && (
+            <div style={{ marginBottom: 16 }}>
+              <FichaTecnicaVehiculo
+                vehiculoId={orden.vehiculo_id}
+                vehiculoLabel={`${orden.vehiculo_marca || ""} ${orden.vehiculo_modelo || ""} ${orden.vehiculo_ano || ""} · ${orden.vehiculo_placa || ""}`.trim()}
+                usuario={nombreTecnico}
+              />
+            </div>
+          )}
 
           {/* Botón marcar completa → Control Calidad */}
           {orden.estado === "REPARACION" && (
