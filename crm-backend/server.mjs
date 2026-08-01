@@ -961,7 +961,11 @@ app.post("/vehiculos", async (req, res) => {
     .insert([{ cliente_id, marca, modelo, ano, placa, color,
       vin: vin || null, motor: motor || null,
       combustible: combustible || null, vin_data: vin_data || null,
-      cilindros: cilindros ?? null, tipo_aceite: tipo_aceite || null }])
+      cilindros: cilindros ?? null, tipo_aceite: tipo_aceite || null,
+      cuartos_aceite: req.body.cuartos_aceite ?? null,
+      viscosidad: req.body.viscosidad || null,
+      spec_id: req.body.spec_id ?? null,
+      spec_confianza: req.body.spec_confianza || "ESTIMADO" }])
     .select();
   if (error) return res.json({ error: error.message });
 
@@ -1001,7 +1005,7 @@ app.delete("/vehiculos/:id", async (req, res) => {
 app.patch("/vehiculos/:id", async (req, res) => {
   const { id } = req.params;
   const campos = ["cliente_id","marca","modelo","ano","placa","color","vin","motor","combustible","vin_data",
-                  "cilindros","tipo_aceite"].reduce((o, k) => {
+                  "cilindros","tipo_aceite","cuartos_aceite","viscosidad","spec_id","spec_confianza"].reduce((o, k) => {
     if (req.body[k] !== undefined) o[k] = req.body[k];
     return o;
   }, {});
@@ -1022,6 +1026,69 @@ app.patch("/vehiculos/:id", async (req, res) => {
   }
 
   res.json(data[0]);
+});
+
+// ── Especificaciones de servicio ────────────────────────────────────────────
+// El cliente no sabe qué aceite usa ni cuántos cuartos lleva. Estas rutas
+// resuelven eso: el catálogo se llena una vez por modelo y después todos los
+// vehículos iguales se autocompletan solos (ver migracion_v25).
+
+// Qué lleva este vehículo, antes de guardarlo
+app.get("/vehiculos/spec/sugerir", async (req, res) => {
+  const { marca, modelo, ano, motor, cilindros } = req.query;
+  if (!marca || !modelo) {
+    return res.status(400).json({ error: true, mensaje: "marca y modelo son requeridos" });
+  }
+  const { data, error } = await supabase.rpc("vehiculo_sugerir_spec", {
+    p_marca: String(marca),
+    p_modelo: String(modelo),
+    p_ano: ano ? Number(ano) : null,
+    p_motor: motor ? String(motor) : null,
+    p_cilindros: cilindros ? Number(cilindros) : null,
+  });
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  res.json(data?.[0] || null);
+});
+
+// El técnico confirma lo que midió. Se guarda en el vehículo y, si propagar
+// es true, queda como ficha del modelo para todos los demás.
+app.post("/vehiculos/:id/spec", async (req, res) => {
+  const { id } = req.params;
+  const { cuartos, viscosidad, tipo_aceite, intervalo_km, filtro_aceite, propagar, notas } = req.body;
+  if (cuartos == null || Number(cuartos) <= 0) {
+    return res.status(400).json({ error: true, mensaje: "Los cuartos de aceite son requeridos" });
+  }
+  const { data, error } = await supabase.rpc("vehiculo_guardar_spec", {
+    p_vehiculo_id: Number(id),
+    p_cuartos: Number(cuartos),
+    p_viscosidad: viscosidad || null,
+    p_tipo_aceite: tipo_aceite || null,
+    p_intervalo_km: intervalo_km ? Number(intervalo_km) : null,
+    p_filtro_aceite: filtro_aceite || null,
+    p_usuario: usuarioDesdeReq(req).nombre,
+    p_propagar: propagar !== false,
+    p_notas: notas || null,
+  });
+  if (error) return res.status(400).json({ error: true, mensaje: error.message });
+  logAccion(req, { accion: "ACTUALIZAR", modulo: "vehiculos", registroId: id,
+    descripcion: `Verificó especificaciones de aceite (${cuartos} cuartos)` });
+  res.json(data?.[0] || { ok: true });
+});
+
+// Catálogo completo, para administrarlo desde el panel
+app.get("/vehiculos/spec/catalogo", async (req, res) => {
+  const { data, error } = await supabase.from("vehiculo_spec_servicio")
+    .select("*").eq("activo", true)
+    .order("marca").order("modelo").order("ano_desde");
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  res.json(data || []);
+});
+
+// Qué modelos urge medir: los que más entran al taller y no tienen ficha
+app.get("/vehiculos/spec/cobertura", async (req, res) => {
+  const { data, error } = await supabase.from("v_spec_cobertura").select("*");
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  res.json(data || []);
 });
 
 // ── Odómetro ────────────────────────────────────────────────────────────────
