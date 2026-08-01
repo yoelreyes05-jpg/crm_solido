@@ -1091,6 +1091,62 @@ app.get("/vehiculos/spec/cobertura", async (req, res) => {
   res.json(data || []);
 });
 
+// Campos editables de una ficha del catálogo. Lista blanca explícita para que
+// nadie pueda escribir columnas de control (veces_usada, created_at, etc.).
+const CAMPOS_SPEC = [
+  "marca", "modelo", "ano_desde", "ano_hasta", "motor", "cilindros",
+  "cuartos", "viscosidad", "tipo_aceite", "intervalo_km",
+  "filtro_aceite", "filtro_aire", "filtro_cabina", "bujias",
+  "refrigerante_l", "transmision_l", "confianza", "notas",
+];
+
+app.post("/vehiculos/spec/catalogo", async (req, res) => {
+  const fila = CAMPOS_SPEC.reduce((o, k) => {
+    if (req.body[k] !== undefined && req.body[k] !== "") o[k] = req.body[k];
+    return o;
+  }, {});
+  if (!fila.marca || !fila.modelo) {
+    return res.status(400).json({ error: true, mensaje: "marca y modelo son requeridos" });
+  }
+  if (fila.confianza === "VERIFICADO") {
+    fila.verificado_por = usuarioDesdeReq(req).nombre;
+    fila.verificado_el  = new Date().toISOString();
+  }
+  const { data, error } = await supabase.from("vehiculo_spec_servicio").insert([fila]).select().single();
+  if (error) return res.status(400).json({ error: true, mensaje: error.message });
+  logAccion(req, { accion: "CREAR", modulo: "vehiculos", registroId: data.id,
+    descripcion: `Creó ficha técnica de ${fila.marca} ${fila.modelo}` });
+  res.status(201).json(data);
+});
+
+app.patch("/vehiculos/spec/catalogo/:id", async (req, res) => {
+  const fila = CAMPOS_SPEC.reduce((o, k) => {
+    if (req.body[k] !== undefined) o[k] = req.body[k] === "" ? null : req.body[k];
+    return o;
+  }, {});
+  fila.updated_at = new Date().toISOString();
+  if (fila.confianza === "VERIFICADO") {
+    fila.verificado_por = usuarioDesdeReq(req).nombre;
+    fila.verificado_el  = new Date().toISOString();
+  }
+  const { data, error } = await supabase.from("vehiculo_spec_servicio")
+    .update(fila).eq("id", req.params.id).select().single();
+  if (error) return res.status(400).json({ error: true, mensaje: error.message });
+  logAccion(req, { accion: "ACTUALIZAR", modulo: "vehiculos", registroId: req.params.id,
+    descripcion: `Editó ficha técnica de ${data.marca} ${data.modelo}` });
+  res.json(data);
+});
+
+// Ficha de un vehículo. Se declara DESPUÉS de /vehiculos/spec/* y
+// /vehiculos/catalogo para que esas rutas no queden capturadas por :id.
+app.get("/vehiculos/:id", async (req, res) => {
+  const { data, error } = await supabase.from("vehiculos")
+    .select("*").eq("id", req.params.id).maybeSingle();
+  if (error) return res.status(500).json({ error: true, mensaje: error.message });
+  if (!data) return res.status(404).json({ error: true, mensaje: "Vehículo no encontrado" });
+  res.json(data);
+});
+
 // ── Odómetro ────────────────────────────────────────────────────────────────
 // Historial de lecturas de kilometraje. Alimenta la proyección de uso y las
 // alertas de mantenimiento vencido (ver migracion_v24).
