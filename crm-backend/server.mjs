@@ -3101,6 +3101,49 @@ app.get("/facturas", async (req, res) => {
   res.json(data || []);
 });
 
+// ─── Detección de mantenimiento cubierto por membresía ──────────────────────
+// El plan incluye N cambios de aceite al año. Para descontarlos automáticamente
+// hay que reconocer cuáles renglones de la factura son ese servicio.
+//
+// Se hace por palabras clave porque el sistema no marca los ítems con un tipo
+// de servicio. Desde caja siempre se puede forzar o anular con el parámetro
+// `cubrir_mantenimiento`, así que un falso positivo es corregible.
+
+const PALABRAS_MANTENIMIENTO = [
+  "aceite", "filtro de aceite", "filtro aceite", "cambio de aceite",
+  "mantenimiento", "lubricacion", "lubricación", "engrase",
+];
+// Estas descartan el renglón aunque mencione "aceite": son otros servicios.
+const PALABRAS_EXCLUIDAS = [
+  "transmision", "transmisión", "caja", "hidraulic", "hidráulic",
+  "freno", "direccion", "dirección", "diferencial", "motor completo",
+];
+
+function itemEsDeMantenimiento(item) {
+  const t = String(item?.descripcion || item?.nombre || "").toLowerCase();
+  if (!t) return false;
+  if (PALABRAS_EXCLUIDAS.some(p => t.includes(p))) return false;
+  return PALABRAS_MANTENIMIENTO.some(p => t.includes(p));
+}
+
+/** La factura cuenta como mantenimiento si incluye aceite Y algo más del servicio. */
+function esFacturaDeMantenimiento(items) {
+  const conAceite = (items || []).some(i => {
+    const t = String(i?.descripcion || i?.nombre || "").toLowerCase();
+    return t.includes("aceite") && !PALABRAS_EXCLUIDAS.some(p => t.includes(p));
+  });
+  return conAceite;
+}
+
+/** El plan solo cubre los vehículos amarrados a la membresía. */
+function vehiculoCubiertoPorMembresia(ben, vehiculoId) {
+  if (!ben) return false;
+  // Sin vehículos amarrados, la membresía cubre cualquiera del cliente.
+  if (!ben.vehiculos || ben.vehiculos.length === 0) return true;
+  if (!vehiculoId) return false;
+  return ben.vehiculos.includes(Number(vehiculoId));
+}
+
 app.post("/facturas", async (req, res) => {
   const {
     items,
@@ -3133,33 +3176,88 @@ app.post("/facturas", async (req, res) => {
       else baseServicios += linea;
     }
 
-    // 💎 PLANES: descuento automático según la membresía activa del cliente
+    // 💎 PLANES: cobertura y descuentos de la membresía activa del cliente
     let descuentoPlan = 0;
     let descuentoPlanNombre = null;
     let notaPlan = null;
+    let mantenimientoCubierto = null;   // datos para registrar el consumo al final
     if (cliente_id) {
       const benPlan = await beneficiosCliente(cliente_id);
       if (benPlan) {
+        // ── 1. Mantenimiento incluido ──────────────────────────────────────
+        // Si la factura ES un cambio de aceite y al cliente le quedan
+        // mantenimientos del año, esos renglones van en cero. Esto es lo que
+        // el cliente compró con el plan; el descuento porcentual es aparte.
+        const cubreMant = benPlan.uso.mantenimientos_disponibles !== 0
+          && Number(benPlan.beneficios.mantenimientos_ano || 0) !== 0;
+
+        // `cubrir_mantenimiento` permite forzarlo o desactivarlo desde caja;
+        // si no viene, se detecta por el contenido de la factura.
+        const esMant = req.body.cubrir_mantenimiento !== undefined
+          ? !!req.body.cubrir_mantenimiento
+          : esFacturaDeMantenimiento(items);
+
+        if (cubreMant && esMant && vehiculoCubiertoPorMembresia(benPlan, vehiculo_id)) {
+          let montoCubierto = 0;
+          for (const item of items) {
+            if (!itemEsDeMantenimiento(item)) continue;
+            const linea = Number(item.precio_unitario) * Number(item.cantidad);
+            montoCubierto += linea;
+            if (item.itbis_aplica) itbis -= linea * 0.18;   // tampoco se cobra su ITBIS
+            item.cubierto_por_plan = true;
+            // El renglón se conserva en la factura, pero en 0: el cliente ve
+            // qué se le hizo y cuánto se le habría cobrado.
+            if ((item.tipo || "repuesto") === "repuesto") baseRepuestos -= linea;
+            else baseServicios -= linea;
+          }
+          if (montoCubierto > 0) {
+            subtotal -= montoCubierto;
+            mantenimientoCubierto = {
+              membresia_id: benPlan.membresia.id,
+              plan: benPlan.plan.nombre,
+              monto: +montoCubierto.toFixed(2),
+              restantes: benPlan.uso.mantenimientos_disponibles < 0
+                ? -1 : benPlan.uso.mantenimientos_disponibles - 1,
+            };
+          }
+        }
+
+        // ── 2. Descuentos porcentuales sobre lo que sí se cobra ────────────
         const dS = Number(benPlan.beneficios.desc_servicios || 0);
         const dR = Number(benPlan.beneficios.desc_repuestos || 0);
-        descuentoPlan = +((baseServicios * dS / 100) + (baseRepuestos * dR / 100)).toFixed(2);
+        descuentoPlan = +((Math.max(0, baseServicios) * dS / 100)
+                        + (Math.max(0, baseRepuestos) * dR / 100)).toFixed(2);
         if (descuentoPlan > 0) descuentoPlanNombre = benPlan.plan.nombre;
         else descuentoPlan = 0;
-        // Estado del plan visible en la factura (lo que le queda este mes)
+
+        // ── 3. Estado del plan, visible en la factura ─────────────────────
         const partes = [];
+        if (benPlan.beneficios.mantenimientos_ano !== undefined) {
+          const usados = benPlan.uso.mantenimientos_usados + (mantenimientoCubierto ? 1 : 0);
+          const tot = Number(benPlan.beneficios.mantenimientos_ano);
+          partes.push(tot < 0
+            ? "mantenimientos ilimitados"
+            : `mantenimientos ${usados}/${tot} usados este año`);
+        }
         if (benPlan.beneficios.lavados_mes !== undefined) {
           const r = benPlan.uso.lavados_disponibles;
-          partes.push(r < 0 ? "lavados ilimitados" : `${r} lavado(s) restante(s)`);
+          partes.push(r < 0 ? "lavados ilimitados" : `${r} lavado(s) restante(s) este mes`);
         }
         if (benPlan.beneficios.diagnosticos_mes !== undefined) {
           const r = benPlan.uso.diagnosticos_disponibles;
-          partes.push(r < 0 ? "diagnósticos ilimitados" : `${r} diagnóstico(s) restante(s)`);
+          partes.push(r < 0 ? "diagnósticos ilimitados" : `${r} diagnóstico(s) restante(s) este mes`);
         }
-        notaPlan = `💎 ${benPlan.plan.nombre}${partes.length ? `: ${partes.join(" · ")} este mes` : ""} · renueva el ${benPlan.membresia.fecha_renovacion}`;
+        notaPlan = `💎 ${benPlan.plan.nombre}${partes.length ? `: ${partes.join(" · ")}` : ""}`
+          + ` · renueva el ${benPlan.membresia.fecha_renovacion}`;
+        if (mantenimientoCubierto) {
+          notaPlan = `💎 MANTENIMIENTO CUBIERTO POR ${benPlan.plan.nombre} `
+            + `(valor ${mantenimientoCubierto.monto.toFixed(2)})\n` + notaPlan;
+        }
       }
     }
 
-    subtotal = +(subtotal - descuentoPlan).toFixed(2);
+    subtotal = +(Math.max(0, subtotal) - descuentoPlan).toFixed(2);
+    itbis = +Math.max(0, itbis).toFixed(2);
     const total = subtotal + itbis;
 
     const tipo = ncf_tipo || "B02";
@@ -3322,7 +3420,27 @@ app.post("/facturas", async (req, res) => {
     // 🎁 Fidelización: acumular puntos de la factura (si el programa está activo)
     if (cliente_id) await acumularPuntos(cliente_id, subtotal, "taller", facturaId, `Factura ${ncf}`);
 
-    res.json(factura[0]);
+    // 💎 PLANES: descontar el mantenimiento del cupo anual. Se registra AQUÍ,
+    // después de que la factura existe, para que un fallo al facturar no
+    // consuma un mantenimiento que el cliente no recibió.
+    if (mantenimientoCubierto) {
+      await registrarConsumoPlan(
+        mantenimientoCubierto.membresia_id, cliente_id, "mantenimiento", facturaId,
+        `Mantenimiento cubierto por ${mantenimientoCubierto.plan} — factura ${ncf} `
+        + `(valor RD$ ${mantenimientoCubierto.monto.toFixed(2)})`,
+        usuario_nombre || "Sistema"
+      );
+    }
+
+    res.json({
+      ...factura[0],
+      // La caja necesita saber que se cubrió, para decírselo al cliente
+      mantenimiento_cubierto: mantenimientoCubierto
+        ? { plan: mantenimientoCubierto.plan,
+            valor: mantenimientoCubierto.monto,
+            restantes: mantenimientoCubierto.restantes }
+        : null,
+    });
   } catch (err) {
     console.error("Error creando factura:", err);
     res.json({ error: err.message || "Error interno" });
@@ -10337,16 +10455,31 @@ async function beneficiosCliente(clienteId) {
     const { data: vehs } = await supabase.from("plan_membresia_vehiculos")
       .select("vehiculo_id").eq("membresia_id", memb.id);
     const vehiculos = (vehs || []).map(v => Number(v.vehiculo_id));
-    // Consumos del mes calendario actual (RD)
+    // Consumos del mes calendario actual (RD) — para lavados y diagnósticos
     const inicioMes = hoy.slice(0, 8) + "01";
     const { data: cons } = await supabase.from("plan_consumos")
       .select("tipo").eq("membresia_id", memb.id).gte("created_at", `${inicioMes}T00:00:00`);
     const usados = {};
     for (const c of (cons || [])) usados[c.tipo] = (usados[c.tipo] || 0) + 1;
+
+    // Los mantenimientos son un cupo ANUAL, no mensual. Se cuentan desde el
+    // último aniversario de la membresía (no desde el 1 de enero): si alguien
+    // se inscribió en agosto, su año va de agosto a agosto.
+    const inicioAnio = aniversarioMembresia(memb.fecha_inicio, hoy);
+    const { data: consAnio } = await supabase.from("plan_consumos")
+      .select("tipo").eq("membresia_id", memb.id)
+      .eq("tipo", "mantenimiento")
+      .gte("created_at", `${inicioAnio}T00:00:00`);
+    const mantUsados = (consAnio || []).length;
+
     // -1 = ilimitado; undefined = el plan no incluye ese beneficio
     const disp = (limite, u) => limite === undefined ? 0 : (limite < 0 ? -1 : Math.max(0, limite - u));
     return {
-      membresia: { id: memb.id, estado: memb.estado, ciclo: memb.ciclo, fecha_inicio: memb.fecha_inicio, fecha_renovacion: memb.fecha_renovacion },
+      membresia: {
+        id: memb.id, estado: memb.estado, ciclo: memb.ciclo,
+        fecha_inicio: memb.fecha_inicio, fecha_renovacion: memb.fecha_renovacion,
+        anio_desde: inicioAnio,
+      },
       plan: memb.plan_catalogo,
       beneficios: b,
       vehiculos,
@@ -10355,9 +10488,27 @@ async function beneficiosCliente(clienteId) {
         lavados_disponibles:      disp(b.lavados_mes, usados.lavado || 0),
         diagnosticos_usados:      usados.diagnostico || 0,
         diagnosticos_disponibles: disp(b.diagnosticos_mes, usados.diagnostico || 0),
+        mantenimientos_incluidos:    b.mantenimientos_ano ?? 0,
+        mantenimientos_usados:       mantUsados,
+        mantenimientos_disponibles:  disp(b.mantenimientos_ano, mantUsados),
       },
     };
   } catch (e) { console.error("beneficiosCliente:", e.message); return null; }
+}
+
+/**
+ * Fecha (YYYY-MM-DD) en que empezó el año vigente de la membresía.
+ * Si el cliente se inscribió el 2025-08-15 y hoy es 2026-03-10, devuelve
+ * 2025-08-15. Si hoy es 2026-09-01, devuelve 2026-08-15.
+ * Así el cupo de mantenimientos se reinicia en el aniversario, no en enero.
+ */
+function aniversarioMembresia(fechaInicio, hoy) {
+  if (!fechaInicio) return `${hoy.slice(0, 4)}-01-01`;
+  const [ai, mi, di] = fechaInicio.split("-").map(Number);
+  const anioHoy = Number(hoy.slice(0, 4));
+  const cand = `${anioHoy}-${String(mi).padStart(2, "0")}-${String(di).padStart(2, "0")}`;
+  // Si el aniversario de este año todavía no llega, el año vigente arrancó el anterior
+  return cand <= hoy ? cand : `${anioHoy - 1}-${String(mi).padStart(2, "0")}-${String(di).padStart(2, "0")}`;
 }
 
 // ¿La membresía cubre este vehículo? Reglas:
@@ -10531,7 +10682,8 @@ app.get("/planes/membresias", async (req, res) => {
       }
     }
     const inicioMes = hoy.slice(0, 8) + "01";
-    const consPorMemb = {};
+    const consPorMemb = {};      // consumos del mes (lavados, diagnósticos)
+    const mantPorMemb = {};      // mantenimientos del año de cada membresía
     if (membIds.length) {
       const { data: cons } = await supabase.from("plan_consumos")
         .select("membresia_id, tipo").in("membresia_id", membIds)
@@ -10540,17 +10692,40 @@ app.get("/planes/membresias", async (req, res) => {
         if (!consPorMemb[c.membresia_id]) consPorMemb[c.membresia_id] = {};
         consPorMemb[c.membresia_id][c.tipo] = (consPorMemb[c.membresia_id][c.tipo] || 0) + 1;
       }
+
+      // Los mantenimientos son cupo anual: se traen los de los últimos 12 meses
+      // y luego se filtran por el aniversario de cada membresía, que es distinto
+      // para cada cliente según cuándo se inscribió.
+      const hace12 = new Date(`${hoy}T12:00:00Z`);
+      hace12.setUTCFullYear(hace12.getUTCFullYear() - 1);
+      const { data: mants } = await supabase.from("plan_consumos")
+        .select("membresia_id, created_at").in("membresia_id", membIds)
+        .eq("tipo", "mantenimiento")
+        .gte("created_at", `${hace12.toISOString().slice(0, 10)}T00:00:00`);
+      for (const c of (mants || [])) {
+        (mantPorMemb[c.membresia_id] ||= []).push(String(c.created_at).slice(0, 10));
+      }
     }
+
     const restantesDe = (m) => {
       if (m.estado !== "ACTIVA") return null;
       const b = bensPorPlan[m.plan_id] || {};
       const u = consPorMemb[m.id] || {};
       const disp = (lim, usado) => lim === undefined ? null : (lim < 0 ? -1 : Math.max(0, lim - usado));
+
+      const desde = aniversarioMembresia(m.fecha_inicio, hoy);
+      const mantUsados = (mantPorMemb[m.id] || []).filter(f => f >= desde).length;
+
       return {
         lavados:      disp(b.lavados_mes, u.lavado || 0),
         lavados_usados: u.lavado || 0,
         diagnosticos: disp(b.diagnosticos_mes, u.diagnostico || 0),
         diagnosticos_usados: u.diagnostico || 0,
+        // Cupo anual de mantenimientos: lo que el cliente realmente compró
+        mantenimientos:            disp(b.mantenimientos_ano, mantUsados),
+        mantenimientos_usados:     mantUsados,
+        mantenimientos_incluidos:  b.mantenimientos_ano ?? null,
+        anio_desde:                desde,
       };
     };
     res.json((data || []).map(m => ({
@@ -10685,7 +10860,24 @@ app.post("/planes/membresias/:id/renovar", async (req, res) => {
     if (!memb) return res.status(404).json({ error: "Membresía no encontrada" });
     const plan = memb.plan_catalogo;
     const esAnual = memb.ciclo === "ANUAL";
-    const monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+
+    // El precio depende del cilindraje del vehículo amarrado, igual que al
+    // inscribir. Cobrar el de catálogo aquí haría que la renovación saliera
+    // más barata que la inscripción para un V6 o V8.
+    let monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+    const { data: vehMemb } = await supabase.from("plan_membresia_vehiculos")
+      .select("vehiculo_id").eq("membresia_id", memb.id).limit(1);
+    if (vehMemb?.[0]?.vehiculo_id) {
+      const { data: cot, error: errCot } = await supabase.rpc("plan_cotizar_membresia", {
+        p_plan_id: memb.plan_id,
+        p_vehiculo_id: Number(vehMemb[0].vehiculo_id),
+      });
+      if (!errCot && cot?.[0]) {
+        const m = esAnual ? Number(cot[0].precio_anual || 0) : Number(cot[0].precio_mensual || 0);
+        if (m > 0) monto = m;
+      }
+    }
+
     // Extiende desde la fecha mayor entre hoy y la renovación actual
     const hoy = hoyPlanRD();
     const base = memb.fecha_renovacion > hoy ? memb.fecha_renovacion : hoy;

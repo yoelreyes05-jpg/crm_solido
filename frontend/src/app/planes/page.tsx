@@ -377,16 +377,51 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
     setGestVeh(null);
   };
 
-  const renovar = async (m: any) => {
-    const metodo = prompt(`Renovar ${m.plan_catalogo?.nombre} de ${m.cliente?.nombre}.\nMétodo de pago (EFECTIVO / TARJETA / TRANSFERENCIA):`, "EFECTIVO");
-    if (!metodo) return;
-    const r = await fetch(`${API}/planes/membresias/${m.id}/renovar`, {
-      method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
-      body: JSON.stringify({ metodo_pago: metodo.toUpperCase(), usuario: usuario?.nombre || "Sistema" }),
-    });
-    const d = await r.json();
-    if (d.error) return alert("Error: " + d.error);
-    cargar();
+  // ── Cobro de renovación ───────────────────────────────────────────────────
+  // Antes era un prompt() que no decía cuánto se iba a cobrar. Ahora se abre un
+  // modal que muestra el monto real (según el cilindraje del vehículo) antes de
+  // confirmar, porque este cobro entra directo a caja.
+  const [cobrando, setCobrando] = useState<any>(null);
+  const [cotRenov, setCotRenov] = useState<any>(null);
+  const [metodoCobro, setMetodoCobro] = useState("EFECTIVO");
+  const [procesando, setProcesando] = useState(false);
+
+  const abrirCobro = async (m: any) => {
+    setCobrando(m); setCotRenov(null); setMetodoCobro("EFECTIVO");
+    const vid = (m.vehiculos || [])[0]?.id;
+    if (vid && m.plan_id) {
+      try {
+        const r = await fetch(`${API}/planes/cotizar?plan_id=${m.plan_id}&vehiculo_id=${vid}`);
+        if (r.ok) { const d = await r.json(); if (d && !d.error) setCotRenov(d); }
+      } catch { /* sin cotización se muestra el precio de catálogo */ }
+    }
+  };
+
+  const confirmarCobro = async () => {
+    if (!cobrando) return;
+    setProcesando(true);
+    try {
+      const r = await fetch(`${API}/planes/membresias/${cobrando.id}/renovar`, {
+        method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
+        body: JSON.stringify({ metodo_pago: metodoCobro, usuario: usuario?.nombre || "Sistema" }),
+      });
+      const d = await r.json();
+      if (d.error) { alert("Error: " + d.error); return; }
+      const cobrado = montoRenovacion();
+      setCobrando(null);
+      alert(`✅ Cobro registrado · ${fmt(cobrado)}\nEntró a caja como ingreso de membresía.`);
+      cargar();
+    } catch { alert("Error de conexión"); }
+    finally { setProcesando(false); }
+  };
+
+  /** Monto a cobrar: el de la cotización por cilindraje, o el de catálogo. */
+  const montoRenovacion = () => {
+    if (!cobrando) return 0;
+    const anual = cobrando.ciclo === "ANUAL";
+    if (cotRenov) return Number(anual ? cotRenov.precio_anual : cotRenov.precio_mensual) || 0;
+    const p = cobrando.plan_catalogo || {};
+    return Number(anual ? p.precio_anual : p.precio_mensual) || 0;
   };
 
   const cancelar = async (m: any) => {
@@ -449,6 +484,21 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                   <td style={S.td}>
                     {m.restantes ? (
                       <>
+                        {/* Mantenimientos: es el beneficio principal del plan,
+                            así que va primero y con el detalle del año. */}
+                        {m.restantes.mantenimientos !== null && m.restantes.mantenimientos !== undefined && (
+                          <div style={{ fontSize: 12, fontWeight: 800,
+                            color: m.restantes.mantenimientos === 0 ? "#ef4444"
+                                 : m.restantes.mantenimientos === 1 ? "#f59e0b" : "#16a34a" }}>
+                            🛢️ {m.restantes.mantenimientos < 0
+                              ? "Mantenimientos ilimitados"
+                              : `${m.restantes.mantenimientos} de ${m.restantes.mantenimientos_incluidos} mantenimientos`}
+                            <div style={{ fontSize: 10, fontWeight: 400, color: "#94a3b8" }}>
+                              {m.restantes.mantenimientos_usados} usado(s)
+                              {m.restantes.anio_desde ? ` desde ${fmtFecha(m.restantes.anio_desde)}` : " este año"}
+                            </div>
+                          </div>
+                        )}
                         {m.restantes.lavados !== null && (
                           <div style={{ fontSize: 12, fontWeight: 700, color: m.restantes.lavados === 0 ? "#ef4444" : "#0ea5e9" }}>
                             🚿 {m.restantes.lavados < 0 ? "Ilimitados" : `${m.restantes.lavados} de ${m.restantes.lavados + m.restantes.lavados_usados}`}
@@ -459,7 +509,9 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                             🔍 {m.restantes.diagnosticos < 0 ? "Ilimitados" : `${m.restantes.diagnosticos} de ${m.restantes.diagnosticos + m.restantes.diagnosticos_usados}`}
                           </div>
                         )}
-                        {m.restantes.lavados === null && m.restantes.diagnosticos === null && <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>}
+                        {m.restantes.lavados === null && m.restantes.diagnosticos === null
+                          && (m.restantes.mantenimientos === null || m.restantes.mantenimientos === undefined)
+                          && <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>}
                       </>
                     ) : <span style={{ fontSize: 11, color: "#94a3b8" }}>—</span>}
                   </td>
@@ -476,7 +528,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                   </td>
                   <td style={{ ...S.td, whiteSpace: "nowrap" }}>
                     {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => setGestVeh(m)} style={S.btnGhost}>🚗</button>}{" "}
-                    {puedeEditar && m.estado !== "CANCELADA" && <button onClick={() => renovar(m)} style={S.btnGhost}>🔄 Renovar</button>}{" "}
+                    {puedeEditar && m.estado !== "CANCELADA" && <button onClick={() => abrirCobro(m)} style={{ ...S.btnGhost, color: "#16a34a", fontWeight: 800 }}>💵 Cobrar</button>}{" "}
                     {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => cancelar(m)} style={{ ...S.btnGhost, color: "#ef4444" }}>✕</button>}
                   </td>
                 </tr>
@@ -486,6 +538,63 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
           </tbody>
         </table>
       </div>
+
+      {/* Modal de cobro de renovación */}
+      {cobrando && (
+        <div onClick={() => !procesando && setCobrando(null)}
+          style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: 16 }}>
+          <div onClick={e => e.stopPropagation()} style={{ ...S.card, width: 430, margin: 0 }}>
+            <h3 style={{ fontWeight: 800, color: "#111827", marginTop: 0 }}>💵 Cobrar membresía</h3>
+
+            <div style={{ background: "#f8fafc", borderRadius: 9, padding: "10px 12px", fontSize: 13, marginBottom: 12, color: "#334155" }}>
+              <div><b>{cobrando.cliente?.nombre}</b></div>
+              <div>{cobrando.plan_catalogo?.emoji} {cobrando.plan_catalogo?.nombre} · {cobrando.ciclo === "ANUAL" ? "Anual" : "Mensual"}</div>
+              {(cobrando.vehiculos || []).length > 0 && (
+                <div style={{ fontSize: 12, color: "#64748b" }}>🚗 {vehLabel(cobrando.vehiculos[0])}</div>
+              )}
+              <div style={{ fontSize: 12, color: "#64748b" }}>
+                Vence: {fmtFecha(cobrando.fecha_renovacion)}
+              </div>
+            </div>
+
+            {/* El monto sale del cilindraje del vehículo, igual que al inscribir */}
+            <div style={{ background: "#ecfdf5", border: "1px solid #a7f3d0", borderRadius: 9, padding: "12px 14px", marginBottom: 12 }}>
+              <div style={{ fontSize: 12, color: "#065f46", fontWeight: 700 }}>Monto a cobrar</div>
+              <div style={{ fontSize: 26, fontWeight: 900, color: "#047857" }}>{fmt(montoRenovacion())}</div>
+              {cotRenov && (
+                <div style={{ fontSize: 11, color: "#047857" }}>
+                  Tarifa de {cotRenov.cilindros} cilindros
+                  {cotRenov.precio_es_sugerido ? " · precio sugerido (sin tarifa fijada)" : ""}
+                </div>
+              )}
+              {!cotRenov && (cobrando.vehiculos || []).length === 0 && (
+                <div style={{ fontSize: 11, color: "#a16207" }}>
+                  Sin vehículo amarrado: se usa el precio de catálogo.
+                </div>
+              )}
+            </div>
+
+            <label style={S.label}>Método de pago</label>
+            <select value={metodoCobro} onChange={e => setMetodoCobro(e.target.value)} style={{ ...S.input, marginBottom: 14 }}>
+              <option value="EFECTIVO">💵 Efectivo</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+            </select>
+
+            <div style={{ display: "flex", gap: 8 }}>
+              <button onClick={confirmarCobro} disabled={procesando}
+                style={{ ...S.btn, flex: 2, background: "#16a34a", opacity: procesando ? 0.6 : 1 }}>
+                {procesando ? "Cobrando…" : `Cobrar ${fmt(montoRenovacion())}`}
+              </button>
+              <button onClick={() => setCobrando(null)} disabled={procesando}
+                style={{ ...S.btnGhost, flex: 1 }}>Cancelar</button>
+            </div>
+            <p style={{ fontSize: 11, color: "#94a3b8", marginTop: 10, marginBottom: 0 }}>
+              El cobro entra a caja y extiende la membresía un {cobrando.ciclo === "ANUAL" ? "año" : "mes"}.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Modal gestión de vehículos de una membresía */}
       {gestVeh && (
