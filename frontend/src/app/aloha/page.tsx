@@ -15,8 +15,19 @@ const TIENDA = {
   telefono: "829-393-3673",
   instagram: "@alohaperfumes_store",
   direccion: "Calle Constanza #71, Los Cerros de Sabana Perdida",
-  emoji: "🌺",
+  // Logo real de la tienda. Va en /public, así que se sirve desde la raíz del
+  // sitio. Para la impresión hace falta la URL absoluta (ver logoAbsoluto).
+  logo: "/logo-aloha.png",
 };
+
+/**
+ * URL absoluta del logo.
+ * La factura se imprime dentro de un iframe con `document.write`, y ahí una
+ * ruta relativa como "/logo-aloha.jpg" no siempre resuelve contra el sitio.
+ * Con el origen completo la imagen carga siempre.
+ */
+const logoAbsoluto = () =>
+  typeof window !== "undefined" ? window.location.origin + TIENDA.logo : TIENDA.logo;
 
 // ── Paleta rosa/blanco ────────────────────────────────────────────────────────
 const C = {
@@ -86,7 +97,7 @@ function generarHTMLAloha(venta: any, items: any[]) {
     *{margin:0;padding:0;box-sizing:border-box;}
     body{font-family:Arial,sans-serif;font-size:13px;color:#500724;padding:24px;max-width:400px;margin:auto;background:#fff;}
     .header{text-align:center;border-bottom:3px solid #ec4899;padding-bottom:14px;margin-bottom:16px;}
-    .logo{font-size:34px;}
+    .logo img{max-width:150px;max-height:110px;object-fit:contain;display:block;margin:0 auto 6px;}
     .nombre{font-size:18px;font-weight:900;letter-spacing:2px;color:#db2777;margin-top:4px;}
     .sub{font-size:11px;color:#9d5c7d;margin-top:4px;line-height:1.6;}
     .num-box{background:#ec4899;color:#fff;text-align:center;padding:8px;border-radius:6px;margin:12px 0;}
@@ -100,7 +111,7 @@ function generarHTMLAloha(venta: any, items: any[]) {
     @media print{body{padding:8px;}}
   </style></head><body>
   <div class="header">
-    <div class="logo">${TIENDA.emoji}</div>
+    <div class="logo"><img src="${logoAbsoluto()}" alt="${TIENDA.nombre}" /></div>
     <div class="nombre">${TIENDA.nombre}</div>
     <div class="sub">Tel: ${TIENDA.telefono}<br/>${TIENDA.instagram}<br/>${TIENDA.direccion}</div>
   </div>
@@ -124,11 +135,26 @@ function generarHTMLAloha(venta: any, items: any[]) {
     <div class="t-row t-total"><span>TOTAL:</span><span>${fmt(venta.total)}</span></div>
   </div>
   <div class="footer">
-    ¡Gracias por su compra! ${TIENDA.emoji}<br/>
+    ¡Gracias por su compra!<br/>
     <b>${TIENDA.nombre}</b> · ${TIENDA.telefono}<br/>
     ${TIENDA.instagram} · ${TIENDA.direccion}
   </div>
-  <script>window.onload=function(){window.print();}</script>
+  <script>
+    // Con el logo ya no basta con imprimir al cargar el documento: si la
+    // imagen todavía no está lista, la factura sale sin logo. Se espera a que
+    // cargue (o falle) antes de abrir el diálogo de impresión.
+    (function(){
+      var img = document.querySelector('.logo img');
+      var listo = false;
+      function imprimir(){ if (listo) return; listo = true; window.print(); }
+      if (!img || img.complete) { window.onload = imprimir; }
+      else {
+        img.onload  = imprimir;
+        img.onerror = imprimir;          // si el logo falla, se imprime igual
+        setTimeout(imprimir, 2500);      // red lenta: no dejar al usuario esperando
+      }
+    })();
+  </script>
   </body></html>`;
 }
 
@@ -142,8 +168,11 @@ function imprimirHTML(html: string) {
   const doc = iframe.contentDocument || (iframe.contentWindow as any)?.document;
   if (!doc) { const w = window.open("", "_blank"); if (w) { w.document.write(html); w.document.close(); } return; }
   doc.open(); doc.write(html); doc.close();
+  // El propio HTML dispara la impresión cuando el logo terminó de cargar, así
+  // que aquí solo se enfoca el iframe. Llamar print() también desde acá abriría
+  // el diálogo dos veces.
   iframe.onload = () => {
-    try { (iframe.contentWindow as any)?.focus(); (iframe.contentWindow as any)?.print(); }
+    try { (iframe.contentWindow as any)?.focus(); }
     catch { const w = window.open("", "_blank"); if (w) { w.document.write(html); w.document.close(); } }
   };
 }
@@ -185,7 +214,8 @@ export default function AlohaPage() {
     <div style={{ minHeight: "100vh", background: C.bg, padding: 24 }}>
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
-        <div style={{ fontSize: 36 }}>{TIENDA.emoji}</div>
+        <img src={TIENDA.logo} alt={TIENDA.nombre}
+          style={{ width: 74, height: 74, objectFit: "contain" }} />
         <div>
           <h1 style={{ fontSize: 24, fontWeight: 900, color: C.primaryD, letterSpacing: 1, margin: 0 }}>
             {TIENDA.nombre}
