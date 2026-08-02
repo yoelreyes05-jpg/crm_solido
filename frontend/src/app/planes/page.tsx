@@ -275,7 +275,10 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
   const [vehiculos, setVehiculos] = useState<any[]>([]);
   const [busqueda, setBusqueda] = useState("");
   const [filtro, setFiltro] = useState("TODAS");
-  const [form, setForm] = useState({ cliente_id: "", plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
+  // modalidad: TOTAL (año completo) · MITAD (2 pagos de 50%) · MENSUAL (12 pagos)
+  // cobrar_ahora: false → la(s) cuota(s) quedan pendientes y se cobran en
+  // Facturación → "Por Cobrar" cuando el cliente pase por caja.
+  const [form, setForm] = useState({ cliente_id: "", plan_id: "", modalidad: "TOTAL", metodo_pago: "EFECTIVO", cobrar_ahora: true });
   const [vehSel, setVehSel] = useState<number[]>([]);
   const [buscaCliente, setBuscaCliente] = useState("");
   const [guardando, setGuardando] = useState(false);
@@ -344,12 +347,22 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
     try {
       const r = await fetch(`${API}/planes/membresias`, {
         method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
-        body: JSON.stringify({ ...form, vehiculo_ids: vehSel, usuario: usuario?.nombre || "Sistema" }),
+        body: JSON.stringify({
+          cliente_id: form.cliente_id, plan_id: form.plan_id,
+          modalidad_pago: form.modalidad, cobrar_ahora: form.cobrar_ahora,
+          metodo_pago: form.metodo_pago,
+          vehiculo_ids: vehSel, usuario: usuario?.nombre || "Sistema",
+        }),
       });
       const d = await r.json();
       if (d.error) return alert("Error: " + d.error);
-      alert("✅ Membresía activada");
-      setForm({ cliente_id: "", plan_id: "", ciclo: "MENSUAL", metodo_pago: "EFECTIVO" });
+      const nCuotas = (d.cuotas || []).length;
+      const pendientes = (d.cuotas || []).filter((c: any) => c.estado === "PENDIENTE").length;
+      alert("✅ Membresía activada"
+        + (nCuotas > 1 ? ` — ${nCuotas} cuotas` : "")
+        + (pendientes > 0 ? `\n💳 ${pendientes} cuota(s) pendiente(s): el cliente aparece en Facturación → "Por Cobrar" para pagarlas.` : "")
+        + (d.aviso ? `\n${d.aviso}` : ""));
+      setForm({ cliente_id: "", plan_id: "", modalidad: "TOTAL", metodo_pago: "EFECTIVO", cobrar_ahora: true });
       setVehSel([]);
       setBuscaCliente("");
       cargar();
@@ -464,7 +477,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         </div>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
-            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Restantes (mes)</th><th style={S.th}>Vehículos</th><th style={S.th}>Ciclo</th>
+            <th style={S.th}>Cliente</th><th style={S.th}>Plan</th><th style={S.th}>Servicios restantes</th><th style={S.th}>Vehículos</th><th style={S.th}>Ciclo</th>
             <th style={S.th}>Renueva</th><th style={S.th}>Estado</th><th style={S.th}></th>
           </tr></thead>
           <tbody>
@@ -521,7 +534,14 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                     ))}
                     {(m.vehiculos || []).length === 0 && <span style={{ fontSize: 11, color: "#94a3b8" }}>— se amarra al 1er uso</span>}
                   </td>
-                  <td style={S.td}>{m.ciclo === "ANUAL" ? "Anual" : "Mensual"}</td>
+                  <td style={S.td}>
+                    {m.modalidad_pago === "MENSUAL" ? "12 pagos" : m.modalidad_pago === "MITAD" ? "2 pagos (50/50)" : m.ciclo === "ANUAL" ? "Anual" : "Mensual"}
+                    {Number(m.saldo_pendiente || 0) > 0 && (
+                      <div style={{ fontSize: 11, fontWeight: 800, color: "#dc2626" }}>
+                        💳 Debe {fmt(m.saldo_pendiente)}
+                      </div>
+                    )}
+                  </td>
                   <td style={S.td}>{fmtFecha(m.fecha_renovacion)}</td>
                   <td style={S.td}>
                     <span style={{ background: ec.bg, color: ec.color, padding: "3px 10px", borderRadius: 20, fontWeight: 800, fontSize: 11 }}>{m.estado}</span>
@@ -689,18 +709,36 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
           </div>
         )}
 
-        <label style={S.label}>Ciclo</label>
-        <select value={form.ciclo} onChange={e => setForm({ ...form, ciclo: e.target.value })} style={{ ...S.input, marginBottom: 8 }}>
-          <option value="MENSUAL">Mensual</option>
-          <option value="ANUAL">Anual</option>
+        <label style={S.label}>Forma de pago (la membresía dura 1 año)</label>
+        <select value={form.modalidad} onChange={e => setForm({ ...form, modalidad: e.target.value })} style={{ ...S.input, marginBottom: 8 }}>
+          <option value="TOTAL">💰 Total — 1 pago del año completo</option>
+          <option value="MITAD">➗ Mitad — 2 pagos de 50% (hoy y a los 6 meses)</option>
+          <option value="MENSUAL">📅 Mensual — 12 pagos, uno por mes</option>
         </select>
 
-        <label style={S.label}>Método de pago</label>
-        <select value={form.metodo_pago} onChange={e => setForm({ ...form, metodo_pago: e.target.value })} style={{ ...S.input, marginBottom: 12 }}>
-          <option value="EFECTIVO">💵 Efectivo</option>
-          <option value="TARJETA">💳 Tarjeta</option>
-          <option value="TRANSFERENCIA">🏦 Transferencia</option>
-        </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, marginBottom: 8, cursor: "pointer", color: "#111827" }}>
+          <input type="checkbox" checked={form.cobrar_ahora}
+            onChange={e => setForm({ ...form, cobrar_ahora: e.target.checked })}
+            style={{ width: 16, height: 16, accentColor: "#6366f1" }} />
+          Cobrar la primera cuota ahora mismo
+        </label>
+        {!form.cobrar_ahora && (
+          <div style={{ fontSize: 12, color: "#92400e", background: "#fef3c7", borderRadius: 8, padding: "8px 10px", marginBottom: 8 }}>
+            💳 No se cobra nada aquí: todas las cuotas quedan pendientes y el cliente
+            aparecerá en <b>Facturación → Por Cobrar</b> para pagarlas en caja.
+          </div>
+        )}
+
+        {form.cobrar_ahora && (
+          <>
+            <label style={S.label}>Método de pago (primera cuota)</label>
+            <select value={form.metodo_pago} onChange={e => setForm({ ...form, metodo_pago: e.target.value })} style={{ ...S.input, marginBottom: 12 }}>
+              <option value="EFECTIVO">💵 Efectivo</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+            </select>
+          </>
+        )}
 
         {/* ── Cotización según el vehículo ────────────────────────────────
             Si hay vehículo seleccionado, el precio sale del cilindraje real.
@@ -711,12 +749,26 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
               🚗 {cotizacion.vehiculo} · {cotizacion.cilindros} cilindros
             </div>
 
-            <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
-              <span>Cobro hoy</span>
-              <b style={{ color: "#4f46e5", fontSize: 15 }}>
-                {fmt(form.ciclo === "ANUAL" ? cotizacion.precio_anual : cotizacion.precio_mensual)}
-              </b>
-            </div>
+            {(() => {
+              const pa = Number(cotizacion.precio_anual || 0);
+              const pm = Number(cotizacion.precio_mensual || 0);
+              const cuota = form.modalidad === "TOTAL" ? pa : form.modalidad === "MITAD" ? pa / 2 : pm;
+              const detalle = form.modalidad === "TOTAL" ? "1 pago único"
+                : form.modalidad === "MITAD" ? `2 cuotas de ${fmt(pa / 2)}`
+                : `12 cuotas de ${fmt(pm)}`;
+              return (
+                <>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span>{form.cobrar_ahora ? "Cobro hoy (1ra cuota)" : "1ra cuota (a facturación)"}</span>
+                    <b style={{ color: "#4f46e5", fontSize: 15 }}>{fmt(cuota)}</b>
+                  </div>
+                  <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
+                    <span>Plan de pago</span>
+                    <b>{detalle}</b>
+                  </div>
+                </>
+              );
+            })()}
             <div style={{ display: "flex", justifyContent: "space-between", padding: "3px 0" }}>
               <span>Mantenimientos al año</span>
               <b>{Number(cotizacion.mantenimientos_ano)} · cada {Number(cotizacion.intervalo_km).toLocaleString("es-DO")} km</b>
@@ -748,11 +800,12 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
 
         {form.plan_id && !cotizacion && (
           <div style={{ background: "#f8fafc", borderRadius: 9, padding: "10px 12px", fontSize: 13, marginBottom: 12, color: "#334155" }}>
-            Cobro hoy: <b style={{ color: "#6366f1" }}>
+            {form.cobrar_ahora ? "Cobro hoy (1ra cuota): " : "1ra cuota (a facturación): "}<b style={{ color: "#6366f1" }}>
               {(() => {
                 const p = planes.find(x => String(x.id) === String(form.plan_id));
                 if (!p) return "—";
-                return fmt(form.ciclo === "ANUAL" ? p.precio_anual : p.precio_mensual);
+                const pa = Number(p.precio_anual || 0), pm = Number(p.precio_mensual || 0);
+                return fmt(form.modalidad === "TOTAL" ? pa : form.modalidad === "MITAD" ? pa / 2 : pm);
               })()}
             </b>
             {cotizando

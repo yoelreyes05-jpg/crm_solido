@@ -10770,7 +10770,19 @@ app.get("/planes/resumen", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
-// Inscribir: crea membresía ACTIVA + registra pago + ingreso en caja
+// Inscribir: crea membresía ACTIVA + genera cuotas según la modalidad de pago.
+//
+// modalidad_pago:
+//   TOTAL   → 1 cuota por el año completo
+//   MITAD   → 2 cuotas de 50% (hoy y a los 6 meses)
+//   MENSUAL → 12 cuotas mensuales (precio mensual del plan)
+// Si no viene modalidad, se mantiene el comportamiento viejo por `ciclo`
+// (compatibilidad con pantallas que aún no la envían): TOTAL del ciclo.
+//
+// cobrar_ahora:
+//   true  → la primera cuota se cobra aquí mismo (pago + caja), como antes.
+//   false → TODAS las cuotas quedan PENDIENTES y el cliente aparece en
+//           Facturación → "Por Cobrar" para pagarlas en caja.
 app.post("/planes/membresias", async (req, res) => {
   try {
     const { cliente_id, plan_id, ciclo, metodo_pago, usuario, notas, vehiculo_ids } = req.body;
@@ -10789,13 +10801,25 @@ app.post("/planes/membresias", async (req, res) => {
     if (vmax >= 0 && vehIds.length > vmax)
       return res.status(400).json({ error: `${plan.nombre} cubre máximo ${vmax} vehículo(s); seleccionaste ${vehIds.length}` });
 
-    const esAnual = String(ciclo || "MENSUAL").toUpperCase() === "ANUAL";
+    // Modalidad de pago. Si viene, la membresía SIEMPRE es anual (el plan es
+    // un paquete de beneficios del año: 3 mantenimientos, etc.) y lo que
+    // cambia es cómo se paga. Si no viene, comportamiento viejo por ciclo.
+    const modalidad = req.body.modalidad_pago
+      ? String(req.body.modalidad_pago).toUpperCase()
+      : null;
+    if (modalidad && !["TOTAL", "MITAD", "MENSUAL"].includes(modalidad))
+      return res.status(400).json({ error: "modalidad_pago debe ser TOTAL, MITAD o MENSUAL" });
+    // true por defecto para no romper las pantallas existentes
+    const cobrarAhora = req.body.cobrar_ahora === undefined ? true : !!req.body.cobrar_ahora;
+
+    const esAnual = modalidad ? true : String(ciclo || "MENSUAL").toUpperCase() === "ANUAL";
 
     // El precio depende del cilindraje del vehículo: un V8 consume 7 cuartos
     // de aceite y un L4 consume 4.5, así que no pueden pagar lo mismo. Se
     // cotiza contra el primer vehículo amarrado; si no hay ninguno, se cae al
     // precio de catálogo (que es el de referencia, 4 cilindros).
-    let monto = esAnual ? Number(plan.precio_anual || 0) : Number(plan.precio_mensual);
+    let precioAnual   = Number(plan.precio_anual || 0);
+    let precioMensual = Number(plan.precio_mensual || 0);
     let cotizado = false;
     if (vehIds.length) {
       const { data: cot, error: errCot } = await supabase.rpc("plan_cotizar_membresia", {
@@ -10804,24 +10828,65 @@ app.post("/planes/membresias", async (req, res) => {
       });
       if (!errCot && cot?.[0]) {
         const c = cot[0];
-        const m = esAnual ? Number(c.precio_anual || 0) : Number(c.precio_mensual || 0);
-        if (m > 0) { monto = m; cotizado = true; }
+        if (Number(c.precio_anual || 0) > 0)   { precioAnual = Number(c.precio_anual); cotizado = true; }
+        if (Number(c.precio_mensual || 0) > 0) { precioMensual = Number(c.precio_mensual); cotizado = true; }
       } else if (errCot) {
         console.warn("[planes] no se pudo cotizar por cilindraje:", errCot.message);
       }
     }
+    const monto = esAnual ? precioAnual : precioMensual;
 
+    // ── Plan de cuotas según la modalidad ──────────────────────────────────
     const inicio = hoyPlanRD();
+    const sumarMeses = (fechaISO, n) => {
+      const d = new Date(`${fechaISO}T12:00:00Z`);
+      d.setUTCMonth(d.getUTCMonth() + n);
+      return d.toISOString().slice(0, 10);
+    };
+    let cuotas = []; // [{numero, monto, fecha_vencimiento}]
+    if (modalidad === "TOTAL") {
+      cuotas = [{ numero: 1, monto: precioAnual, fecha_vencimiento: inicio }];
+    } else if (modalidad === "MITAD") {
+      const mitad = +(precioAnual / 2).toFixed(2);
+      cuotas = [
+        { numero: 1, monto: mitad, fecha_vencimiento: inicio },
+        { numero: 2, monto: +(precioAnual - mitad).toFixed(2), fecha_vencimiento: sumarMeses(inicio, 6) },
+      ];
+    } else if (modalidad === "MENSUAL") {
+      cuotas = Array.from({ length: 12 }, (_, i) => ({
+        numero: i + 1, monto: precioMensual, fecha_vencimiento: sumarMeses(inicio, i),
+      }));
+    } else {
+      // Sin modalidad (pantallas viejas): una sola cuota del ciclo elegido
+      cuotas = [{ numero: 1, monto, fecha_vencimiento: inicio }];
+    }
+    const montoTotal = +cuotas.reduce((a, c) => a + Number(c.monto), 0).toFixed(2);
+
     const renov = new Date(`${inicio}T12:00:00Z`);
     if (esAnual) renov.setUTCFullYear(renov.getUTCFullYear() + 1);
     else renov.setUTCMonth(renov.getUTCMonth() + 1);
 
-    const { data: memb, error } = await supabase.from("plan_membresias").insert([{
+    // La primera cuota se cobra ahora (si así se pidió); el resto queda
+    // pendiente y aparece en Facturación → Por Cobrar.
+    const pagadaAhora = cobrarAhora && cuotas.length && Number(cuotas[0].monto) > 0
+      ? Number(cuotas[0].monto) : 0;
+    const saldoPendiente = +(montoTotal - pagadaAhora).toFixed(2);
+
+    const filaMemb = {
       cliente_id: Number(cliente_id), plan_id: Number(plan_id), estado: "ACTIVA",
       ciclo: esAnual ? "ANUAL" : "MENSUAL",
       fecha_inicio: inicio, fecha_renovacion: renov.toISOString().slice(0, 10),
       notas: notas || null, created_by: usuario || "Sistema",
-    }]).select();
+      modalidad_pago: modalidad || "TOTAL",
+      monto_total: montoTotal, saldo_pendiente: saldoPendiente,
+    };
+    let { data: memb, error } = await supabase.from("plan_membresias").insert([filaMemb]).select();
+    if (error && /modalidad_pago|monto_total|saldo_pendiente/.test(error.message || "")) {
+      // La migración v23 no se ha corrido: insertar sin los campos nuevos
+      // para no bloquear la inscripción (las cuotas fallarán con aviso claro).
+      const { modalidad_pago, monto_total, saldo_pendiente, ...viejo } = filaMemb;
+      ({ data: memb, error } = await supabase.from("plan_membresias").insert([viejo]).select());
+    }
     if (error) return res.status(400).json({ error: error.message });
 
     // Amarrar los vehículos seleccionados a la membresía
@@ -10831,23 +10896,121 @@ app.post("/planes/membresias", async (req, res) => {
         .then(() => {}).catch(() => {});
     }
 
-    // Pago + caja (ingreso recurrente visible en contabilidad)
-    if (monto > 0) {
+    // ── Registrar las cuotas ────────────────────────────────────────────────
+    let avisoCuotas = null;
+    const filasCuotas = cuotas.map((c, i) => ({
+      membresia_id: memb[0].id, cliente_id: Number(cliente_id),
+      numero: c.numero, total_cuotas: cuotas.length,
+      monto: Number(c.monto), fecha_vencimiento: c.fecha_vencimiento,
+      estado: (i === 0 && pagadaAhora > 0) ? "PAGADA" : "PENDIENTE",
+      metodo_pago: (i === 0 && pagadaAhora > 0) ? (metodo_pago || "EFECTIVO") : null,
+      pagada_at: (i === 0 && pagadaAhora > 0) ? new Date().toISOString() : null,
+      cobrada_por: (i === 0 && pagadaAhora > 0) ? (usuario || "Sistema") : null,
+    }));
+    const { error: errCuotas } = await supabase.from("plan_cuotas").insert(filasCuotas);
+    if (errCuotas) {
+      console.error("[planes] no se pudieron crear las cuotas:", errCuotas.message);
+      avisoCuotas = "⚠️ No se pudieron registrar las cuotas (¿corriste la migración v23?). "
+        + "La membresía quedó activa pero no aparecerá en Facturación → Por Cobrar.";
+    }
+
+    // Pago + caja SOLO de lo que se cobró ahora
+    if (pagadaAhora > 0) {
       await supabase.from("plan_pagos").insert([{
-        membresia_id: memb[0].id, cliente_id: Number(cliente_id), monto,
+        membresia_id: memb[0].id, cliente_id: Number(cliente_id), monto: pagadaAhora,
         metodo: metodo_pago || "EFECTIVO",
-        concepto: `Inscripción ${plan.nombre} (${esAnual ? "anual" : "mensual"})`
+        concepto: `Inscripción ${plan.nombre} — cuota 1/${cuotas.length}`
+          + (modalidad ? ` (${modalidad.toLowerCase()})` : esAnual ? " (anual)" : " (mensual)")
           + (cotizado ? " — tarifa según cilindraje del vehículo" : ""),
         usuario: usuario || "Sistema",
       }]);
       await supabase.from("caja_movimientos").insert([{
-        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — inscripción`,
-        monto, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
+        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — cuota 1/${cuotas.length}`,
+        monto: pagadaAhora, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
       }]).then(() => {}).catch(() => {});
     }
     logAccion(req, { accion: "CREAR", modulo: "planes", registroId: memb[0].id,
-      descripcion: `Inscribió al cliente #${cliente_id} en ${plan.nombre} (${esAnual ? "anual" : "mensual"})` });
-    res.json(memb[0]);
+      descripcion: `Inscribió al cliente #${cliente_id} en ${plan.nombre}`
+        + ` (${modalidad ? modalidad.toLowerCase() : esAnual ? "anual" : "mensual"}`
+        + `, ${cuotas.length} cuota(s), ${cobrarAhora ? "1ra cobrada" : "todas a facturación"})` });
+    res.json({
+      ...memb[0],
+      cuotas: filasCuotas.map(c => ({ numero: c.numero, monto: c.monto,
+        fecha_vencimiento: c.fecha_vencimiento, estado: c.estado })),
+      aviso: avisoCuotas,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ─── Cuotas de membresía (se cobran desde Facturación → Por Cobrar) ─────────
+app.get("/planes/cuotas", async (req, res) => {
+  try {
+    const estado = String(req.query.estado || "PENDIENTE").toUpperCase();
+    const { data, error } = await supabase.from("plan_cuotas")
+      .select("*, plan_membresias(id, estado, plan_id, modalidad_pago, plan_catalogo(nombre, emoji, color))")
+      .eq("estado", estado)
+      .order("fecha_vencimiento", { ascending: true }).limit(500);
+    if (error) {
+      // Tabla inexistente → migración v23 pendiente. Respuesta vacía, no 500,
+      // para que Facturación siga funcionando.
+      if (/plan_cuotas/.test(error.message || "")) return res.json([]);
+      return res.status(500).json({ error: error.message });
+    }
+    const cliMap = await mapaClientes((data || []).map(c => c.cliente_id));
+    const hoy = hoyPlanRD();
+    res.json((data || [])
+      // No cobrar cuotas de membresías canceladas
+      .filter(c => c.plan_membresias?.estado !== "CANCELADA")
+      .map(c => ({
+        ...c,
+        cliente: cliMap[c.cliente_id] || { id: c.cliente_id, nombre: `Cliente #${c.cliente_id}`, telefono: null },
+        plan_nombre: c.plan_membresias?.plan_catalogo?.nombre || "—",
+        plan_emoji: c.plan_membresias?.plan_catalogo?.emoji || "💎",
+        vencida: c.fecha_vencimiento < hoy,
+      })));
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Cobrar una cuota: pago + caja + saldo de la membresía
+app.post("/planes/cuotas/:id/cobrar", async (req, res) => {
+  try {
+    const { metodo_pago, usuario } = req.body;
+    const { data: cuota } = await supabase.from("plan_cuotas")
+      .select("*, plan_membresias(id, cliente_id, saldo_pendiente, plan_catalogo(nombre))")
+      .eq("id", req.params.id).maybeSingle();
+    if (!cuota) return res.status(404).json({ error: "Cuota no encontrada" });
+    if (cuota.estado !== "PENDIENTE")
+      return res.status(400).json({ error: `Esta cuota ya está ${cuota.estado.toLowerCase()}` });
+
+    const planNombre = cuota.plan_membresias?.plan_catalogo?.nombre || "Membresía";
+    const { data: upd, error } = await supabase.from("plan_cuotas").update({
+      estado: "PAGADA", metodo_pago: metodo_pago || "EFECTIVO",
+      pagada_at: new Date().toISOString(), cobrada_por: usuario || "Sistema",
+    }).eq("id", cuota.id).select();
+    if (error) return res.status(400).json({ error: error.message });
+
+    await supabase.from("plan_pagos").insert([{
+      membresia_id: cuota.membresia_id, cliente_id: cuota.cliente_id, monto: Number(cuota.monto),
+      metodo: metodo_pago || "EFECTIVO",
+      concepto: `${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas}`,
+      usuario: usuario || "Sistema",
+    }]);
+    await supabase.from("caja_movimientos").insert([{
+      tipo: "INGRESO", concepto: `Membresía ${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas}`,
+      monto: Number(cuota.monto), metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
+    }]).then(() => {}).catch(() => {});
+
+    // Actualizar saldo pendiente de la membresía (best-effort)
+    const saldoActual = Number(cuota.plan_membresias?.saldo_pendiente || 0);
+    await supabase.from("plan_membresias")
+      .update({ saldo_pendiente: Math.max(0, +(saldoActual - Number(cuota.monto)).toFixed(2)),
+        updated_at: new Date().toISOString() })
+      .eq("id", cuota.membresia_id).then(() => {}).catch(() => {});
+
+    logAccion(req, { accion: "COBRAR", modulo: "planes", registroId: cuota.membresia_id,
+      descripcion: `Cobró la cuota ${cuota.numero}/${cuota.total_cuotas} de ${planNombre}`
+        + ` del cliente #${cuota.cliente_id} — RD$ ${Number(cuota.monto).toLocaleString("es-DO")}` });
+    res.json({ ok: true, cuota: upd[0] });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -10963,7 +11126,16 @@ app.delete("/planes/membresias/:id/vehiculos/:vehiculoId", async (req, res) => {
 // ─── Beneficios de un cliente (badge en recepción/carwash/facturación) ──────
 app.get("/planes/beneficios/:clienteId", async (req, res) => {
   const ben = await beneficiosCliente(req.params.clienteId);
-  res.json(ben || { plan: null });
+  // Cuotas de membresía pendientes de cobro (para avisar en Facturación)
+  let cuotasPendientes = [];
+  try {
+    const { data } = await supabase.from("plan_cuotas")
+      .select("id, numero, total_cuotas, monto, fecha_vencimiento")
+      .eq("cliente_id", Number(req.params.clienteId)).eq("estado", "PENDIENTE")
+      .order("fecha_vencimiento");
+    cuotasPendientes = data || [];
+  } catch { /* tabla sin migrar — sin aviso */ }
+  res.json({ ...(ben || { plan: null }), cuotas_pendientes: cuotasPendientes });
 });
 
 // Consumir un beneficio manualmente (ej. diagnóstico cubierto por plan)

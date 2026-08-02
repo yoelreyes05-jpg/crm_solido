@@ -328,6 +328,13 @@ export default function FacturaPage() {
   const [cobrandoLoading, setCobrandoLoading] = useState(false);
   const [montoRecibidoCobro, setMontoRecibidoCobro] = useState("");
 
+  // 💎 Membresías: cuotas por cobrar en caja + beneficios del cliente elegido
+  const [cuotasPlan, setCuotasPlan]           = useState<any[]>([]);
+  const [benCliente, setBenCliente]           = useState<any>(null);
+  const [cobrandoCuota, setCobrandoCuota]     = useState<any>(null);
+  const [cuotaMetodo, setCuotaMetodo]         = useState("EFECTIVO");
+  const [cuotaLoading, setCuotaLoading]       = useState(false);
+
   // ── Carga inicial ────────────────────────────────────────────────────────
   const fetchData = async () => {
     try {
@@ -350,6 +357,13 @@ export default function FacturaPage() {
         !["FACTURADO", "COMPLETADO"].includes(d.estado)
       ));
     } catch (err) { console.error(err); }
+    // Cuotas de membresía pendientes (aparte: si el backend no tiene la
+    // migración v23 devuelve [], y esto no debe tumbar la carga principal)
+    try {
+      const r = await fetch(`${API}/planes/cuotas?estado=PENDIENTE`);
+      const d = await r.json();
+      setCuotasPlan(Array.isArray(d) ? d : []);
+    } catch { setCuotasPlan([]); }
   };
 
   const recargarCotizaciones = async () => {
@@ -361,6 +375,22 @@ export default function FacturaPage() {
   };
 
   useEffect(() => { fetchData(); }, []);
+
+  // 💎 Al elegir cliente, traer su membresía: qué le queda (mantenimientos,
+  // lavados, diagnósticos) y si tiene cuotas del plan sin pagar.
+  useEffect(() => {
+    if (!clienteId) { setBenCliente(null); return; }
+    let cancelado = false;
+    fetch(`${API}/planes/beneficios/${clienteId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelado) return;
+        const tiene = d && (d.plan || (d.cuotas_pendientes || []).length > 0);
+        setBenCliente(tiene ? d : null);
+      })
+      .catch(() => { if (!cancelado) setBenCliente(null); });
+    return () => { cancelado = true; };
+  }, [clienteId]);
 
   // ── Cuando cambia el tipo NCF, limpiar RNC manual si no aplica ───────────
   useEffect(() => {
@@ -681,6 +711,16 @@ export default function FacturaPage() {
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
 
+      // 💎 El plan cubrió el mantenimiento: avisar cuántos le quedan este año
+      if (data.mantenimiento_cubierto) {
+        const mc = data.mantenimiento_cubierto;
+        alert(`💎 MANTENIMIENTO CUBIERTO POR ${String(mc.plan || "").toUpperCase()}\n\n`
+          + `Valor cubierto: RD$ ${Number(mc.valor || 0).toFixed(2)}\n`
+          + (mc.restantes < 0
+            ? "Mantenimientos ilimitados."
+            : `Le quedan ${mc.restantes} mantenimiento(s) este año.`));
+      }
+
       const pagoMixtoData = method === "MIXTO"
         ? { efectivo: efecMixto, resto: restoMixto, metodoResto }
         : undefined;
@@ -781,6 +821,24 @@ export default function FacturaPage() {
     finally { setCobrandoLoading(false); }
   };
 
+  // ── Cobrar una cuota de membresía ─────────────────────────────────────────
+  const confirmarCobroCuota = async () => {
+    if (!cobrandoCuota) return;
+    setCuotaLoading(true);
+    try {
+      const res = await fetch(`${API}/planes/cuotas/${cobrandoCuota.id}/cobrar`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", ...auditHeaders() },
+        body: JSON.stringify({ metodo_pago: cuotaMetodo, usuario: usuario?.nombre || null }),
+      });
+      const data = await res.json();
+      if (data.error) { alert(data.error); return; }
+      setCobrandoCuota(null);
+      fetchData();
+    } catch { alert("Error al cobrar la cuota de membresía"); }
+    finally { setCuotaLoading(false); }
+  };
+
   const guardarEdicion = async () => {
     if (!modalFac) return;
     await fetch(`${API}/facturas/${modalFac.id}`, {
@@ -825,7 +883,7 @@ export default function FacturaPage() {
       <div style={{ display: "flex", gap: 10, marginBottom: 20, flexWrap: "wrap" }}>
         {[
           { key: "nueva",       label: "➕ Nueva Factura / Cotización" },
-          { key: "pendientes",  label: `🕒 Por Cobrar (${facturas.filter((f:any) => f.estado === "PENDIENTE_COBRO").length})`, alerta: facturas.some((f:any) => f.estado === "PENDIENTE_COBRO") },
+          { key: "pendientes",  label: `🕒 Por Cobrar (${facturas.filter((f:any) => f.estado === "PENDIENTE_COBRO").length + cuotasPlan.length})`, alerta: facturas.some((f:any) => f.estado === "PENDIENTE_COBRO") || cuotasPlan.some((c:any) => c.vencida) },
           { key: "historial",   label: `📋 Facturas (${facturas.filter((f:any) => f.estado !== "CANCELADA" && f.estado !== "PENDIENTE_COBRO").length})` },
           { key: "cotizaciones",label: `📄 Cotizaciones (${cotizaciones.length})` },
           { key: "canceladas",  label: `🚫 Canceladas (${facturas.filter((f:any) => f.estado === "CANCELADA").length})` },
@@ -965,6 +1023,60 @@ export default function FacturaPage() {
                       <button onClick={() => { setClienteSel(null); setClienteId(""); setRncManual(""); setRazonSocial(""); }}
                         style={{ background: "none", border: "none", color: "#ef4444",
                           cursor: "pointer", fontSize: 18 }}>✕</button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* 💎 Membresía del cliente: qué le queda y qué debe */}
+              {clienteId && benCliente && (
+                <div style={{ background: "#faf5ff", border: "1px solid #d8b4fe",
+                  borderRadius: 10, padding: "10px 14px", marginBottom: 12, fontSize: 13 }}>
+                  {benCliente.plan ? (
+                    <>
+                      <div style={{ fontWeight: 800, color: "#6b21a8", marginBottom: 4 }}>
+                        💎 {benCliente.plan.emoji || ""} {benCliente.plan.nombre} — miembro activo
+                        <span style={{ fontWeight: 500, color: "#7c3aed" }}>
+                          {" "}· renueva el {benCliente.membresia?.fecha_renovacion}
+                        </span>
+                      </div>
+                      {benCliente.beneficios?.mantenimientos_ano !== undefined && (
+                        <div style={{ color: benCliente.uso?.mantenimientos_disponibles === 0 ? "#dc2626" : "#166534", fontWeight: 700 }}>
+                          🛢️ {benCliente.uso?.mantenimientos_disponibles < 0
+                            ? "Mantenimientos ilimitados"
+                            : `Le quedan ${benCliente.uso?.mantenimientos_disponibles} de ${benCliente.uso?.mantenimientos_incluidos} mantenimientos este año`}
+                          {benCliente.uso?.mantenimientos_disponibles === 0 ? " — se cobra normal" : ""}
+                        </div>
+                      )}
+                      {benCliente.beneficios?.lavados_mes !== undefined && (
+                        <div style={{ color: "#0369a1" }}>
+                          🚿 {benCliente.uso?.lavados_disponibles < 0
+                            ? "Lavados ilimitados"
+                            : `Le quedan ${benCliente.uso?.lavados_disponibles} lavado(s) este mes`}
+                        </div>
+                      )}
+                      {benCliente.beneficios?.diagnosticos_mes !== undefined && (
+                        <div style={{ color: "#7c3aed" }}>
+                          🔍 {benCliente.uso?.diagnosticos_disponibles < 0
+                            ? "Diagnósticos ilimitados"
+                            : `Le quedan ${benCliente.uso?.diagnosticos_disponibles} diagnóstico(s) este mes`}
+                        </div>
+                      )}
+                      {(Number(benCliente.beneficios?.desc_servicios || 0) > 0 || Number(benCliente.beneficios?.desc_repuestos || 0) > 0) && (
+                        <div style={{ color: "#92400e" }}>
+                          🏷️ Descuentos: {Number(benCliente.beneficios?.desc_servicios || 0)}% servicios · {Number(benCliente.beneficios?.desc_repuestos || 0)}% repuestos (se aplican solos)
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <div style={{ fontWeight: 700, color: "#6b21a8" }}>💎 Cliente con membresía</div>
+                  )}
+                  {(benCliente.cuotas_pendientes || []).length > 0 && (
+                    <div style={{ marginTop: 6, background: "#fef3c7", border: "1px solid #fcd34d",
+                      borderRadius: 8, padding: "6px 10px", color: "#92400e", fontWeight: 700 }}>
+                      💳 Debe {benCliente.cuotas_pendientes.length} cuota(s) de membresía —
+                      RD$ {benCliente.cuotas_pendientes.reduce((a: number, c: any) => a + Number(c.monto), 0).toFixed(2)}.
+                      Cóbralas en la pestaña "🕒 Por Cobrar".
                     </div>
                   )}
                 </div>
@@ -1460,6 +1572,60 @@ export default function FacturaPage() {
 
       {/* ══════════════ POR COBRAR ══════════════ */}
       {tab === "pendientes" && (
+        <>
+        {/* 💎 Cuotas de membresía pendientes: aquí aparece el cliente para
+            pagar su plan (total, 50% o mensual) */}
+        {cuotasPlan.length > 0 && (
+          <div style={{ ...card, marginBottom: 20 }}>
+            <h2 style={cardTitle}>💎 Membresías por Cobrar</h2>
+            <p style={{ color: "#6b21a8", fontSize: 13, marginTop: -8, marginBottom: 8 }}>
+              Cuotas de planes de membresía pendientes de pago (inscripción total, 50/50 o mensualidad).
+            </p>
+            <div style={{ overflowX: "auto" }}>
+              <table style={tableStyle}>
+                <thead>
+                  <tr>
+                    {["Cliente","Plan","Cuota","Monto","Vence","Estado","Acciones"]
+                      .map(h => <th key={h} style={th}>{h}</th>)}
+                  </tr>
+                </thead>
+                <tbody>
+                  {cuotasPlan.map((c: any) => (
+                    <tr key={c.id} style={{ background: c.vencida ? "#fef2f2" : undefined }}>
+                      <td style={{ ...td, textTransform: "uppercase", fontWeight: 600 }}>
+                        {c.cliente?.nombre}
+                        {c.cliente?.telefono && (
+                          <div style={{ fontSize: 11, color: "#6b7280", fontWeight: 400 }}>{c.cliente.telefono}</div>
+                        )}
+                      </td>
+                      <td style={td}>{c.plan_emoji} {c.plan_nombre}
+                        <div style={{ fontSize: 11, color: "#6b7280" }}>
+                          {c.plan_membresias?.modalidad_pago === "MENSUAL" ? "Pago mensual"
+                            : c.plan_membresias?.modalidad_pago === "MITAD" ? "Pago 50/50"
+                            : "Pago total"}
+                        </div>
+                      </td>
+                      <td style={{ ...td, fontWeight: 700 }}>{c.numero}/{c.total_cuotas}</td>
+                      <td style={{ ...td, fontWeight: 700 }}>RD$ {Number(c.monto).toFixed(2)}</td>
+                      <td style={{ ...td, fontSize: 12 }}>{c.fecha_vencimiento}</td>
+                      <td style={td}>
+                        {c.vencida
+                          ? <span style={{ color: "#dc2626", fontWeight: 700 }}>🔴 Vencida</span>
+                          : <span style={{ color: "#d97706", fontWeight: 700 }}>🟡 Pendiente</span>}
+                      </td>
+                      <td style={td}>
+                        {puedeCobrar && (
+                          <button onClick={() => { setCobrandoCuota(c); setCuotaMetodo("EFECTIVO"); }}
+                            style={btnAcc("#7c3aed")} title="Cobrar cuota de membresía">💰 Cobrar</button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
         <div style={card}>
           <div style={{ display: "flex", justifyContent: "space-between",
             alignItems: "center", marginBottom: 8, flexWrap: "wrap", gap: 12 }}>
@@ -1516,6 +1682,7 @@ export default function FacturaPage() {
             </table>
           </div>
         </div>
+        </>
       )}
 
       {/* ══════════════ HISTORIAL ══════════════ */}
@@ -1821,6 +1988,40 @@ export default function FacturaPage() {
                 {cobrandoLoading ? "Procesando..." : "✅ Confirmar cobro"}
               </button>
               <button onClick={() => setCobrando(null)}
+                style={{ flex: 1, padding: 12, background: "#eee", borderRadius: 8,
+                  border: "none", cursor: "pointer" }}>
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════ MODAL COBRAR CUOTA DE MEMBRESÍA ══════════════ */}
+      {cobrandoCuota && (
+        <div style={overlay}>
+          <div style={modal}>
+            <h2 style={{ marginBottom: 4 }}>💎 Cobrar cuota de membresía</h2>
+            <p style={{ color: "#6b7280", fontSize: 13, marginBottom: 16 }}>
+              {cobrandoCuota.cliente?.nombre} · {cobrandoCuota.plan_emoji} {cobrandoCuota.plan_nombre}
+              {" "}· Cuota {cobrandoCuota.numero}/{cobrandoCuota.total_cuotas}
+              {" "}· <b>RD$ {Number(cobrandoCuota.monto).toFixed(2)}</b>
+            </p>
+            <label style={labelS}>Método de pago recibido</label>
+            <select value={cuotaMetodo} onChange={e => setCuotaMetodo(e.target.value)} style={input}>
+              <option value="EFECTIVO">💵 Efectivo</option>
+              <option value="TARJETA">💳 Tarjeta</option>
+              <option value="TRANSFERENCIA">🏦 Transferencia</option>
+              <option value="CHEQUE">📄 Cheque</option>
+            </select>
+            <div style={{ display: "flex", gap: 10, marginTop: 8 }}>
+              <button onClick={confirmarCobroCuota} disabled={cuotaLoading}
+                style={{ flex: 1, padding: 12, background: "#7c3aed", color: "#fff",
+                  borderRadius: 8, border: "none", cursor: "pointer", fontWeight: 700,
+                  opacity: cuotaLoading ? 0.6 : 1 }}>
+                {cuotaLoading ? "Procesando..." : "✅ Confirmar cobro"}
+              </button>
+              <button onClick={() => setCobrandoCuota(null)}
                 style={{ flex: 1, padding: 12, background: "#eee", borderRadius: 8,
                   border: "none", cursor: "pointer" }}>
                 Cerrar
