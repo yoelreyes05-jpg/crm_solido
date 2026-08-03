@@ -11474,6 +11474,273 @@ app.get("/planes/alertas", async (req, res) => {
 });
 
 // ══════════════════════════════════════════════════════════════════════════════
+// 🔧 TARIFARIO DE MANO DE OBRA — catálogo de operaciones del taller
+// Tabla: mano_obra_catalogo (migracion_v27_tarifario_mano_obra.sql)
+//
+// El mismo trabajo no cuesta igual en un Corolla que en una Silverado diésel,
+// así que cada operación tiene 4 precios (segmentos A/B/C/D). El sistema
+// sugiere el segmento según el vehículo y el usuario puede cambiarlo.
+// ══════════════════════════════════════════════════════════════════════════════
+
+// Segmentos de precio. El orden importa: es el que se muestra en pantalla.
+const MO_SEGMENTOS = [
+  { clave: "A", campo: "precio_seg_a", label: "Sedán 4 cil.",     hint: "4 cilindros, carro de pasajeros" },
+  { clave: "B", campo: "precio_seg_b", label: "SUV / Crossover",  hint: "Jeepeta mediana" },
+  { clave: "C", campo: "precio_seg_c", label: "V6 / Camioneta",   hint: "6+ cilindros, pick-up" },
+  { clave: "D", campo: "precio_seg_d", label: "Diésel / Europeo", hint: "Diésel o marca europea" },
+];
+
+const MO_CAMPO_SEG = (seg) =>
+  (MO_SEGMENTOS.find(s => s.clave === String(seg || "A").toUpperCase()) || MO_SEGMENTOS[0]).campo;
+
+/**
+ * Sugiere el segmento de un vehículo. Es una SUGERENCIA: el usuario decide.
+ * Orden de las reglas: primero diésel/europeo (manda sobre el cilindraje,
+ * porque un diésel europeo de 4 cilindros igual paga tarifa D), luego el
+ * cilindraje, y de último el tipo de carrocería.
+ */
+const MARCAS_EUROPEAS = [
+  "bmw", "mercedes", "mercedes-benz", "audi", "volkswagen", "vw", "volvo",
+  "peugeot", "renault", "citroen", "citroën", "seat", "skoda", "porsche",
+  "land rover", "range rover", "jaguar", "mini", "fiat", "alfa romeo", "opel",
+];
+function sugerirSegmentoVehiculo(veh) {
+  if (!veh) return { segmento: "A", motivo: "sin datos del vehículo, se asume sedán" };
+  const marca = String(veh.marca || "").toLowerCase().trim();
+  const modelo = String(veh.modelo || "").toLowerCase().trim();
+  const comb = String(veh.combustible || veh.tipo_combustible || "").toLowerCase();
+  const cil = veh.cilindros != null ? Number(veh.cilindros) : null;
+
+  const esEuropea = MARCAS_EUROPEAS.some(m => marca === m || marca.startsWith(m + " "));
+  const esDiesel = /diesel|diésel|gasoil|gasoíl/.test(comb);
+  if (esDiesel || esEuropea) {
+    return { segmento: "D",
+      motivo: esDiesel && esEuropea ? "diésel y marca europea"
+        : esDiesel ? "vehículo diésel" : `${veh.marca} es marca europea` };
+  }
+  if (cil != null && cil >= 6) {
+    return { segmento: "C", motivo: `${cil} cilindros` };
+  }
+  // Carrocería: solo si no hay cilindraje que mande
+  const texto = `${marca} ${modelo}`;
+  if (/pick|pickup|silverado|tacoma|hilux|frontier|ranger|f-150|f150|ram|tundra|titan/.test(texto)) {
+    return { segmento: "C", motivo: "camioneta / pick-up" };
+  }
+  if (/suv|jeep|cr-v|crv|rav4|highlander|explorer|santa fe|tucson|sportage|pilot|4runner|escape|equinox|rogue|x-trail|outlander|cx-5|cx5/.test(texto)) {
+    return { segmento: "B", motivo: "SUV / crossover" };
+  }
+  if (cil != null && cil <= 4) {
+    return { segmento: "A", motivo: `${cil} cilindros` };
+  }
+  return { segmento: "A", motivo: "sin cilindraje registrado, se asume sedán" };
+}
+
+// GET /mano-obra — catálogo. ?q= busca, ?categoria= filtra, ?vehiculo_id=
+// además devuelve el segmento sugerido y el precio ya resuelto.
+app.get("/mano-obra", async (req, res) => {
+  try {
+    let q = supabase.from("mano_obra_catalogo").select("*")
+      .or("activo.is.null,activo.eq.true")
+      .order("codigo");
+    if (req.query.categoria && req.query.categoria !== "TODAS") {
+      q = q.eq("categoria", req.query.categoria);
+    }
+    const { data, error } = await q;
+    if (error) {
+      // Tabla sin migrar: no tumbar las pantallas que la consultan
+      if (/mano_obra_catalogo/.test(error.message || "")) {
+        return res.json({ operaciones: [], categorias: [], segmentos: MO_SEGMENTOS,
+          aviso: "Falta correr migracion_v27_tarifario_mano_obra.sql" });
+      }
+      return res.status(500).json({ error: error.message });
+    }
+
+    let ops = data || [];
+    const busq = String(req.query.q || "").trim().toLowerCase();
+    if (busq) {
+      ops = ops.filter(o =>
+        String(o.nombre || "").toLowerCase().includes(busq) ||
+        String(o.codigo || "").toLowerCase().includes(busq) ||
+        String(o.categoria || "").toLowerCase().includes(busq));
+    }
+
+    // Segmento sugerido a partir del vehículo
+    let sugerido = null;
+    if (req.query.vehiculo_id) {
+      const { data: veh } = await supabase.from("vehiculos").select("*")
+        .eq("id", Number(req.query.vehiculo_id)).maybeSingle();
+      sugerido = { ...sugerirSegmentoVehiculo(veh),
+        vehiculo: veh ? `${veh.marca || ""} ${veh.modelo || ""}`.trim() : null };
+    }
+    const segPedido = req.query.segmento
+      ? String(req.query.segmento).toUpperCase()
+      : (sugerido?.segmento || null);
+
+    const categorias = [...new Set((data || []).map(o => o.categoria).filter(Boolean))].sort();
+
+    res.json({
+      operaciones: ops.map(o => ({
+        ...o,
+        // precio ya resuelto para el segmento pedido/sugerido (comodidad del front)
+        precio: segPedido ? Number(o[MO_CAMPO_SEG(segPedido)] || 0) : null,
+      })),
+      categorias,
+      segmentos: MO_SEGMENTOS,
+      sugerido,
+      total: ops.length,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// GET /mano-obra/segmento-sugerido/:vehiculoId — solo la sugerencia
+app.get("/mano-obra/segmento-sugerido/:vehiculoId", async (req, res) => {
+  try {
+    const { data: veh } = await supabase.from("vehiculos").select("*")
+      .eq("id", Number(req.params.vehiculoId)).maybeSingle();
+    if (!veh) return res.status(404).json({ error: "Vehículo no encontrado" });
+    res.json({ ...sugerirSegmentoVehiculo(veh), segmentos: MO_SEGMENTOS,
+      vehiculo: `${veh.marca || ""} ${veh.modelo || ""} ${veh.placa || ""}`.trim() });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.post("/mano-obra", async (req, res) => {
+  try {
+    const b = req.body || {};
+    if (!b.codigo || !b.nombre)
+      return res.status(400).json({ error: "codigo y nombre son requeridos" });
+    const { data, error } = await supabase.from("mano_obra_catalogo").insert([{
+      codigo: String(b.codigo).trim().toUpperCase(),
+      nombre: String(b.nombre).trim(),
+      categoria: (b.categoria || "GENERAL").toUpperCase(),
+      tipo: b.tipo || "SERVICIO",
+      unidad: b.unidad || "UND",
+      horas_estandar: b.horas_estandar != null && b.horas_estandar !== "" ? Number(b.horas_estandar) : null,
+      precio_seg_a: Number(b.precio_seg_a || 0),
+      precio_seg_b: Number(b.precio_seg_b || 0),
+      precio_seg_c: Number(b.precio_seg_c || 0),
+      precio_seg_d: Number(b.precio_seg_d || 0),
+      itbis: Number(b.itbis ?? 18),
+      notas: b.notas || null,
+      activo: true,
+    }]).select();
+    if (error) {
+      if (/duplicate|unique/i.test(error.message || ""))
+        return res.status(409).json({ error: `Ya existe una operación con el código ${b.codigo}` });
+      return res.status(400).json({ error: error.message });
+    }
+    logAccion(req, { accion: "CREAR", modulo: "mano_obra", registroId: data[0].id,
+      descripcion: `Creó la operación ${data[0].codigo} — ${data[0].nombre}` });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+app.patch("/mano-obra/:id", async (req, res) => {
+  try {
+    const permitidos = ["codigo", "nombre", "categoria", "tipo", "unidad", "horas_estandar",
+      "precio_seg_a", "precio_seg_b", "precio_seg_c", "precio_seg_d", "itbis", "notas", "activo"];
+    const upd = { updated_at: new Date().toISOString() };
+    for (const k of permitidos) if (req.body[k] !== undefined) upd[k] = req.body[k];
+    for (const k of ["horas_estandar", "precio_seg_a", "precio_seg_b", "precio_seg_c", "precio_seg_d", "itbis"]) {
+      if (upd[k] !== undefined) upd[k] = upd[k] === "" || upd[k] === null ? null : Number(upd[k]);
+    }
+    if (upd.codigo) upd.codigo = String(upd.codigo).trim().toUpperCase();
+    const { data, error } = await supabase.from("mano_obra_catalogo")
+      .update(upd).eq("id", req.params.id).select();
+    if (error) return res.status(400).json({ error: error.message });
+    logAccion(req, { accion: "EDITAR", modulo: "mano_obra", registroId: req.params.id,
+      descripcion: `Editó la operación ${data[0]?.codigo || req.params.id}` });
+    res.json(data[0]);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// DELETE /mano-obra/:id — desactiva (soft delete). ?definitivo=1 borra de verdad.
+app.delete("/mano-obra/:id", async (req, res) => {
+  try {
+    const definitivo = String(req.query.definitivo || "") === "1";
+    if (definitivo) {
+      const { error } = await supabase.from("mano_obra_catalogo").delete().eq("id", req.params.id);
+      if (error) return res.status(400).json({ error: error.message });
+    } else {
+      const { error } = await supabase.from("mano_obra_catalogo")
+        .update({ activo: false, updated_at: new Date().toISOString() }).eq("id", req.params.id);
+      if (error) return res.status(400).json({ error: error.message });
+    }
+    logAccion(req, { accion: "ELIMINAR", modulo: "mano_obra", registroId: req.params.id,
+      descripcion: `${definitivo ? "Eliminó" : "Desactivó"} la operación #${req.params.id}` });
+    res.json({ ok: true });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /mano-obra/importar — carga masiva desde CSV.
+// body: { filas: [{codigo, nombre, ...}], usuario }
+// Busca por `codigo`: si existe actualiza, si no lo crea. NUNCA borra nada,
+// así una importación parcial no destruye el tarifario.
+app.post("/mano-obra/importar", async (req, res) => {
+  try {
+    const filas = Array.isArray(req.body?.filas) ? req.body.filas : [];
+    if (!filas.length) return res.status(400).json({ error: "No se recibieron filas" });
+
+    const num = (v) => {
+      if (v === undefined || v === null || String(v).trim() === "") return null;
+      // Tolera "RD$ 10,450.00" por si exportan con formato
+      const n = Number(String(v).replace(/[^\d.-]/g, ""));
+      return isNaN(n) ? null : n;
+    };
+
+    const errores = [];
+    const limpias = [];
+    filas.forEach((f, i) => {
+      const codigo = String(f.codigo || "").trim().toUpperCase();
+      const nombre = String(f.nombre || "").trim();
+      if (!codigo || !nombre) {
+        errores.push(`Fila ${i + 2}: falta código o nombre`);
+        return;
+      }
+      limpias.push({
+        codigo, nombre,
+        categoria: String(f.categoria || "GENERAL").trim().toUpperCase(),
+        tipo: String(f.tipo || "SERVICIO").trim().toUpperCase(),
+        unidad: String(f.unidad || "UND").trim().toUpperCase(),
+        horas_estandar: num(f.horas_estandar),
+        precio_seg_a: num(f.precio_seg_a ?? f.precio_seg_a_sedan) ?? 0,
+        precio_seg_b: num(f.precio_seg_b ?? f.precio_seg_b_suv) ?? 0,
+        precio_seg_c: num(f.precio_seg_c ?? f.precio_seg_c_v6_camioneta) ?? 0,
+        precio_seg_d: num(f.precio_seg_d ?? f.precio_seg_d_diesel_europeo) ?? 0,
+        itbis: num(f.itbis) ?? 18,
+        notas: f.notas ? String(f.notas).trim() : null,
+        activo: true,
+        updated_at: new Date().toISOString(),
+      });
+    });
+    if (!limpias.length)
+      return res.status(400).json({ error: "Ninguna fila válida", errores });
+
+    // Códigos duplicados dentro del propio archivo: el último gana, pero se avisa
+    const vistos = new Map();
+    for (const f of limpias) {
+      if (vistos.has(f.codigo)) errores.push(`Código repetido en el archivo: ${f.codigo}`);
+      vistos.set(f.codigo, f);
+    }
+    const unicas = [...vistos.values()];
+
+    // Cuáles ya existían, para reportar creados vs actualizados
+    const { data: existentes } = await supabase.from("mano_obra_catalogo")
+      .select("codigo").in("codigo", unicas.map(f => f.codigo));
+    const yaEstaban = new Set((existentes || []).map(e => e.codigo));
+
+    const { error } = await supabase.from("mano_obra_catalogo")
+      .upsert(unicas, { onConflict: "codigo" });
+    if (error) return res.status(400).json({ error: error.message, errores });
+
+    const actualizados = unicas.filter(f => yaEstaban.has(f.codigo)).length;
+    const creados = unicas.length - actualizados;
+    logAccion(req, { accion: "IMPORTAR", modulo: "mano_obra",
+      descripcion: `Importó el tarifario: ${creados} nuevas, ${actualizados} actualizadas` });
+    res.json({ ok: true, creados, actualizados, total: unicas.length, errores });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// ══════════════════════════════════════════════════════════════════════════════
 // 🌺 ALOHA PERFUME STORE — MÓDULO TOTALMENTE INDEPENDIENTE
 // Tel: 829-393-3673 · Tablas propias con prefijo aloha_ (migracion_v18_aloha.sql)
 // No toca ventas, inventario ni contabilidad del taller.

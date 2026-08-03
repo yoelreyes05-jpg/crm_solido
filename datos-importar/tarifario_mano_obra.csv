@@ -1,0 +1,72 @@
+codigo,nombre,categoria,tipo,unidad,horas_estandar,precio_seg_a_sedan,precio_seg_b_suv,precio_seg_c_v6_camioneta,precio_seg_d_diesel_europeo,itbis,notas
+MO-D01,Diagnostico con escaner (lectura y borrado de codigos),DIAGNOSTICO,SERVICIO,UND,1.0,1200,1500,1750,2050,18,Se abona al trabajo si el cliente autoriza la reparacion
+MO-D02,Diagnostico avanzado (escaner + datos en vivo y pruebas),DIAGNOSTICO,SERVICIO,UND,2.0,2400,3000,3500,4100,18,"Fallas intermitentes, luz de motor recurrente"
+MO-D03,Chequeo electrico general,DIAGNOSTICO,SERVICIO,UND,1.25,1500,1900,2200,2550,18,"Incluye prueba de bateria, alternador y consumo parasito"
+MO-D04,"Prueba de carga: bateria, alternador y arranque",DIAGNOSTICO,SERVICIO,UND,0.5,600,750,850,1000,18,Cortesia si el cliente compra la pieza en el taller
+MO-D05,Prueba de compresion de motor,DIAGNOSTICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-D06,Deteccion de fuga de A/C (nitrogeno / luz UV),DIAGNOSTICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-D07,Prueba de fuga de gases al enfriamiento (block test),DIAGNOSTICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,Sospecha de empacadura de cabezote
+MO-E01,Cambio de alternador,ELECTRICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,Incluye prueba de carga posterior
+MO-E02,Cambio de motor de arranque,ELECTRICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-E03,Cambio de bateria y limpieza de bornes,ELECTRICO,SERVICIO,UND,0.3,500,500,500,600,18,Aplica cargo minimo
+MO-E04,Cambio de motor de puerta (elevavidrios),ELECTRICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,Incluye desarmar y armar panel de puerta
+MO-E05,Cambio de botonera / switch de vidrios,ELECTRICO,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-E06,Cambio de actuador de seguro de puerta,ELECTRICO,SERVICIO,UND,1.25,1500,1900,2200,2550,18,
+MO-E07,Reparacion de arnes o cortocircuito (por hora),ELECTRICO,SERVICIO,UND,1.0,1200,1500,1750,2050,18,Se cobra por hora real trabajada
+MO-E08,Cambio de bobina de encendido,ELECTRICO,SERVICIO,UND,0.75,900,1100,1300,1550,18,"Si son todas, cotizar como bujias + bobinas"
+MO-E09,Cambio de motor de limpiaparabrisas,ELECTRICO,SERVICIO,UND,1.25,1500,1900,2200,2550,18,
+MO-E10,Instalacion de radio / bocinas,ELECTRICO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-M01,Cambio de bujias (4 cilindros),MOTOR Y ENCENDIDO,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-M02,Cambio de bujias (6 cilindros / hay que bajar multiple),MOTOR Y ENCENDIDO,SERVICIO,UND,2.0,2400,3000,3500,4100,18,Incluye empacaduras de multiple si aplica
+MO-M03,Cambio de correa de accesorios,MOTOR Y ENCENDIDO,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-M04,Cambio de correa de tiempo (kit completo),MOTOR Y ENCENDIDO,SERVICIO,UND,6.0,7200,9000,10450,12250,18,"Kit: correa, tensor, poleas, bomba de agua"
+MO-M05,Cambio de bomba de agua,MOTOR Y ENCENDIDO,SERVICIO,UND,3.0,3600,4500,5200,6100,18,
+MO-M06,Cambio de termostato,MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,Incluye purgado del sistema
+MO-M07,Cambio de radiador,MOTOR Y ENCENDIDO,SERVICIO,UND,2.5,3000,3750,4350,5100,18,
+MO-M08,Cambio de empacadura de cabezote,MOTOR Y ENCENDIDO,SERVICIO,UND,12.0,14400,18000,20900,24500,18,No incluye planeado ni rectificado del cabezote
+MO-M09,Cambio de soporte de motor (cada uno),MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-M10,Cambio de empacadura de tapa de valvulas,MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-M11,Cambio de sensor de oxigeno (O2),MOTOR Y ENCENDIDO,SERVICIO,UND,0.75,900,1100,1300,1550,18,Si esta pegado por oxido se cobra hora extra
+MO-M12,Cambio de sensor (CKP / CMP / MAP / IAT / TPS),MOTOR Y ENCENDIDO,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-M13,Limpieza de cuerpo de aceleracion (trotter) + reset,MOTOR Y ENCENDIDO,SERVICIO,UND,0.75,900,1100,1300,1550,18,Incluye reajuste de ralenti con escaner
+MO-M14,Limpieza de inyectores en banco (4 cilindros),MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-M15,Cambio de valvula EGR,MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-M16,Cambio de valvula IAC,MOTOR Y ENCENDIDO,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-M17,Cambio de catalizador,MOTOR Y ENCENDIDO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-C01,Cambio de bomba de gasolina (acceso por asiento/piso),COMBUSTIBLE,SERVICIO,UND,2.0,2400,3000,3500,4100,18,
+MO-C02,Cambio de bomba de gasolina (bajando el tanque),COMBUSTIBLE,SERVICIO,UND,3.5,4200,5250,6100,7150,18,Camionetas y modelos sin tapa de acceso
+MO-C03,Cambio de filtro de gasolina,COMBUSTIBLE,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-C04,Limpieza de tanque de combustible,COMBUSTIBLE,SERVICIO,UND,3.0,3600,4500,5200,6100,18,
+MO-N01,Cambio de aceite y filtro,MANTENIMIENTO,SERVICIO,UND,0.5,600,750,850,1000,18,Aplica cargo minimo
+MO-N02,"Mantenimiento completo (aceite, filtros y revision 20 puntos)",MANTENIMIENTO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-N03,Cambio de filtro de aire o de cabina,MANTENIMIENTO,SERVICIO,UND,0.25,500,500,500,500,18,Gratis si va dentro de un mantenimiento
+MO-N04,Lavado del sistema de enfriamiento (flush),MANTENIMIENTO,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-N05,Cambio de aceite de transmision automatica,MANTENIMIENTO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-S01,Cambio de tren delantero completo,SUSPENSION Y DIRECCION,SERVICIO,UND,6.0,7200,9000,10450,12250,18,"Mesetas, terminales, rotulas, bujes y gomas de barra"
+MO-S02,Cambio de terminales de direccion (par),SUSPENSION Y DIRECCION,SERVICIO,UND,1.5,1800,2250,2600,3050,18,Requiere alineacion despues
+MO-S03,Cambio de rotulas (par),SUSPENSION Y DIRECCION,SERVICIO,UND,2.0,2400,3000,3500,4100,18,
+MO-S04,Cambio de mesetas / brazos de control (par),SUSPENSION Y DIRECCION,SERVICIO,UND,3.0,3600,4500,5200,6100,18,
+MO-S05,Cambio de amortiguadores delanteros (par),SUSPENSION Y DIRECCION,SERVICIO,UND,2.5,3000,3750,4350,5100,18,
+MO-S06,Cambio de amortiguadores traseros (par),SUSPENSION Y DIRECCION,SERVICIO,UND,2.0,2400,3000,3500,4100,18,
+MO-S07,Cambio de bujes de meseta (par),SUSPENSION Y DIRECCION,SERVICIO,UND,2.5,3000,3750,4350,5100,18,
+MO-S08,Cambio de gomas de barra estabilizadora (par),SUSPENSION Y DIRECCION,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-S09,Cambio de cremallera de direccion,SUSPENSION Y DIRECCION,SERVICIO,UND,4.0,4800,6000,6950,8150,18,
+MO-S10,Cambio de bomba hidraulica de direccion,SUSPENSION Y DIRECCION,SERVICIO,UND,2.5,3000,3750,4350,5100,18,
+MO-S11,Cambio de bocina / rodamiento de rueda (cada uno),SUSPENSION Y DIRECCION,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-S12,Cambio de tripoide o junta homocinetica (cada uno),SUSPENSION Y DIRECCION,SERVICIO,UND,2.0,2400,3000,3500,4100,18,
+MO-S13,Alineacion y balanceo,SUSPENSION Y DIRECCION,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-F01,Cambio de pastillas delanteras,FRENOS,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-F02,Cambio de pastillas traseras,FRENOS,SERVICIO,UND,1.0,1200,1500,1750,2050,18,
+MO-F03,Cambio o rectificado de discos (par),FRENOS,SERVICIO,UND,1.5,1800,2250,2600,3050,18,El rectificado externo se cobra aparte
+MO-F04,Cambio de zapatas traseras (tambor),FRENOS,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-F05,Cambio de bomba de freno (master),FRENOS,SERVICIO,UND,2.0,2400,3000,3500,4100,18,Incluye purgado
+MO-F06,Cambio de caliper (cada uno),FRENOS,SERVICIO,UND,1.25,1500,1900,2200,2550,18,
+MO-F07,Purgado del sistema de frenos,FRENOS,SERVICIO,UND,0.75,900,1100,1300,1550,18,
+MO-A01,Recarga de gas con vacio,AIRE ACONDICIONADO,SERVICIO,UND,1.25,1500,1900,2200,2550,18,No incluye el gas refrigerante
+MO-A02,Cambio de compresor de A/C,AIRE ACONDICIONADO,SERVICIO,UND,3.0,3600,4500,5200,6100,18,Incluye vacio y recarga
+MO-A03,Cambio de condensador,AIRE ACONDICIONADO,SERVICIO,UND,2.0,2400,3000,3500,4100,18,
+MO-A04,Cambio de evaporador (bajando tablero),AIRE ACONDICIONADO,SERVICIO,UND,8.0,9600,12000,13900,16300,18,
+MO-A05,Cambio de blower / motor ventilador,AIRE ACONDICIONADO,SERVICIO,UND,1.5,1800,2250,2600,3050,18,
+MO-T01,Cambio de clutch / embrague (manual),TRANSMISION,SERVICIO,UND,6.0,7200,9000,10450,12250,18,
+MO-T02,Cambio de retenedor de caja,TRANSMISION,SERVICIO,UND,3.0,3600,4500,5200,6100,18,
+MO-T03,Cambio de soportes de caja,TRANSMISION,SERVICIO,UND,1.5,1800,2250,2600,3050,18,

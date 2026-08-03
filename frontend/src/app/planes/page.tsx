@@ -16,8 +16,13 @@ const fmt = (n: any) =>
 const fmtFecha = (d: string) =>
   d ? new Date(`${String(d).slice(0, 10)}T12:00:00Z`).toLocaleDateString("es-DO", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" }) : "—";
 
-// Tipos de beneficio que el backend entiende
+// Tipos de beneficio que el CRM aplica AUTOMÁTICAMENTE.
+// El `tipo` es la llave exacta que lee el backend: cambiarla rompe la
+// automatización. `mantenimientos_ano` es el cambio de aceite incluido — es
+// el beneficio principal de los planes de mantenimiento y faltaba aquí, por
+// eso no se podía configurar desde la pantalla.
 const BENEFICIO_TIPOS: { tipo: string; label: string; hint: string }[] = [
+  { tipo: "mantenimientos_ano",   label: "Mantenimientos por año (cambio de aceite)", hint: "Cuántos cambios de aceite incluye al año · -1 = ilimitados" },
   { tipo: "lavados_mes",          label: "Lavados por mes",        hint: "-1 = ilimitado, 0 = no incluye" },
   { tipo: "diagnosticos_mes",     label: "Diagnósticos por mes",   hint: "-1 = ilimitado, 0 = no incluye" },
   { tipo: "desc_servicios",       label: "% desc. en servicios",   hint: "0 a 100" },
@@ -27,15 +32,29 @@ const BENEFICIO_TIPOS: { tipo: string; label: string; hint: string }[] = [
   { tipo: "vehiculos_max",        label: "Vehículos cubiertos",    hint: "-1 = ilimitados; sin configurar = 1" },
 ];
 
-const beneficioLabel = (tipo: string) => BENEFICIO_TIPOS.find(b => b.tipo === tipo)?.label || tipo;
+const esTipoConocido = (tipo: string) => BENEFICIO_TIPOS.some(b => b.tipo === tipo);
+
+// Un beneficio personalizado no tiene automatización: se muestra en la ficha
+// del plan y en el comprobante, pero el sistema no lo descuenta solo.
+const beneficioLabel = (tipo: string) =>
+  BENEFICIO_TIPOS.find(b => b.tipo === tipo)?.label
+  || String(tipo).replace(/_/g, " ").replace(/^\w/, c => c.toUpperCase());
+
 const valorLabel = (tipo: string, valor: number) => {
-  if (tipo === "lavados_mes" || tipo === "diagnosticos_mes") return valor < 0 ? "Ilimitados" : String(valor);
+  if (tipo === "lavados_mes" || tipo === "diagnosticos_mes" || tipo === "mantenimientos_ano")
+    return valor < 0 ? "Ilimitados" : String(valor);
   if (tipo === "desc_servicios" || tipo === "desc_repuestos") return `${valor}%`;
   if (tipo === "multiplicador_puntos") return `x${valor}`;
   if (tipo === "prioridad") return valor ? "Sí" : "No";
   if (tipo === "vehiculos_max") return valor < 0 ? "Ilimitados" : String(valor);
   return String(valor);
 };
+
+// Convierte "Cambio de filtro de aire" → "cambio_de_filtro_de_aire"
+const slugBeneficio = (txt: string) =>
+  String(txt).trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 40);
 
 // Etiqueta corta de un vehículo
 const vehLabel = (v: any) => {
@@ -122,7 +141,8 @@ function CatalogoPlanes({ puedeCrear, puedeEditar, puedeEliminar }: any) {
   const [form, setForm] = useState<any>(vacio);
   const [editId, setEditId] = useState<any>(null);
   const [benefPlan, setBenefPlan] = useState<any>(null);        // plan cuyo editor de beneficios está abierto
-  const [benefValores, setBenefValores] = useState<Record<string, string>>({});
+  const [benefFilas, setBenefFilas] = useState<{ tipo: string; valor: string }[]>([]);
+  const [nuevoBenef, setNuevoBenef] = useState({ label: "", valor: "" });
 
   const cargar = async () => {
     try {
@@ -155,21 +175,49 @@ function CatalogoPlanes({ puedeCrear, puedeEditar, puedeEliminar }: any) {
     cargar();
   };
 
+  // El editor trabaja con una LISTA de filas, no con un formulario fijo. Así
+  // se puede agregar y quitar beneficios, y no se pierden los que ya estaban
+  // guardados con un tipo que esta pantalla no conoce.
   const abrirBeneficios = (p: any) => {
-    const vals: Record<string, string> = {};
-    for (const b of BENEFICIO_TIPOS) {
-      const actual = (p.plan_beneficios || []).find((x: any) => x.tipo === b.tipo);
-      vals[b.tipo] = actual !== undefined ? String(actual.valor) : "";
-    }
-    setBenefValores(vals);
+    const guardados = (p.plan_beneficios || []).map((x: any) => ({
+      tipo: x.tipo, valor: String(x.valor),
+    }));
+    // Los tipos automáticos siempre se muestran, aunque el plan no los tenga:
+    // así se ven todas las opciones disponibles de una vez.
+    const filas = BENEFICIO_TIPOS.map(b => {
+      const y = guardados.find((g: any) => g.tipo === b.tipo);
+      return { tipo: b.tipo, valor: y ? y.valor : "" };
+    });
+    // Personalizados guardados que no están en el catálogo
+    for (const g of guardados) if (!esTipoConocido(g.tipo)) filas.push(g);
+    setBenefFilas(filas);
+    setNuevoBenef({ label: "", valor: "" });
     setBenefPlan(p);
   };
 
+  const setFilaValor = (i: number, valor: string) =>
+    setBenefFilas(f => f.map((x, k) => (k === i ? { ...x, valor } : x)));
+
+  const quitarFila = (i: number) =>
+    setBenefFilas(f => f.filter((_, k) => k !== i));
+
+  const agregarBeneficio = () => {
+    const label = nuevoBenef.label.trim();
+    if (!label) return alert("Escribe el nombre del beneficio");
+    const tipo = slugBeneficio(label);
+    if (!tipo) return alert("Ese nombre no es válido, usa letras y números");
+    if (benefFilas.some(f => f.tipo === tipo)) return alert("Ese beneficio ya está en la lista");
+    setBenefFilas([...benefFilas, { tipo, valor: nuevoBenef.valor === "" ? "1" : nuevoBenef.valor }]);
+    setNuevoBenef({ label: "", valor: "" });
+  };
+
   const guardarBeneficios = async () => {
-    const beneficios = BENEFICIO_TIPOS
-      .filter(b => benefValores[b.tipo] !== "" && benefValores[b.tipo] !== undefined)
-      .map(b => ({ tipo: b.tipo, valor: Number(benefValores[b.tipo]) }))
-      .filter(b => !isNaN(b.valor) && b.valor !== 0);
+    // Se guardan las filas con valor. Las vacías se descartan = el plan no
+    // incluye ese beneficio. Un 0 explícito SÍ se guarda (antes se perdía).
+    const beneficios = benefFilas
+      .filter(f => String(f.valor).trim() !== "")
+      .map(f => ({ tipo: f.tipo, valor: Number(f.valor) }))
+      .filter(f => !isNaN(f.valor));
     const r = await fetch(`${API}/planes/${benefPlan.id}/beneficios`, {
       method: "POST", headers: { "Content-Type": "application/json", ...auditHeaders() },
       body: JSON.stringify({ beneficios }),
@@ -242,22 +290,94 @@ function CatalogoPlanes({ puedeCrear, puedeEditar, puedeEliminar }: any) {
       {/* Modal editor de beneficios */}
       {benefPlan && (
         <div onClick={() => setBenefPlan(null)} style={{ position: "fixed", inset: 0, background: "rgba(17,24,39,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60 }}>
-          <div onClick={e => e.stopPropagation()} style={{ ...S.card, width: 440, margin: 0 }}>
+          <div onClick={e => e.stopPropagation()} style={{ ...S.card, width: 520, margin: 0, maxHeight: "88vh", overflowY: "auto" }}>
             <h3 style={{ fontWeight: 800, color: "#111827" }}>🎁 Beneficios — {benefPlan.emoji} {benefPlan.nombre}</h3>
-            <p style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>Deja vacío o 0 para que el plan no incluya ese beneficio.</p>
-            {BENEFICIO_TIPOS.map(b => (
-              <div key={b.tipo} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{b.label}</div>
-                  <div style={{ fontSize: 11, color: "#94a3b8" }}>{b.hint}</div>
+            <p style={{ fontSize: 12, color: "#64748b", marginBottom: 12 }}>
+              Deja el campo vacío para que el plan <b>no</b> incluya ese beneficio.
+              Usa <b>-1</b> para ilimitado.
+            </p>
+
+            <div style={{ fontSize: 11, fontWeight: 800, color: "#4f46e5", textTransform: "uppercase",
+              letterSpacing: 0.5, margin: "4px 0 8px" }}>
+              ⚙️ Aplicados automáticamente por el sistema
+            </div>
+
+            {benefFilas.map((f, i) => {
+              const cat = BENEFICIO_TIPOS.find(b => b.tipo === f.tipo);
+              if (!cat) return null;
+              const activo = String(f.valor).trim() !== "" && Number(f.valor) !== 0;
+              return (
+                <div key={f.tipo} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8,
+                  background: activo ? "#f5f3ff" : "transparent", borderRadius: 8,
+                  padding: activo ? "6px 8px" : "0 8px" }}>
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{cat.label}</div>
+                    <div style={{ fontSize: 11, color: "#94a3b8" }}>{cat.hint}</div>
+                  </div>
+                  <input type="number" value={f.valor} placeholder="—"
+                    onChange={e => setFilaValor(i, e.target.value)}
+                    style={{ ...S.input, width: 105, marginBottom: 0, textAlign: "center", fontWeight: 700 }} />
                 </div>
-                <input type="number" value={benefValores[b.tipo] ?? ""} placeholder="0"
-                  onChange={e => setBenefValores({ ...benefValores, [b.tipo]: e.target.value })}
-                  style={{ ...S.input, width: 110, marginBottom: 0 }} />
+              );
+            })}
+
+            {/* ── Beneficios personalizados ───────────────────────────────── */}
+            {benefFilas.some(f => !esTipoConocido(f.tipo)) && (
+              <>
+                <div style={{ fontSize: 11, fontWeight: 800, color: "#0d9488", textTransform: "uppercase",
+                  letterSpacing: 0.5, margin: "14px 0 8px" }}>
+                  ✨ Personalizados (informativos)
+                </div>
+                {benefFilas.map((f, i) => {
+                  if (esTipoConocido(f.tipo)) return null;
+                  return (
+                    <div key={f.tipo} style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8,
+                      background: "#f0fdfa", borderRadius: 8, padding: "6px 8px" }}>
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 13, fontWeight: 700, color: "#111827" }}>{beneficioLabel(f.tipo)}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8" }}>Se muestra en la ficha del plan</div>
+                      </div>
+                      <input type="number" value={f.valor}
+                        onChange={e => setFilaValor(i, e.target.value)}
+                        style={{ ...S.input, width: 105, marginBottom: 0, textAlign: "center", fontWeight: 700 }} />
+                      <button onClick={() => quitarFila(i)} title="Quitar este beneficio"
+                        style={{ ...S.btnGhost, color: "#ef4444", padding: "7px 9px" }}>🗑️</button>
+                    </div>
+                  );
+                })}
+              </>
+            )}
+
+            {/* ── Agregar un beneficio nuevo ──────────────────────────────── */}
+            <div style={{ border: "1px dashed #cbd5e1", borderRadius: 10, padding: 12, marginTop: 14, background: "#f8fafc" }}>
+              <div style={{ fontSize: 12, fontWeight: 800, color: "#334155", marginBottom: 8 }}>
+                ➕ Agregar otro beneficio
               </div>
-            ))}
-            <div style={{ display: "flex", gap: 8, marginTop: 14 }}>
-              <button onClick={guardarBeneficios} style={{ ...S.btn, flex: 1 }}>Guardar beneficios</button>
+              <div style={{ display: "flex", gap: 8, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={S.label}>Nombre del beneficio</label>
+                  <input value={nuevoBenef.label} placeholder="Ej: Rotación de gomas al año"
+                    onChange={e => setNuevoBenef({ ...nuevoBenef, label: e.target.value })}
+                    onKeyDown={e => { if (e.key === "Enter") { e.preventDefault(); agregarBeneficio(); } }}
+                    style={{ ...S.input, marginBottom: 0 }} />
+                </div>
+                <div style={{ width: 90 }}>
+                  <label style={S.label}>Cantidad</label>
+                  <input type="number" value={nuevoBenef.valor} placeholder="1"
+                    onChange={e => setNuevoBenef({ ...nuevoBenef, valor: e.target.value })}
+                    style={{ ...S.input, marginBottom: 0, textAlign: "center" }} />
+                </div>
+                <button onClick={agregarBeneficio} style={{ ...S.btn, padding: "10px 14px" }}>Agregar</button>
+              </div>
+              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8, lineHeight: 1.5 }}>
+                Los beneficios personalizados aparecen en la ficha del plan y en el comprobante,
+                pero el sistema <b>no los descuenta solo</b> — solo los de la lista de arriba se
+                aplican automáticamente al facturar.
+              </div>
+            </div>
+
+            <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
+              <button onClick={guardarBeneficios} style={{ ...S.btn, flex: 1 }}>💾 Guardar beneficios</button>
               <button onClick={() => setBenefPlan(null)} style={S.btnGhost}>Cancelar</button>
             </div>
           </div>

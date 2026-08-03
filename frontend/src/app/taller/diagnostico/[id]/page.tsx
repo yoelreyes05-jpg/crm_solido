@@ -183,6 +183,19 @@ export default function DiagnosticoPage() {
   const [sugeridos,      setSugeridos]      = useState<any[]>([]);
   const [loadingSuger,   setLoadingSuger]   = useState(false);
 
+  // 🔧 Tarifario de mano de obra — el técnico arma el precio escogiendo
+  // operaciones en vez de inventarse una cifra. Cada operación suma su precio
+  // al campo "Mano de obra" y deja el renglón escrito en el detalle.
+  const [tarifario,     setTarifario]     = useState<any[]>([]);
+  const [tarifBusq,     setTarifBusq]     = useState("");
+  const [tarifOpen,     setTarifOpen]     = useState(false);
+  const [tarifSeg,      setTarifSeg]      = useState("A");
+  const [tarifSugerido, setTarifSugerido] = useState<any>(null);
+  const [tarifSegs,     setTarifSegs]     = useState<any[]>([
+    { clave: "A", label: "Sedán 4 cil." }, { clave: "B", label: "SUV / Crossover" },
+    { clave: "C", label: "V6 / Camioneta" }, { clave: "D", label: "Diésel / Europeo" },
+  ]);
+
   // Total calculado
   const totalRepuestos = repuestosItems.reduce((s, r) => s + r.subtotal, 0);
   const total = (parseFloat(manoObra) || 0) + totalRepuestos;
@@ -353,6 +366,45 @@ export default function DiagnosticoPage() {
       .catch(() => setSugeridos([]))
       .finally(() => setLoadingSuger(false));
   }, [orden?.vehiculo_id]);
+
+  // ── Tarifario de mano de obra + segmento sugerido por el vehículo ─────────
+  useEffect(() => {
+    fetch(`${API}/mano-obra`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (!d) return;
+        setTarifario(Array.isArray(d.operaciones) ? d.operaciones : []);
+        if (Array.isArray(d.segmentos) && d.segmentos.length) setTarifSegs(d.segmentos);
+      })
+      .catch(() => {});
+  }, []);
+
+  useEffect(() => {
+    if (!orden?.vehiculo_id) return;
+    fetch(`${API}/mano-obra/segmento-sugerido/${orden.vehiculo_id}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => { if (d && !d.error) { setTarifSugerido(d); setTarifSeg(d.segmento); } })
+      .catch(() => {});
+  }, [orden?.vehiculo_id]);
+
+  const campoSeg = (s: string) =>
+    ({ A: "precio_seg_a", B: "precio_seg_b", C: "precio_seg_c", D: "precio_seg_d" } as any)[s] || "precio_seg_a";
+
+  const tarifarioFiltrado = tarifario.filter(o => {
+    const q = tarifBusq.trim().toLowerCase();
+    if (!q) return true;
+    return `${o.codigo} ${o.nombre} ${o.categoria}`.toLowerCase().includes(q);
+  });
+
+  // Suma la operación al total de mano de obra y la escribe en el detalle.
+  const agregarOperacion = (op: any) => {
+    const precio = Number(op[campoSeg(tarifSeg)] || 0);
+    setManoObra(prev => String(((parseFloat(prev) || 0) + precio).toFixed(2)));
+    const linea = `• ${op.nombre} (${op.codigo})`
+      + (op.horas_estandar != null ? ` — ${Number(op.horas_estandar)} h` : "")
+      + ` — RD$ ${precio.toLocaleString("es-DO", { minimumFractionDigits: 2 })}`;
+    setMoDetalle(prev => (prev.trim() ? prev.replace(/\s*$/, "") + "\n" : "") + linea);
+  };
 
   // ── Guardar ───────────────────────────────────────────────────────────────
   const guardar = async (cerrar = false) => {
@@ -824,6 +876,96 @@ export default function DiagnosticoPage() {
                 style={{ ...inputStyle, resize: "vertical", height: 120 }}
               />
             </div>
+
+            {/* ── Tarifario de mano de obra ──────────────────────────────────
+                En vez de inventar el precio, el técnico escoge la operación
+                del tarifario: suma el monto y deja el renglón escrito. */}
+            {!diagnostico?.terminado && tarifario.length > 0 && (
+              <div style={{ background: "#0d1f1e", border: "1px solid #0f766e88",
+                borderRadius: 10, padding: 14, marginBottom: 18 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#5eead4", flex: 1 }}>
+                    🔧 Tarifario de mano de obra
+                    <span style={{ fontSize: 11, fontWeight: 400, color: "#99f6e4", marginLeft: 8 }}>
+                      {tarifario.length} operaciones con precio de mercado
+                    </span>
+                  </div>
+                  <button type="button" onClick={() => setTarifOpen(!tarifOpen)}
+                    style={{ background: tarifOpen ? "#0f766e" : "#162032",
+                      border: "1px solid #0f766e", color: "#5eead4", borderRadius: 8,
+                      padding: "6px 14px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
+                    {tarifOpen ? "Cerrar" : "Buscar operación"}
+                  </button>
+                </div>
+
+                {tarifOpen && (
+                  <>
+                    <div style={{ display: "flex", gap: 6, marginTop: 12, flexWrap: "wrap" }}>
+                      {tarifSegs.map((s: any) => (
+                        <button key={s.clave} type="button" onClick={() => setTarifSeg(s.clave)}
+                          style={{
+                            padding: "6px 10px", borderRadius: 7, cursor: "pointer",
+                            fontWeight: 700, fontSize: 11,
+                            background: tarifSeg === s.clave ? "#0f766e" : "#162032",
+                            color: tarifSeg === s.clave ? "#fff" : C.muted,
+                            border: `1px solid ${tarifSeg === s.clave ? "#0f766e" : C.border}`,
+                          }}>
+                          {s.clave} · {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    {tarifSugerido && (
+                      <div style={{ fontSize: 11, color: "#5eead4", marginTop: 7 }}>
+                        {tarifSeg === tarifSugerido.segmento
+                          ? `✓ Segmento sugerido por el vehículo (${tarifSugerido.motivo})`
+                          : `⚠️ El vehículo sugiere ${tarifSugerido.segmento} (${tarifSugerido.motivo})`}
+                      </div>
+                    )}
+
+                    <input value={tarifBusq} onChange={e => setTarifBusq(e.target.value)}
+                      placeholder="Buscar: pastillas, alternador, correa de tiempo…"
+                      style={{ ...inputStyle, marginTop: 10, marginBottom: 8 }} />
+
+                    <div style={{ maxHeight: 220, overflowY: "auto" }}>
+                      {tarifarioFiltrado.slice(0, 40).map((o: any) => {
+                        const precio = Number(o[campoSeg(tarifSeg)] || 0);
+                        return (
+                          <div key={o.id} style={{ display: "flex", alignItems: "center",
+                            gap: 10, padding: "7px 0", borderBottom: `1px solid ${C.border}55` }}>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              <div style={{ fontSize: 13, color: C.text }}>{o.nombre}</div>
+                              <div style={{ fontSize: 11, color: C.muted }}>
+                                {o.codigo} · {o.categoria}
+                                {o.horas_estandar != null ? ` · ${Number(o.horas_estandar)} h` : ""}
+                              </div>
+                            </div>
+                            <span style={{ fontWeight: 700, fontSize: 13, color: "#5eead4", whiteSpace: "nowrap" }}>
+                              {fmtDinero(precio)}
+                            </span>
+                            <button type="button" onClick={() => agregarOperacion(o)}
+                              style={{ background: "#0f766e", border: "none", color: "#fff",
+                                borderRadius: 7, padding: "5px 12px", cursor: "pointer",
+                                fontWeight: 700, fontSize: 12, whiteSpace: "nowrap" }}>
+                              + Sumar
+                            </button>
+                          </div>
+                        );
+                      })}
+                      {tarifarioFiltrado.length === 0 && (
+                        <p style={{ fontSize: 12, color: C.muted, textAlign: "center", padding: 16 }}>
+                          Sin resultados
+                        </p>
+                      )}
+                      {tarifarioFiltrado.length > 40 && (
+                        <p style={{ fontSize: 11, color: C.muted, textAlign: "center", padding: 8 }}>
+                          Mostrando 40 de {tarifarioFiltrado.length} — afina la búsqueda
+                        </p>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
 
             {/* Mano de obra + Total */}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 14, marginBottom: 18 }}>

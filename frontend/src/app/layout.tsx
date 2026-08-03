@@ -69,6 +69,7 @@ const MODULOS: Modulo[] = [
     id: "inventario_compras", label: "Inventario y Compras", icon: "📦", color: "#06b6d4",
     items: [
       { href: "/inventario", icon: "📦", label: "Inventario", key: "inventario", iconBg: "linear-gradient(145deg,#0e7490,#06b6d4)", iconShadow: "0 4px 12px rgba(6,182,212,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/tarifario",  icon: "🔧", label: "Tarifario M.O.", key: "tarifario", iconBg: "linear-gradient(145deg,#134e4a,#0f766e)", iconShadow: "0 4px 12px rgba(15,118,110,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
       { href: "/suplidores", icon: "🚚", label: "Suplidores", key: "suplidores", iconBg: "linear-gradient(145deg,#7c2d12,#ea580c)", iconShadow: "0 4px 12px rgba(234,88,12,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
     ],
   },

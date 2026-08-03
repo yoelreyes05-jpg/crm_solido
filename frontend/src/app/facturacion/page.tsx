@@ -384,6 +384,16 @@ export default function FacturaPage() {
   const [cobrandoLoading, setCobrandoLoading] = useState(false);
   const [montoRecibidoCobro, setMontoRecibidoCobro] = useState("");
 
+  // 🔧 Tarifario de mano de obra: catálogo de operaciones con precio por
+  // segmento de vehículo. El segmento se sugiere solo y se puede cambiar.
+  const [tarifario, setTarifario]         = useState<any[]>([]);
+  const [tarifSegmentos, setTarifSegs]    = useState<any[]>([]);
+  const [tarifBusq, setTarifBusq]         = useState("");
+  const [segmento, setSegmento]           = useState("A");
+  const [segSugerido, setSegSugerido]     = useState<any>(null);
+  const [segTocado, setSegTocado]         = useState(false); // el usuario lo cambió a mano
+  const [panelItems, setPanelItems]       = useState<"repuestos" | "mano_obra">("repuestos");
+
   // 💎 Membresías: cuotas por cobrar en caja + beneficios del cliente elegido
   const [cuotasPlan, setCuotasPlan]           = useState<any[]>([]);
   const [benCliente, setBenCliente]           = useState<any>(null);
@@ -420,6 +430,18 @@ export default function FacturaPage() {
       const d = await r.json();
       setCuotasPlan(Array.isArray(d) ? d : []);
     } catch { setCuotasPlan([]); }
+    // Tarifario de mano de obra (si falta la migración v27 llega vacío)
+    try {
+      const r = await fetch(`${API}/mano-obra`);
+      const d = await r.json();
+      setTarifario(Array.isArray(d.operaciones) ? d.operaciones : []);
+      setTarifSegs(Array.isArray(d.segmentos) && d.segmentos.length ? d.segmentos : [
+        { clave: "A", campo: "precio_seg_a", label: "Sedán 4 cil." },
+        { clave: "B", campo: "precio_seg_b", label: "SUV / Crossover" },
+        { clave: "C", campo: "precio_seg_c", label: "V6 / Camioneta" },
+        { clave: "D", campo: "precio_seg_d", label: "Diésel / Europeo" },
+      ]);
+    } catch { setTarifario([]); }
   };
 
   const recargarCotizaciones = async () => {
@@ -621,6 +643,56 @@ export default function FacturaPage() {
     i.code?.toLowerCase().includes(busqueda.toLowerCase())
   );
 
+  // 🔧 Al elegir vehículo, sugerir el segmento de precio del tarifario.
+  // Solo se aplica si el usuario no lo cambió a mano en esta factura.
+  useEffect(() => {
+    if (!vehiculoId) { setSegSugerido(null); return; }
+    let cancelado = false;
+    fetch(`${API}/mano-obra/segmento-sugerido/${vehiculoId}`)
+      .then(r => r.ok ? r.json() : null)
+      .then(d => {
+        if (cancelado || !d || d.error) return;
+        setSegSugerido(d);
+        if (!segTocado) setSegmento(d.segmento);
+      })
+      .catch(() => {});
+    return () => { cancelado = true; };
+  }, [vehiculoId]);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  const campoSegmento = (seg: string) =>
+    ({ A: "precio_seg_a", B: "precio_seg_b", C: "precio_seg_c", D: "precio_seg_d" } as any)[seg] || "precio_seg_a";
+
+  const tarifarioFiltrado = tarifario.filter(o => {
+    const q = tarifBusq.trim().toLowerCase();
+    if (!q) return true;
+    return `${o.codigo} ${o.nombre} ${o.categoria}`.toLowerCase().includes(q);
+  });
+
+  // Agrega una operación del tarifario al carrito como mano de obra.
+  // El precio sale del segmento activo; queda editable en el carrito por si
+  // hay que ajustarlo en un caso puntual.
+  const addManoObra = (op: any) => {
+    const precio = Number(op[campoSegmento(segmento)] || 0);
+    if (precio <= 0 && !confirm(`"${op.nombre}" no tiene precio para este tipo de vehículo.\n\n¿Agregarlo en RD$ 0.00 y ponerle el precio a mano?`)) return;
+    const id = `TAR-${op.id}`;
+    const exists = carrito.find(p => p.id === id);
+    if (exists) {
+      setCarrito(carrito.map(p => p.id === id ? { ...p, cantidad: p.cantidad + 1 } : p));
+      return;
+    }
+    setCarrito([...carrito, {
+      id,
+      descripcion:     `${op.nombre} (${op.codigo})`,
+      tipo:            "mano_obra",
+      precio_unitario: precio,
+      cantidad:        1,
+      itbis_aplica:    false,   // como el resto de la mano de obra; se activa desde el carrito
+      inventario_id:   null,
+      _tarifarioId:    op.id,
+      _segmento:       segmento,
+    }]);
+  };
+
   const addItem = (item: any) => {
     if (item.stock <= 0) return alert("Sin stock disponible");
     const exists = carrito.find(p => p.id === item.id);
@@ -647,6 +719,13 @@ export default function FacturaPage() {
     const orig = items.find(i => i.id === id);
     if (orig && cant > orig.stock) { alert("Stock insuficiente"); return; }
     setCarrito(carrito.map(p => p.id === id ? { ...p, cantidad: cant } : p));
+  };
+
+  // Ajustar el precio de un renglón de mano de obra sin salir del carrito
+  const updatePrecio = (id: any, valor: string) => {
+    const n = valor === "" ? 0 : Number(valor);
+    if (isNaN(n) || n < 0) return;
+    setCarrito(carrito.map(p => p.id === id ? { ...p, precio_unitario: n } : p));
   };
 
   // ✅ NUEVO: toggle ITBIS para cualquier ítem del carrito (especialmente mano de obra)
@@ -1469,33 +1548,133 @@ export default function FacturaPage() {
                 )}
               </div>
 
-              <input placeholder="🔍 Buscar repuesto o código..." value={busqueda}
-                onChange={e => setBusqueda(e.target.value)}
-                style={{ ...input, marginBottom: 12 }} />
-              <div style={{ maxHeight: 280, overflowY: "auto" }}>
-                {itemsFiltrados.map((i: any) => (
-                  <div key={i.id} style={productoRow}>
-                    <div>
-                      <div style={{ fontWeight: 600, fontSize: 14 }}>{i.name}</div>
-                      <div style={{ fontSize: 12, color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>
-                        Stock: {i.stock}{i.code ? ` · Cód: ${i.code}` : ""}
-                      </div>
-                    </div>
-                    <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                      <span style={{ fontWeight: 700 }}>RD$ {Number(i.price).toFixed(2)}</span>
-                      <button onClick={() => addItem(i)} disabled={i.stock <= 0}
-                        style={{ ...btnAdd, background: i.stock <= 0 ? "#ccc" : "#111827" }}>
-                        + Agregar
-                      </button>
-                    </div>
-                  </div>
+              {/* ── Selector: repuestos del inventario / mano de obra ──────── */}
+              <div style={{ display: "flex", gap: 6, marginBottom: 12 }}>
+                {[
+                  { k: "repuestos", label: `📦 Repuestos (${items.length})` },
+                  { k: "mano_obra", label: `🔧 Mano de obra (${tarifario.length})` },
+                ].map(t => (
+                  <button key={t.k} onClick={() => setPanelItems(t.k as any)}
+                    style={{
+                      flex: 1, padding: "9px 12px", borderRadius: 8, cursor: "pointer",
+                      fontWeight: 700, fontSize: 13,
+                      background: panelItems === t.k ? "#111827" : "#fff",
+                      color: panelItems === t.k ? "#fff" : "#64748b",
+                      border: panelItems === t.k ? "1px solid transparent" : "1px solid #ddd",
+                    }}>{t.label}</button>
                 ))}
-                {itemsFiltrados.length === 0 && (
-                  <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>
-                    Sin resultados
-                  </p>
-                )}
               </div>
+
+              {panelItems === "repuestos" ? (
+                <>
+                  <input placeholder="🔍 Buscar repuesto o código..." value={busqueda}
+                    onChange={e => setBusqueda(e.target.value)}
+                    style={{ ...input, marginBottom: 12 }} />
+                  <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                    {itemsFiltrados.map((i: any) => (
+                      <div key={i.id} style={productoRow}>
+                        <div>
+                          <div style={{ fontWeight: 600, fontSize: 14 }}>{i.name}</div>
+                          <div style={{ fontSize: 12, color: i.stock > 0 ? "#10b981" : "#e74c3c" }}>
+                            Stock: {i.stock}{i.code ? ` · Cód: ${i.code}` : ""}
+                          </div>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                          <span style={{ fontWeight: 700 }}>RD$ {Number(i.price).toFixed(2)}</span>
+                          <button onClick={() => addItem(i)} disabled={i.stock <= 0}
+                            style={{ ...btnAdd, background: i.stock <= 0 ? "#ccc" : "#111827" }}>
+                            + Agregar
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                    {itemsFiltrados.length === 0 && (
+                      <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>
+                        Sin resultados
+                      </p>
+                    )}
+                  </div>
+                </>
+              ) : (
+                <>
+                  {/* ── Segmento de precio ─────────────────────────────────── */}
+                  <div style={{ background: "#f0fdfa", border: "1px solid #99f6e4",
+                    borderRadius: 10, padding: "10px 12px", marginBottom: 10 }}>
+                    <div style={{ fontSize: 12, fontWeight: 800, color: "#0f766e", marginBottom: 6 }}>
+                      Tipo de vehículo para el precio
+                    </div>
+                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                      {tarifSegmentos.map((s: any) => (
+                        <button key={s.clave}
+                          onClick={() => { setSegmento(s.clave); setSegTocado(true); }}
+                          style={{
+                            padding: "7px 8px", borderRadius: 7, cursor: "pointer",
+                            fontWeight: 700, fontSize: 12, textAlign: "left",
+                            background: segmento === s.clave ? "#0f766e" : "#fff",
+                            color: segmento === s.clave ? "#fff" : "#334155",
+                            border: segmento === s.clave ? "1px solid transparent" : "1px solid #cbd5e1",
+                          }}>
+                          {s.clave} · {s.label}
+                        </button>
+                      ))}
+                    </div>
+                    {segSugerido && (
+                      <div style={{ fontSize: 11, color: "#0f766e", marginTop: 7 }}>
+                        {segmento === segSugerido.segmento
+                          ? `✓ Sugerido por el vehículo (${segSugerido.motivo})`
+                          : `⚠️ El vehículo sugiere el segmento ${segSugerido.segmento} (${segSugerido.motivo}) — lo cambiaste a mano`}
+                      </div>
+                    )}
+                    {!segSugerido && (
+                      <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 7 }}>
+                        Selecciona el vehículo del cliente y el segmento se propone solo.
+                      </div>
+                    )}
+                  </div>
+
+                  <input placeholder="🔍 Buscar operación (ej: pastillas, alternador, MO-F01)..."
+                    value={tarifBusq} onChange={e => setTarifBusq(e.target.value)}
+                    style={{ ...input, marginBottom: 12 }} />
+
+                  <div style={{ maxHeight: 280, overflowY: "auto" }}>
+                    {tarifarioFiltrado.slice(0, 60).map((o: any) => {
+                      const precio = Number(o[campoSegmento(segmento)] || 0);
+                      return (
+                        <div key={o.id} style={productoRow}>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontWeight: 600, fontSize: 14 }}>{o.nombre}</div>
+                            <div style={{ fontSize: 12, color: "#888" }}>
+                              {o.codigo} · {o.categoria}
+                              {o.horas_estandar != null ? ` · ${Number(o.horas_estandar)} h` : ""}
+                            </div>
+                          </div>
+                          <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                            <span style={{ fontWeight: 700, color: "#0f766e", whiteSpace: "nowrap" }}>
+                              RD$ {precio.toFixed(2)}
+                            </span>
+                            <button onClick={() => addManoObra(o)}
+                              style={{ ...btnAdd, background: "#0f766e" }}>
+                              + Agregar
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {tarifarioFiltrado.length === 0 && (
+                      <p style={{ color: "#888", textAlign: "center", padding: 20, fontSize: 13 }}>
+                        {tarifario.length === 0
+                          ? "Tarifario vacío — corre la migración v27 o cárgalo desde la pantalla Tarifario."
+                          : "Sin resultados"}
+                      </p>
+                    )}
+                    {tarifarioFiltrado.length > 60 && (
+                      <p style={{ color: "#888", textAlign: "center", padding: 10, fontSize: 12 }}>
+                        Mostrando 60 de {tarifarioFiltrado.length} — afina la búsqueda
+                      </p>
+                    )}
+                  </div>
+                </>
+              )}
             </div>
           </div>
 
@@ -1542,12 +1721,30 @@ export default function FacturaPage() {
                       </button>
                     </div>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{p.descripcion}</div>
-                    <div style={{ fontSize: 12, color: "#888" }}>
-                      RD$ {Number(p.precio_unitario).toFixed(2)} c/u ·{" "}
-                      {p.itbis_aplica
-                        ? `ITBIS: RD$ ${(Number(p.precio_unitario) * p.cantidad * 0.18).toFixed(2)}`
-                        : "Sin ITBIS"}
-                    </div>
+                    {/* La mano de obra se puede ajustar en el momento: el tarifario
+                        es la referencia, pero un caso puntual puede cobrarse distinto. */}
+                    {p.tipo === "mano_obra" ? (
+                      <div style={{ fontSize: 12, color: "#888", display: "flex",
+                        alignItems: "center", gap: 6, marginTop: 3, flexWrap: "wrap" }}>
+                        <span>RD$</span>
+                        <input type="number" value={p.precio_unitario}
+                          onChange={e => updatePrecio(p.id, e.target.value)}
+                          style={{ width: 95, padding: "3px 7px", borderRadius: 6,
+                            border: "1px solid #fde68a", background: "#fffbeb",
+                            fontSize: 13, fontWeight: 700, color: "#92400e" }} />
+                        <span>c/u ·{" "}
+                          {p.itbis_aplica
+                            ? `ITBIS: RD$ ${(Number(p.precio_unitario) * p.cantidad * 0.18).toFixed(2)}`
+                            : "Sin ITBIS"}</span>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: 12, color: "#888" }}>
+                        RD$ {Number(p.precio_unitario).toFixed(2)} c/u ·{" "}
+                        {p.itbis_aplica
+                          ? `ITBIS: RD$ ${(Number(p.precio_unitario) * p.cantidad * 0.18).toFixed(2)}`
+                          : "Sin ITBIS"}
+                      </div>
+                    )}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <button onClick={() => updateCantidad(p.id, p.cantidad - 1)} style={btnQty}>−</button>
