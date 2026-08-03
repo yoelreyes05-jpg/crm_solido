@@ -11,12 +11,55 @@ import { auditHeaders } from "@/lib/audit";
 // generarHTML() usa getEmpresaSync() para acceder a la caché sin hooks.
 
 // ─── GENERADOR HTML DGII COMPLIANT ─────────────────────────────────────────
+// ─── Recuadro de membresía para el comprobante ──────────────────────────────
+// Muestra al miembro, en el papel que se lleva, cuántos servicios le quedan
+// de cada tipo. `restantes: -1` = ilimitado.
+function bloquePlanHTML(resumen: any) {
+  if (!resumen || !Array.isArray(resumen.servicios) || resumen.servicios.length === 0) return "";
+  const color = resumen.color || "#7c3aed";
+  const filas = resumen.servicios.map((s: any) => {
+    const ilimitado = Number(s.restantes) < 0;
+    const agotado   = !ilimitado && Number(s.restantes) === 0;
+    const valor = ilimitado
+      ? "ILIMITADOS"
+      : `${s.restantes} de ${s.incluidos}`;
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px dotted #e9d5ff">
+      <span style="font-size:12px;color:#4c1d95">${s.icono} ${s.label} <span style="color:#7c3aed;font-size:11px">(${s.periodo})</span></span>
+      <span style="font-size:13px;font-weight:900;color:${agotado ? "#dc2626" : "#4c1d95"}">
+        ${valor}${agotado ? " — agotado" : ""}
+      </span>
+    </div>`;
+  }).join("");
+
+  const descuentos = (Number(resumen.desc_servicios) > 0 || Number(resumen.desc_repuestos) > 0)
+    ? `<div style="font-size:11px;color:#6b21a8;margin-top:6px">🏷️ Descuentos de su plan: ${Number(resumen.desc_servicios)}% en servicios · ${Number(resumen.desc_repuestos)}% en repuestos</div>`
+    : "";
+
+  return `
+  <div style="margin:16px 0;border:2px solid ${color};border-radius:10px;overflow:hidden">
+    <div style="background:${color};color:#fff;padding:8px 14px;font-size:13px;font-weight:900;display:flex;justify-content:space-between;align-items:center">
+      <span>${resumen.emoji} ${resumen.plan} — SERVICIOS QUE LE QUEDAN</span>
+      ${resumen.renueva ? `<span style="font-size:11px;font-weight:600;opacity:.85">Renueva: ${resumen.renueva}</span>` : ""}
+    </div>
+    <div style="padding:8px 14px;background:#faf5ff">
+      ${filas}
+      ${descuentos}
+      <div style="font-size:10px;color:#9333ea;margin-top:6px;font-style:italic">
+        ${resumen.al_dia_de_hoy
+          ? "Saldo de beneficios al día de hoy (reimpresión)."
+          : "Saldo de beneficios después de este servicio."}
+      </div>
+    </div>
+  </div>`;
+}
+
 function generarHTML(
   factura: any,
   items: any[],
   clienteExtra: any = {},
   esCotizacion = false,
-  pagoMixto?: { efectivo: number; resto: number; metodoResto: string }
+  pagoMixto?: { efectivo: number; resto: number; metodoResto: string },
+  planResumen?: any
 ) {
   // Leer datos de empresa desde la caché dinámica (actualizada por Configuración)
   const EMPRESA = getEmpresaSync();
@@ -211,6 +254,8 @@ function generarHTML(
       <div class="t-row" style="font-size:13px;"><span>${pagoMixto.metodoResto === "TARJETA" ? "💳" : "🏦"} ${pagoMixto.metodoResto}:</span><span>RD$ ${pagoMixto.resto.toFixed(2)}</span></div>
     </div>` : ""}
   </div>
+
+  ${!esCotizacion ? bloquePlanHTML(planResumen) : ""}
 
   <button class="btn-imprimir" onclick="imprimirAhora()">🖨️ Imprimir / Guardar PDF</button>
 
@@ -735,8 +780,8 @@ export default function FacturaPage() {
       const pagoMixtoData = method === "MIXTO"
         ? { efectivo: efecMixto, resto: restoMixto, metodoResto }
         : undefined;
-      setUltimaFactura({ factura: data, items: snap, pagoMixto: pagoMixtoData });
-      abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false, pagoMixtoData));
+      setUltimaFactura({ factura: data, items: snap, pagoMixto: pagoMixtoData, planResumen: data.plan_resumen });
+      abrirImpresion(generarHTML(data, snap, clienteSeleccionado || { rnc: rncManual }, false, pagoMixtoData, data.plan_resumen));
 
       // ── Registrar compatibilidades aprendidas si teníamos VIN ──────────────
       if (vinPerfilMostrador?.marca) {
@@ -775,7 +820,7 @@ export default function FacturaPage() {
     try {
       const res  = await fetch(`${API}/facturas/${fac.id}/items`);
       const data = await res.json();
-      abrirImpresion(generarHTML(fac, data.items || [], {}, false));
+      abrirImpresion(generarHTML(fac, data.items || [], {}, false, undefined, data.plan_resumen));
     } catch { alert("Error al cargar items"); }
   };
 
@@ -1574,7 +1619,7 @@ export default function FacturaPage() {
             {ultimaFactura && (
               <button onClick={() =>
                 abrirImpresion(generarHTML(
-                  ultimaFactura.factura, ultimaFactura.items, {}, false, ultimaFactura.pagoMixto
+                  ultimaFactura.factura, ultimaFactura.items, {}, false, ultimaFactura.pagoMixto, ultimaFactura.planResumen
                 ))
               } style={btnReimprimir}>
                 🔁 Reimprimir FAC-{String(ultimaFactura.factura.id).padStart(5, "0")}

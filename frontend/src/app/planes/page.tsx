@@ -283,6 +283,7 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
   const [buscaCliente, setBuscaCliente] = useState("");
   const [guardando, setGuardando] = useState(false);
   const [gestVeh, setGestVeh] = useState<any>(null); // membresía cuyo modal de vehículos está abierto
+  const [casillaId, setCasillaId] = useState<any>(null); // miembro mostrado en la casilla de servicios
 
   const cargar = async () => {
     try {
@@ -438,9 +439,32 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
   };
 
   const cancelar = async (m: any) => {
-    if (!confirm(`¿Cancelar la membresía de ${m.cliente?.nombre}?`)) return;
+    if (!confirm(`¿Cancelar la membresía de ${m.cliente?.nombre}?\n\nEl registro se conserva marcado como CANCELADA.`)) return;
     await fetch(`${API}/planes/membresias/${m.id}/cancelar`, { method: "POST", headers: auditHeaders() });
     cargar();
+  };
+
+  // Eliminar = borrado real del registro. Distinto de cancelar.
+  // Si la membresía tiene pagos, el backend responde 409 y pide confirmación:
+  // las facturas y los movimientos de caja NO se borran nunca.
+  const eliminar = async (m: any, forzar = false) => {
+    if (!forzar && !confirm(
+      `¿ELIMINAR la membresía de ${m.cliente?.nombre}?\n\n`
+      + "Se borra el registro completo (cuotas, consumos e historial de pagos del plan).\n"
+      + "Las facturas emitidas y los movimientos de caja NO se eliminan.\n\n"
+      + "Si solo quieres darla de baja, usa ✕ Cancelar.")) return;
+    try {
+      const r = await fetch(`${API}/planes/membresias/${m.id}${forzar ? "?forzar=1" : ""}`,
+        { method: "DELETE", headers: auditHeaders() });
+      const d = await r.json();
+      if (r.status === 409 && d.requiere_confirmacion) {
+        if (confirm(`⚠️ ${d.detalle}\n\n¿Eliminar de todos modos?`)) return eliminar(m, true);
+        return;
+      }
+      if (d.error) return alert("Error: " + d.error);
+      if (String(casillaId) === String(m.id)) setCasillaId(null);
+      cargar();
+    } catch { alert("Error de conexión"); }
   };
 
   const clientesFiltrados = buscaCliente
@@ -483,8 +507,12 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
           <tbody>
             {visibles.map(m => {
               const ec = ESTADO_COLOR[m.estado] || ESTADO_COLOR.CANCELADA;
+              const sel = String(casillaId) === String(m.id);
               return (
-                <tr key={m.id}>
+                <tr key={m.id}
+                  onClick={() => setCasillaId(sel ? null : m.id)}
+                  style={{ cursor: "pointer", background: sel ? "#f5f3ff" : undefined }}
+                  title="Ver servicios restantes en la casilla">
                   <td style={S.td}>
                     <b>{m.cliente?.nombre}</b>
                     {m.cliente?.telefono && <div style={{ fontSize: 11, color: "#94a3b8" }}>{m.cliente.telefono}</div>}
@@ -546,10 +574,12 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
                   <td style={S.td}>
                     <span style={{ background: ec.bg, color: ec.color, padding: "3px 10px", borderRadius: 20, fontWeight: 800, fontSize: 11 }}>{m.estado}</span>
                   </td>
-                  <td style={{ ...S.td, whiteSpace: "nowrap" }}>
-                    {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => setGestVeh(m)} style={S.btnGhost}>🚗</button>}{" "}
+                  {/* stopPropagation: los botones no deben cambiar la casilla */}
+                  <td style={{ ...S.td, whiteSpace: "nowrap" }} onClick={e => e.stopPropagation()}>
+                    {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => setGestVeh(m)} style={S.btnGhost} title="Vehículos cubiertos">🚗</button>}{" "}
                     {puedeEditar && m.estado !== "CANCELADA" && <button onClick={() => abrirCobro(m)} style={{ ...S.btnGhost, color: "#16a34a", fontWeight: 800 }}>💵 Cobrar</button>}{" "}
-                    {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => cancelar(m)} style={{ ...S.btnGhost, color: "#ef4444" }}>✕</button>}
+                    {puedeEditar && m.estado === "ACTIVA" && <button onClick={() => cancelar(m)} style={{ ...S.btnGhost, color: "#ef4444" }} title="Cancelar (conserva el registro)">✕</button>}{" "}
+                    {puedeEditar && <button onClick={() => eliminar(m)} style={{ ...S.btnGhost, color: "#b91c1c" }} title="Eliminar el registro por completo">🗑️</button>}
                   </td>
                 </tr>
               );
@@ -652,6 +682,121 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
           </div>
         </div>
       )}
+
+      {/* ═══════════ CASILLA: SERVICIOS QUE LE QUEDAN AL MIEMBRO ═══════════
+          Haz clic en cualquier fila de la tabla para verlo aquí en grande.
+          Sin selección, muestra el total disponible de todo el programa. */}
+      <div style={{ ...S.card, marginBottom: 16, border: "2px solid #c4b5fd", background: "#faf5ff" }}>
+        <h3 style={{ color: "#5b21b6", fontWeight: 800, marginBottom: 10, fontSize: 15 }}>
+          🎫 Servicios disponibles
+        </h3>
+
+        {(() => {
+          const sel = casillaId ? membresias.find(m => String(m.id) === String(casillaId)) : null;
+
+          // ── Sin selección: resumen de todo el programa ──────────────────
+          if (!sel) {
+            const act = membresias.filter(m => m.estado === "ACTIVA" && m.restantes);
+            const suma = (campo: string) => act.reduce((a, m) => {
+              const v = m.restantes?.[campo];
+              return v == null || v < 0 ? a : a + Number(v);
+            }, 0);
+            const ilimitados = (campo: string) => act.some(m => Number(m.restantes?.[campo]) < 0);
+            const filas = [
+              { icono: "🛢️", label: "Mantenimientos", campo: "mantenimientos", color: "#16a34a" },
+              { icono: "🚿", label: "Lavados",        campo: "lavados",        color: "#0ea5e9" },
+              { icono: "🔍", label: "Diagnósticos",   campo: "diagnosticos",   color: "#8b5cf6" },
+            ].filter(f => act.some(m => m.restantes?.[f.campo] != null));
+
+            return (
+              <>
+                <div style={{ fontSize: 12, color: "#6b21a8", marginBottom: 8 }}>
+                  Total pendiente de usar por los <b>{act.length}</b> miembro(s) activo(s):
+                </div>
+                {filas.map(f => (
+                  <div key={f.campo} style={{ display: "flex", justifyContent: "space-between",
+                    alignItems: "center", padding: "7px 0", borderBottom: "1px dotted #ddd6fe" }}>
+                    <span style={{ fontSize: 13, color: "#4c1d95" }}>{f.icono} {f.label}</span>
+                    <b style={{ fontSize: 17, color: f.color }}>
+                      {suma(f.campo)}{ilimitados(f.campo) ? " + ∞" : ""}
+                    </b>
+                  </div>
+                ))}
+                {filas.length === 0 && (
+                  <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                    Aún no hay miembros activos con beneficios configurados.
+                  </div>
+                )}
+                <div style={{ fontSize: 11, color: "#7c3aed", marginTop: 10, fontStyle: "italic" }}>
+                  👆 Haz clic en un miembro de la tabla para ver su detalle aquí.
+                </div>
+              </>
+            );
+          }
+
+          // ── Con miembro seleccionado: su detalle ────────────────────────
+          const r = sel.restantes || {};
+          const items = [
+            { icono: "🛢️", label: "Mantenimientos", periodo: r.anio_desde ? `desde ${fmtFecha(r.anio_desde)}` : "este año",
+              queda: r.mantenimientos, total: r.mantenimientos_incluidos, usados: r.mantenimientos_usados, color: "#16a34a" },
+            { icono: "🚿", label: "Lavados", periodo: "este mes",
+              queda: r.lavados, total: r.lavados != null ? r.lavados + (r.lavados_usados || 0) : null, usados: r.lavados_usados, color: "#0ea5e9" },
+            { icono: "🔍", label: "Diagnósticos", periodo: "este mes",
+              queda: r.diagnosticos, total: r.diagnosticos != null ? r.diagnosticos + (r.diagnosticos_usados || 0) : null, usados: r.diagnosticos_usados, color: "#8b5cf6" },
+          ].filter(i => i.queda !== null && i.queda !== undefined);
+
+          return (
+            <>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 8 }}>
+                <div>
+                  <b style={{ fontSize: 14, color: "#111827" }}>{sel.cliente?.nombre}</b>
+                  <div style={{ fontSize: 12, color: "#7c3aed", fontWeight: 700 }}>
+                    {sel.plan_catalogo?.emoji} {sel.plan_catalogo?.nombre}
+                  </div>
+                  <div style={{ fontSize: 11, color: "#94a3b8" }}>
+                    Renueva el {fmtFecha(sel.fecha_renovacion)} · {sel.estado}
+                  </div>
+                </div>
+                <button onClick={() => setCasillaId(null)} style={{ ...S.btnGhost, padding: "3px 8px" }}>✕</button>
+              </div>
+
+              {items.map(i => {
+                const ilim = Number(i.queda) < 0;
+                const cero = !ilim && Number(i.queda) === 0;
+                return (
+                  <div key={i.label} style={{ background: "#fff", border: `1px solid ${cero ? "#fecaca" : "#e9d5ff"}`,
+                    borderRadius: 10, padding: "8px 12px", marginBottom: 6 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                      <span style={{ fontSize: 13, color: "#374151" }}>{i.icono} {i.label}</span>
+                      <b style={{ fontSize: 22, color: cero ? "#dc2626" : i.color, lineHeight: 1 }}>
+                        {ilim ? "∞" : i.queda}
+                      </b>
+                    </div>
+                    <div style={{ fontSize: 11, color: cero ? "#dc2626" : "#94a3b8", marginTop: 2 }}>
+                      {ilim ? `Ilimitados ${i.periodo}`
+                        : cero ? `Agotados ${i.periodo} — se cobra normal`
+                        : `le quedan ${i.queda} de ${i.total} ${i.periodo} · ${i.usados || 0} usado(s)`}
+                    </div>
+                  </div>
+                );
+              })}
+
+              {items.length === 0 && (
+                <div style={{ fontSize: 12, color: "#94a3b8" }}>
+                  Este plan no tiene servicios por cantidad configurados.
+                </div>
+              )}
+
+              {Number(sel.saldo_pendiente || 0) > 0 && (
+                <div style={{ background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: 8,
+                  padding: "6px 10px", fontSize: 12, color: "#92400e", fontWeight: 700, marginTop: 4 }}>
+                  💳 Debe {fmt(sel.saldo_pendiente)} de su membresía
+                </div>
+              )}
+            </>
+          );
+        })()}
+      </div>
 
       <div style={S.card}>
         <h3 style={{ color: "#111827", fontWeight: 800, marginBottom: 12 }}>➕ Inscribir miembro</h3>

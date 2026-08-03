@@ -3135,6 +3135,57 @@ function esFacturaDeMantenimiento(items) {
   return conAceite;
 }
 
+/**
+ * Resumen legible de lo que le queda al miembro, para imprimirlo en la
+ * factura y mostrarlo en pantalla. `consumoExtra` descuenta el servicio que
+ * se está facturando en este momento (aún no registrado en plan_consumos).
+ *
+ * restantes: -1 = ilimitado · número = cuántos quedan
+ */
+function resumenServiciosPlan(ben, consumoExtra = {}) {
+  if (!ben || !ben.plan) return null;
+  const b = ben.beneficios || {};
+  const u = ben.uso || {};
+  const menos = (v, n) => (v < 0 ? -1 : Math.max(0, Number(v || 0) - n));
+  const servicios = [];
+
+  if (b.mantenimientos_ano !== undefined) {
+    const usados = Number(u.mantenimientos_usados || 0) + Number(consumoExtra.mantenimiento || 0);
+    servicios.push({
+      clave: "mantenimiento", icono: "🛢️", label: "Mantenimientos (cambio de aceite)",
+      periodo: "este año",
+      incluidos: Number(b.mantenimientos_ano),
+      usados,
+      restantes: menos(u.mantenimientos_disponibles, Number(consumoExtra.mantenimiento || 0)),
+    });
+  }
+  if (b.lavados_mes !== undefined) {
+    const usados = Number(u.lavados_usados || 0) + Number(consumoExtra.lavado || 0);
+    servicios.push({
+      clave: "lavado", icono: "🚿", label: "Lavados", periodo: "este mes",
+      incluidos: Number(b.lavados_mes), usados,
+      restantes: menos(u.lavados_disponibles, Number(consumoExtra.lavado || 0)),
+    });
+  }
+  if (b.diagnosticos_mes !== undefined) {
+    const usados = Number(u.diagnosticos_usados || 0) + Number(consumoExtra.diagnostico || 0);
+    servicios.push({
+      clave: "diagnostico", icono: "🔍", label: "Diagnósticos", periodo: "este mes",
+      incluidos: Number(b.diagnosticos_mes), usados,
+      restantes: menos(u.diagnosticos_disponibles, Number(consumoExtra.diagnostico || 0)),
+    });
+  }
+  return {
+    plan: ben.plan.nombre,
+    emoji: ben.plan.emoji || "💎",
+    color: ben.plan.color || "#7c3aed",
+    renueva: ben.membresia?.fecha_renovacion || null,
+    desc_servicios: Number(b.desc_servicios || 0),
+    desc_repuestos: Number(b.desc_repuestos || 0),
+    servicios,
+  };
+}
+
 /** El plan solo cubre los vehículos amarrados a la membresía. */
 function vehiculoCubiertoPorMembresia(ben, vehiculoId) {
   if (!ben) return false;
@@ -3181,8 +3232,10 @@ app.post("/facturas", async (req, res) => {
     let descuentoPlanNombre = null;
     let notaPlan = null;
     let mantenimientoCubierto = null;   // datos para registrar el consumo al final
+    let benPlanRef = null;              // beneficios del miembro, para el resumen impreso
     if (cliente_id) {
       const benPlan = await beneficiosCliente(cliente_id);
+      benPlanRef = benPlan;
       if (benPlan) {
         // ── 1. Mantenimiento incluido ──────────────────────────────────────
         // Si la factura ES un cambio de aceite y al cliente le quedan
@@ -3458,6 +3511,10 @@ app.post("/facturas", async (req, res) => {
             valor: mantenimientoCubierto.monto,
             restantes: mantenimientoCubierto.restantes }
         : null,
+      // Resumen para imprimir en el comprobante: ya descuenta el servicio
+      // que se acaba de consumir en esta misma factura.
+      plan_resumen: resumenServiciosPlan(benPlanRef,
+        mantenimientoCubierto ? { mantenimiento: 1 } : {}),
     });
   } catch (err) {
     console.error("Error creando factura:", err);
@@ -3470,7 +3527,16 @@ app.get("/facturas/:id/items", async (req, res) => {
   const { data: factura } = await supabase.from("facturas").select("*").eq("id", id).single();
   if (!factura) return res.json({ error: "Factura no encontrada" });
   const { data: items } = await supabase.from("factura_items").select("*").eq("factura_id", id);
-  res.json({ factura, items: items || [] });
+  // Estado ACTUAL del plan del cliente, para la reimpresión. Ojo: es el saldo
+  // de hoy, no el del día en que se emitió la factura (puede haber consumido
+  // más servicios desde entonces). Por eso va marcado `al_dia_de_hoy`.
+  let plan_resumen = null;
+  if (factura.cliente_id) {
+    const ben = await beneficiosCliente(factura.cliente_id);
+    plan_resumen = resumenServiciosPlan(ben);
+    if (plan_resumen) plan_resumen.al_dia_de_hoy = true;
+  }
+  res.json({ factura, items: items || [], plan_resumen });
 });
 
 // POST /facturas/:id/cobrar — la secretaria (u otro rol con permiso) cobra
@@ -11223,6 +11289,59 @@ app.post("/planes/membresias/:id/cancelar", async (req, res) => {
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
+// ─── Eliminar una membresía (borrado real) ──────────────────────────────────
+// CANCELAR conserva el registro (el cliente fue miembro y dejó de serlo);
+// ELIMINAR lo borra del todo. Es para corregir errores de captura, no para
+// dar de baja a un cliente: para eso está cancelar.
+//
+// Se borran los hijos a mano porque no todas las tablas tienen ON DELETE
+// CASCADE. Lo que NO se toca: las facturas y los movimientos de caja ya
+// emitidos — son documentos fiscales/contables y no se pueden desaparecer
+// porque alguien borre una membresía. Por eso el endpoint avisa cuánto se
+// cobró, y exige ?forzar=1 si hubo dinero de por medio.
+app.delete("/planes/membresias/:id", async (req, res) => {
+  try {
+    const membId = Number(req.params.id);
+    const { data: memb } = await supabase.from("plan_membresias")
+      .select("*, plan_catalogo(nombre)").eq("id", membId).maybeSingle();
+    if (!memb) return res.status(404).json({ error: "Membresía no encontrada" });
+
+    // ¿Hubo dinero cobrado? Si sí, no se borra sin confirmación explícita.
+    const { data: pagos } = await supabase.from("plan_pagos")
+      .select("monto").eq("membresia_id", membId);
+    const totalPagado = (pagos || []).reduce((a, p) => a + Number(p.monto || 0), 0);
+    const forzar = String(req.query.forzar || req.body?.forzar || "") === "1"
+      || req.body?.forzar === true;
+
+    if (totalPagado > 0 && !forzar) {
+      return res.status(409).json({
+        error: "Esta membresía tiene pagos registrados",
+        requiere_confirmacion: true,
+        total_pagado: +totalPagado.toFixed(2),
+        detalle: `Se cobraron RD$ ${totalPagado.toLocaleString("es-DO")}. `
+          + "Las facturas y movimientos de caja NO se eliminan (son documentos contables). "
+          + "Si igual quieres borrar el registro de la membresía, confirma la eliminación.",
+      });
+    }
+
+    // Borrar hijos primero (orden importa por las llaves foráneas)
+    for (const tabla of ["plan_cuotas", "plan_consumos", "plan_pagos", "plan_membresia_vehiculos"]) {
+      await supabase.from(tabla).delete().eq("membresia_id", membId)
+        .then(() => {}).catch(() => {});
+    }
+
+    const { error } = await supabase.from("plan_membresias").delete().eq("id", membId);
+    if (error) return res.status(400).json({ error: error.message });
+
+    logAccion(req, { accion: "ELIMINAR", modulo: "planes", registroId: membId,
+      descripcion: `Eliminó la membresía #${membId} (${memb.plan_catalogo?.nombre || "plan"}) `
+        + `del cliente #${memb.cliente_id}`
+        + (totalPagado > 0 ? ` — tenía RD$ ${totalPagado.toLocaleString("es-DO")} en pagos` : ""),
+      detalle: { total_pagado: totalPagado, forzado: forzar } });
+    res.json({ ok: true, eliminada: membId, total_pagado: +totalPagado.toFixed(2) });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 // ─── Vehículos de una membresía (amarrar / desamarrar) ──────────────────────
 app.post("/planes/membresias/:id/vehiculos", async (req, res) => {
   try {
@@ -11274,7 +11393,11 @@ app.get("/planes/beneficios/:clienteId", async (req, res) => {
       .order("fecha_vencimiento");
     cuotasPendientes = data || [];
   } catch { /* tabla sin migrar — sin aviso */ }
-  res.json({ ...(ben || { plan: null }), cuotas_pendientes: cuotasPendientes });
+  res.json({
+    ...(ben || { plan: null }),
+    cuotas_pendientes: cuotasPendientes,
+    resumen: resumenServiciosPlan(ben),
+  });
 });
 
 // Consumir un beneficio manualmente (ej. diagnóstico cubierto por plan)
