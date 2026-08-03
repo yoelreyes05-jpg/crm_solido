@@ -3296,26 +3296,39 @@ app.post("/facturas", async (req, res) => {
     // bajo concurrencia (otra factura pudo tomar el siguiente número y se
     // generaría un duplicado). Los huecos los detecta la vista
     // v_ncf_faltantes y se reportan como anulados en el Formato 608.
-    const { data: compData, error: errNcf } = await supabase
-      .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
+    //
+    // EXCEPCIÓN — total en RD$ 0.00: pasa cuando la membresía cubre el
+    // mantenimiento completo. La regla ck_facturas_ncf_sin_monto prohíbe
+    // quemar un NCF en una factura sin monto (y la DGII no acepta
+    // comprobantes en cero). Se emite como COMPROBANTE INTERNO: ncf = null,
+    // queda en el historial y en el expediente del cliente, pero no consume
+    // secuencia fiscal.
+    const esConsumoInterno = total <= 0;
 
-    if (errNcf || !compData || compData.length === 0) {
-      return res.status(500).json({
-        error: `No se pudo emitir el comprobante ${tipo}: ${errNcf?.message || "no hay secuencia activa"}`,
-        detalle: "Revisar ncf_config (unidad_negocio='taller'): tipo no configurado, rango agotado o autorización vencida."
-      });
+    let ncf = null;
+    let fechaVence = null;
+    if (!esConsumoInterno) {
+      const { data: compData, error: errNcf } = await supabase
+        .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
+
+      if (errNcf || !compData || compData.length === 0) {
+        return res.status(500).json({
+          error: `No se pudo emitir el comprobante ${tipo}: ${errNcf?.message || "no hay secuencia activa"}`,
+          detalle: "Revisar ncf_config (unidad_negocio='taller'): tipo no configurado, rango agotado o autorización vencida."
+        });
+      }
+      ncf        = compData[0].comprobante;
+      fechaVence = compData[0].vence; // null si aún no hay autorización cargada
     }
-
-    const ncf        = compData[0].comprobante;
-    const fechaVence = compData[0].vence; // null si aún no hay autorización cargada
 
     const { data: factura, error: errFac } = await supabase
       .from("facturas")
       .insert([{
         ncf,
-        ncf_tipo: tipo,
+        ncf_tipo: esConsumoInterno ? null : tipo,
         ncf_vence: fechaVence,
-        estado: esPendienteCobro ? "PENDIENTE_COBRO" : "ACTIVA",
+        // Con total 0 no hay nada que cobrar: nunca queda pendiente de cobro
+        estado: (esPendienteCobro && !esConsumoInterno) ? "PENDIENTE_COBRO" : "ACTIVA",
         cliente_id: cliente_id || null,
         cliente_nombre: cliente_nombre || "Consumidor Final",
         cliente_rnc: cliente_rnc || null,
@@ -3336,6 +3349,8 @@ app.post("/facturas", async (req, res) => {
 
     if (errFac) return res.json({ error: errFac.message });
     const facturaId = factura[0].id;
+    // Identificador para conceptos/notas: NCF real o número interno si es en cero
+    const docRef = ncf || `INT-${String(facturaId).padStart(5, "0")}`;
 
     for (const item of items) {
       const subtotalItem = Number(item.precio_unitario) * Number(item.cantidad);
@@ -3361,7 +3376,7 @@ app.post("/facturas", async (req, res) => {
             part_id: item.inventario_id,
             tipo: "SALIDA",
             cantidad: Number(item.cantidad),
-            descripcion: `Factura ${ncf}`,
+            descripcion: `Factura ${docRef}`,
             created_at: new Date()
           }]);
         }
@@ -3387,14 +3402,17 @@ app.post("/facturas", async (req, res) => {
     }
 
     // Si el método de pago es CRÉDITO, crear cuenta por cobrar (no registrar en caja todavía)
-    if ((metodo_pago || "EFECTIVO").toUpperCase() === "CREDITO") {
+    if (esConsumoInterno) {
+      // Total RD$ 0.00 (cubierto por membresía): no hay dinero que mover.
+      // Ni caja, ni cuenta por cobrar, ni pendiente de cobro.
+    } else if ((metodo_pago || "EFECTIVO").toUpperCase() === "CREDITO") {
       const diasCredito = req.body.dias_credito || 30;
       const fechaVence  = new Date();
       fechaVence.setDate(fechaVence.getDate() + Number(diasCredito));
       await supabase.from("cuentas_cobrar").insert([{
         cliente_id:        cliente_id || null,
         factura_id:        facturaId,
-        descripcion:       `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+        descripcion:       `Factura ${docRef} — ${cliente_nombre || "Consumidor Final"}`,
         monto_original:    total,
         monto_pagado:      0,
         fecha_emision:     new Date().toISOString().slice(0, 10),
@@ -3409,7 +3427,7 @@ app.post("/facturas", async (req, res) => {
       // Solo registrar en caja si el pago es inmediato
       await supabase.from("caja_movimientos").insert([{
         tipo: "INGRESO",
-        concepto: `Factura ${ncf} — ${cliente_nombre || "Consumidor Final"}`,
+        concepto: `Factura ${docRef} — ${cliente_nombre || "Consumidor Final"}`,
         monto: total,
         metodo_pago: metodo_pago || "EFECTIVO",
         factura_id: facturaId,
@@ -3418,7 +3436,7 @@ app.post("/facturas", async (req, res) => {
     }
 
     // 🎁 Fidelización: acumular puntos de la factura (si el programa está activo)
-    if (cliente_id) await acumularPuntos(cliente_id, subtotal, "taller", facturaId, `Factura ${ncf}`);
+    if (cliente_id) await acumularPuntos(cliente_id, subtotal, "taller", facturaId, `Factura ${docRef}`);
 
     // 💎 PLANES: descontar el mantenimiento del cupo anual. Se registra AQUÍ,
     // después de que la factura existe, para que un fallo al facturar no
@@ -3426,7 +3444,7 @@ app.post("/facturas", async (req, res) => {
     if (mantenimientoCubierto) {
       await registrarConsumoPlan(
         mantenimientoCubierto.membresia_id, cliente_id, "mantenimiento", facturaId,
-        `Mantenimiento cubierto por ${mantenimientoCubierto.plan} — factura ${ncf} `
+        `Mantenimiento cubierto por ${mantenimientoCubierto.plan} — factura ${docRef} `
         + `(valor RD$ ${mantenimientoCubierto.monto.toFixed(2)})`,
         usuario_nombre || "Sistema"
       );
@@ -7929,19 +7947,24 @@ app.post("/carwash/:id/facturar", async (req, res) => {
 
     // NCF atómico vía RPC. El lavado del carwash factura por la misma
     // secuencia del taller: es el mismo contribuyente y el mismo RNC.
+    // EXCEPCIÓN: lavado en RD$ 0.00 (cubierto por membresía) → comprobante
+    // interno sin NCF, igual que en el taller (ck_facturas_ncf_sin_monto).
     const tipo = ncf_tipo || "B02";
-    const { data: compLav, error: errNcfLav } = await supabase
-      .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
+    let ncf = null;
+    let fechaVence = null;
+    if (total > 0) {
+      const { data: compLav, error: errNcfLav } = await supabase
+        .rpc("siguiente_comprobante", { p_tipo: tipo, p_unidad: "taller" });
 
-    if (errNcfLav || !compLav || compLav.length === 0) {
-      return res.status(500).json({
-        error: `No se pudo emitir el comprobante ${tipo}: ${errNcfLav?.message || "no hay secuencia activa"}`,
-        detalle: "Revisar ncf_config (unidad_negocio='taller')."
-      });
+      if (errNcfLav || !compLav || compLav.length === 0) {
+        return res.status(500).json({
+          error: `No se pudo emitir el comprobante ${tipo}: ${errNcfLav?.message || "no hay secuencia activa"}`,
+          detalle: "Revisar ncf_config (unidad_negocio='taller')."
+        });
+      }
+      ncf        = compLav[0].comprobante;
+      fechaVence = compLav[0].vence;
     }
-
-    const ncf        = compLav[0].comprobante;
-    const fechaVence = compLav[0].vence;
 
     const vehInfo = veh ? [veh.marca, veh.modelo, veh.placa].filter(Boolean).join(" ") : null;
 
@@ -7954,7 +7977,7 @@ app.post("/carwash/:id/facturar", async (req, res) => {
     }
 
     const { data: factura, error } = await supabase.from("facturas").insert([{
-      ncf, ncf_tipo: tipo, ncf_vence: fechaVence, estado: "ACTIVA",
+      ncf, ncf_tipo: ncf ? tipo : null, ncf_vence: fechaVence, estado: "ACTIVA",
       cliente_id: orden.cliente_id, cliente_nombre: cli?.nombre || "Consumidor Final",
       cliente_rnc: cli?.rnc || cli?.cedula || null,
       vehiculo_id: orden.vehiculo_id, vehiculo_info: vehInfo,
@@ -10534,6 +10557,56 @@ async function vehiculoCubiertoPlan(ben, vehiculoId) {
   } catch (e) { console.error("vehiculoCubiertoPlan:", e.message); return false; }
 }
 
+// Crea una FACTURA real por un cobro de membresía (inscripción, cuota o
+// renovación). El cuadre diario y los reportes de facturación se calculan
+// desde la tabla `facturas`; los pagos del plan que antes iban solo a
+// plan_pagos/caja_movimientos eran INVISIBLES para el cuadre. Con esto, el
+// dinero de las membresías entra por el mismo canal que todo lo demás:
+// factura con NCF B02 + ítem descriptivo + ingreso en caja amarrado a la
+// factura. Devuelve { factura } o { error }.
+async function crearFacturaMembresia({ clienteId, monto, concepto, metodo, usuario }) {
+  try {
+    const total = +Number(monto).toFixed(2);
+    if (!(total > 0)) return { error: "monto inválido" };
+    const { data: cli } = await supabase.from("clientes")
+      .select("id, nombre, rnc").eq("id", Number(clienteId)).maybeSingle();
+
+    const { data: comp, error: errNcf } = await supabase
+      .rpc("siguiente_comprobante", { p_tipo: "B02", p_unidad: "taller" });
+    if (errNcf || !comp || comp.length === 0) {
+      return { error: `sin NCF disponible (${errNcf?.message || "no hay secuencia activa"})` };
+    }
+
+    const { data: fac, error } = await supabase.from("facturas").insert([{
+      ncf: comp[0].comprobante, ncf_tipo: "B02", ncf_vence: comp[0].vence,
+      estado: "ACTIVA",
+      cliente_id: Number(clienteId) || null,
+      cliente_nombre: cli?.nombre || "Consumidor Final",
+      cliente_rnc: cli?.rnc || null,
+      subtotal: total, itbis: 0, total,
+      metodo_pago: metodo || "EFECTIVO",
+      notas: `💎 ${concepto}`,
+      creado_por: usuario || "Sistema",
+      created_at: new Date(),
+    }]).select();
+    if (error) return { error: error.message };
+
+    await supabase.from("factura_items").insert([{
+      factura_id: fac[0].id, tipo: "servicio", descripcion: concepto,
+      cantidad: 1, precio_unitario: total, itbis_aplica: false, subtotal: total,
+      inventario_id: null,
+    }]).then(() => {}).catch(() => {});
+
+    await supabase.from("caja_movimientos").insert([{
+      tipo: "INGRESO", concepto: `Factura ${fac[0].ncf} — ${concepto}`,
+      monto: total, metodo_pago: metodo || "EFECTIVO", factura_id: fac[0].id,
+      created_at: new Date(),
+    }]).then(() => {}).catch(() => {});
+
+    return { factura: fac[0] };
+  } catch (e) { return { error: e.message }; }
+}
+
 // Registra el uso de un beneficio (lavado, diagnostico). Best-effort.
 async function registrarConsumoPlan(membresiaId, clienteId, tipo, referenciaId = null, descripcion = null, usuario = "Sistema") {
   try {
@@ -10866,19 +10939,13 @@ app.post("/planes/membresias", async (req, res) => {
     if (esAnual) renov.setUTCFullYear(renov.getUTCFullYear() + 1);
     else renov.setUTCMonth(renov.getUTCMonth() + 1);
 
-    // La primera cuota se cobra ahora (si así se pidió); el resto queda
-    // pendiente y aparece en Facturación → Por Cobrar.
-    const pagadaAhora = cobrarAhora && cuotas.length && Number(cuotas[0].monto) > 0
-      ? Number(cuotas[0].monto) : 0;
-    const saldoPendiente = +(montoTotal - pagadaAhora).toFixed(2);
-
     const filaMemb = {
       cliente_id: Number(cliente_id), plan_id: Number(plan_id), estado: "ACTIVA",
       ciclo: esAnual ? "ANUAL" : "MENSUAL",
       fecha_inicio: inicio, fecha_renovacion: renov.toISOString().slice(0, 10),
       notas: notas || null, created_by: usuario || "Sistema",
       modalidad_pago: modalidad || "TOTAL",
-      monto_total: montoTotal, saldo_pendiente: saldoPendiente,
+      monto_total: montoTotal, saldo_pendiente: montoTotal,
     };
     let { data: memb, error } = await supabase.from("plan_membresias").insert([filaMemb]).select();
     if (error && /modalidad_pago|monto_total|saldo_pendiente/.test(error.message || "")) {
@@ -10896,6 +10963,36 @@ app.post("/planes/membresias", async (req, res) => {
         .then(() => {}).catch(() => {});
     }
 
+    // ── Cobro de la 1ra cuota = FACTURA real ────────────────────────────────
+    // Así el ingreso aparece en Facturación, en el cuadre del día y en caja,
+    // igual que cualquier venta del taller. Si no se puede facturar (p.ej.
+    // sin secuencia NCF), la cuota queda PENDIENTE y se cobra desde caja.
+    let pagadaAhora = 0;
+    let facturaCuota = null;
+    let avisoFactura = null;
+    if (cobrarAhora && cuotas.length && Number(cuotas[0].monto) > 0) {
+      const rFac = await crearFacturaMembresia({
+        clienteId: cliente_id, monto: cuotas[0].monto,
+        concepto: `Membresía ${plan.nombre} — cuota 1/${cuotas.length}`
+          + (modalidad ? ` (${modalidad.toLowerCase()})` : esAnual ? " (anual)" : " (mensual)")
+          + (cotizado ? " — tarifa según cilindraje del vehículo" : ""),
+        metodo: metodo_pago, usuario,
+      });
+      if (rFac.error) {
+        avisoFactura = `⚠️ No se pudo facturar la 1ra cuota (${rFac.error}). `
+          + "Quedó PENDIENTE: cóbrala en Facturación → Por Cobrar.";
+      } else {
+        pagadaAhora = Number(cuotas[0].monto);
+        facturaCuota = rFac.factura;
+      }
+    }
+    const saldoPendiente = +(montoTotal - pagadaAhora).toFixed(2);
+    if (pagadaAhora > 0) {
+      await supabase.from("plan_membresias")
+        .update({ saldo_pendiente: saldoPendiente, updated_at: new Date().toISOString() })
+        .eq("id", memb[0].id).then(() => {}).catch(() => {});
+    }
+
     // ── Registrar las cuotas ────────────────────────────────────────────────
     let avisoCuotas = null;
     const filasCuotas = cuotas.map((c, i) => ({
@@ -10906,38 +11003,41 @@ app.post("/planes/membresias", async (req, res) => {
       metodo_pago: (i === 0 && pagadaAhora > 0) ? (metodo_pago || "EFECTIVO") : null,
       pagada_at: (i === 0 && pagadaAhora > 0) ? new Date().toISOString() : null,
       cobrada_por: (i === 0 && pagadaAhora > 0) ? (usuario || "Sistema") : null,
+      factura_id: (i === 0 && facturaCuota) ? facturaCuota.id : null,
     }));
-    const { error: errCuotas } = await supabase.from("plan_cuotas").insert(filasCuotas);
+    let { error: errCuotas } = await supabase.from("plan_cuotas").insert(filasCuotas);
+    if (errCuotas && /factura_id/.test(errCuotas.message || "")) {
+      // Columna factura_id sin migrar: reintentar sin ella
+      ({ error: errCuotas } = await supabase.from("plan_cuotas")
+        .insert(filasCuotas.map(({ factura_id, ...f }) => f)));
+    }
     if (errCuotas) {
       console.error("[planes] no se pudieron crear las cuotas:", errCuotas.message);
       avisoCuotas = "⚠️ No se pudieron registrar las cuotas (¿corriste la migración v23?). "
         + "La membresía quedó activa pero no aparecerá en Facturación → Por Cobrar.";
     }
 
-    // Pago + caja SOLO de lo que se cobró ahora
+    // Historial de pagos del plan (reporte): el ingreso a caja ya lo hizo la factura
     if (pagadaAhora > 0) {
       await supabase.from("plan_pagos").insert([{
         membresia_id: memb[0].id, cliente_id: Number(cliente_id), monto: pagadaAhora,
         metodo: metodo_pago || "EFECTIVO",
         concepto: `Inscripción ${plan.nombre} — cuota 1/${cuotas.length}`
-          + (modalidad ? ` (${modalidad.toLowerCase()})` : esAnual ? " (anual)" : " (mensual)")
-          + (cotizado ? " — tarifa según cilindraje del vehículo" : ""),
+          + (facturaCuota ? ` — factura ${facturaCuota.ncf}` : ""),
         usuario: usuario || "Sistema",
       }]);
-      await supabase.from("caja_movimientos").insert([{
-        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — cuota 1/${cuotas.length}`,
-        monto: pagadaAhora, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
-      }]).then(() => {}).catch(() => {});
     }
     logAccion(req, { accion: "CREAR", modulo: "planes", registroId: memb[0].id,
       descripcion: `Inscribió al cliente #${cliente_id} en ${plan.nombre}`
         + ` (${modalidad ? modalidad.toLowerCase() : esAnual ? "anual" : "mensual"}`
-        + `, ${cuotas.length} cuota(s), ${cobrarAhora ? "1ra cobrada" : "todas a facturación"})` });
+        + `, ${cuotas.length} cuota(s), ${pagadaAhora > 0 ? `1ra facturada ${facturaCuota?.ncf || ""}` : "todas a facturación"})` });
     res.json({
       ...memb[0],
+      saldo_pendiente: saldoPendiente,
       cuotas: filasCuotas.map(c => ({ numero: c.numero, monto: c.monto,
         fecha_vencimiento: c.fecha_vencimiento, estado: c.estado })),
-      aviso: avisoCuotas,
+      factura: facturaCuota ? { id: facturaCuota.id, ncf: facturaCuota.ncf } : null,
+      aviso: [avisoFactura, avisoCuotas].filter(Boolean).join("\n") || null,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
@@ -10983,22 +11083,40 @@ app.post("/planes/cuotas/:id/cobrar", async (req, res) => {
       return res.status(400).json({ error: `Esta cuota ya está ${cuota.estado.toLowerCase()}` });
 
     const planNombre = cuota.plan_membresias?.plan_catalogo?.nombre || "Membresía";
-    const { data: upd, error } = await supabase.from("plan_cuotas").update({
+
+    // 1. FACTURA real primero: si no se puede facturar, NO se marca pagada.
+    // Es la factura la que mete el ingreso al cuadre del día y a caja.
+    const rFac = await crearFacturaMembresia({
+      clienteId: cuota.cliente_id, monto: cuota.monto,
+      concepto: `Membresía ${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas}`,
+      metodo: metodo_pago, usuario,
+    });
+    if (rFac.error) {
+      return res.status(500).json({ error: `No se pudo facturar la cuota: ${rFac.error}` });
+    }
+    const facturaCuota = rFac.factura;
+
+    // 2. Marcar la cuota pagada (con referencia a la factura)
+    let { data: upd, error } = await supabase.from("plan_cuotas").update({
       estado: "PAGADA", metodo_pago: metodo_pago || "EFECTIVO",
       pagada_at: new Date().toISOString(), cobrada_por: usuario || "Sistema",
+      factura_id: facturaCuota.id,
     }).eq("id", cuota.id).select();
+    if (error && /factura_id/.test(error.message || "")) {
+      ({ data: upd, error } = await supabase.from("plan_cuotas").update({
+        estado: "PAGADA", metodo_pago: metodo_pago || "EFECTIVO",
+        pagada_at: new Date().toISOString(), cobrada_por: usuario || "Sistema",
+      }).eq("id", cuota.id).select());
+    }
     if (error) return res.status(400).json({ error: error.message });
 
+    // 3. Historial de pagos del plan (el ingreso a caja ya lo hizo la factura)
     await supabase.from("plan_pagos").insert([{
       membresia_id: cuota.membresia_id, cliente_id: cuota.cliente_id, monto: Number(cuota.monto),
       metodo: metodo_pago || "EFECTIVO",
-      concepto: `${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas}`,
+      concepto: `${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas} — factura ${facturaCuota.ncf}`,
       usuario: usuario || "Sistema",
     }]);
-    await supabase.from("caja_movimientos").insert([{
-      tipo: "INGRESO", concepto: `Membresía ${planNombre} — cuota ${cuota.numero}/${cuota.total_cuotas}`,
-      monto: Number(cuota.monto), metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
-    }]).then(() => {}).catch(() => {});
 
     // Actualizar saldo pendiente de la membresía (best-effort)
     const saldoActual = Number(cuota.plan_membresias?.saldo_pendiente || 0);
@@ -11009,8 +11127,10 @@ app.post("/planes/cuotas/:id/cobrar", async (req, res) => {
 
     logAccion(req, { accion: "COBRAR", modulo: "planes", registroId: cuota.membresia_id,
       descripcion: `Cobró la cuota ${cuota.numero}/${cuota.total_cuotas} de ${planNombre}`
-        + ` del cliente #${cuota.cliente_id} — RD$ ${Number(cuota.monto).toLocaleString("es-DO")}` });
-    res.json({ ok: true, cuota: upd[0] });
+        + ` del cliente #${cuota.cliente_id} — RD$ ${Number(cuota.monto).toLocaleString("es-DO")}`
+        + ` (factura ${facturaCuota.ncf})` });
+    res.json({ ok: true, cuota: upd[0],
+      factura: { id: facturaCuota.id, ncf: facturaCuota.ncf } });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
@@ -11054,21 +11174,40 @@ app.post("/planes/membresias/:id/renovar", async (req, res) => {
     }).eq("id", memb.id).select();
     if (error) return res.status(400).json({ error: error.message });
 
+    // El cobro de la renovación también genera FACTURA (entra al cuadre).
+    // Si no se puede facturar, se cae al registro directo en caja para no
+    // perder el rastro del dinero, y se avisa.
+    let facturaRenov = null;
+    let avisoRenov = null;
     if (monto > 0) {
+      const rFac = await crearFacturaMembresia({
+        clienteId: memb.cliente_id, monto,
+        concepto: `Renovación ${plan.nombre} (${esAnual ? "anual" : "mensual"})`,
+        metodo: metodo_pago, usuario,
+      });
+      if (rFac.error) {
+        avisoRenov = `⚠️ La renovación se cobró pero no se pudo facturar (${rFac.error}). Quedó registrada solo en caja.`;
+        await supabase.from("caja_movimientos").insert([{
+          tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — renovación`,
+          monto, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
+        }]).then(() => {}).catch(() => {});
+      } else {
+        facturaRenov = rFac.factura;
+      }
       await supabase.from("plan_pagos").insert([{
         membresia_id: memb.id, cliente_id: memb.cliente_id, monto,
         metodo: metodo_pago || "EFECTIVO",
-        concepto: `Renovación ${plan.nombre} (${esAnual ? "anual" : "mensual"})`,
+        concepto: `Renovación ${plan.nombre} (${esAnual ? "anual" : "mensual"})`
+          + (facturaRenov ? ` — factura ${facturaRenov.ncf}` : ""),
         usuario: usuario || "Sistema",
       }]);
-      await supabase.from("caja_movimientos").insert([{
-        tipo: "INGRESO", concepto: `Membresía ${plan.nombre} — renovación`,
-        monto, metodo_pago: metodo_pago || "EFECTIVO", created_at: new Date(),
-      }]).then(() => {}).catch(() => {});
     }
     logAccion(req, { accion: "EDITAR", modulo: "planes", registroId: memb.id,
-      descripcion: `Renovó ${plan.nombre} del cliente #${memb.cliente_id} hasta ${nueva.toISOString().slice(0, 10)}` });
-    res.json(data[0]);
+      descripcion: `Renovó ${plan.nombre} del cliente #${memb.cliente_id} hasta ${nueva.toISOString().slice(0, 10)}`
+        + (facturaRenov ? ` (factura ${facturaRenov.ncf})` : "") });
+    res.json({ ...data[0],
+      factura: facturaRenov ? { id: facturaRenov.id, ncf: facturaRenov.ncf } : null,
+      aviso: avisoRenov });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

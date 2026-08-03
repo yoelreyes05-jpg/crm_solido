@@ -49,3 +49,8 @@ CREATE TABLE IF NOT EXISTS plan_cuotas (
 CREATE INDEX IF NOT EXISTS idx_plan_cuotas_membresia ON plan_cuotas(membresia_id);
 CREATE INDEX IF NOT EXISTS idx_plan_cuotas_estado    ON plan_cuotas(estado, fecha_vencimiento);
 CREATE INDEX IF NOT EXISTS idx_plan_cuotas_cliente   ON plan_cuotas(cliente_id);
+
+-- 3. Referencia a la factura con la que se cobró cada cuota.
+-- Cada cobro de membresía genera una FACTURA real (NCF B02): así entra al
+-- cuadre de caja del día y al historial de facturación, sin brechas.
+ALTER TABLE plan_cuotas ADD COLUMN IF NOT EXISTS factura_id BIGINT;

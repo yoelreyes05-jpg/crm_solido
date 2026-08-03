@@ -463,7 +463,13 @@ function imprimirOrdenCompleta(
       </div>
       <table style="width:100%;border-collapse:collapse">
         <tr>
-          <td style="padding:6px 12px;font-size:13px"><strong>KM entrada:</strong> ${Number(inspeccion.km_entrada||0).toLocaleString()||"N/A"}</td>
+          <td style="padding:6px 12px;font-size:13px"><strong>KM entrada:</strong> ${
+            inspeccion.km_entrada != null && inspeccion.km_entrada !== ""
+              ? Number(inspeccion.km_entrada).toLocaleString() + " km"
+              : (vehiculo?.km_actual != null
+                  ? Number(vehiculo.km_actual).toLocaleString() + " km (ficha del vehículo)"
+                  : "No registrado")
+          }</td>
           <td style="padding:6px 12px;font-size:13px"><strong>Combustible:</strong> ${inspeccion.nivel_combustible??"-"}%</td>
           <td style="padding:6px 12px;font-size:13px"><strong>Condición:</strong> ${inspeccion.condicion_general||"—"}</td>
         </tr>
@@ -530,6 +536,16 @@ function imprimirOrdenCompleta(
     <div class="info-row"><strong>${vMarca} ${vModelo} ${vAno}</strong></div>
     <div class="info-row">🪪 Placa: <strong style="font-family:monospace">${vPlaca}</strong></div>
     <div class="info-row">🎨 Color: ${vColor}</div>
+    ${(() => {
+      // KM con el que llegó el vehículo: primero el de la inspección de
+      // recepción; si no se capturó, el de la ficha del vehículo.
+      const km = (inspeccion?.km_entrada != null && inspeccion?.km_entrada !== "")
+        ? inspeccion.km_entrada
+        : (vehiculo?.km_actual ?? null);
+      return km != null
+        ? `<div class="info-row">🛣️ KM al ingreso: <strong>${Number(km).toLocaleString()} km</strong></div>`
+        : "";
+    })()}
     ${vVin ? `<div class="info-row">VIN: ${vVin}</div>` : ""}
   </div>
 </div>

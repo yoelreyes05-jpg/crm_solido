@@ -137,28 +137,39 @@ function generarHTML(
       </div>
       <div class="doc-meta">
         <strong>Fecha:</strong> ${fecha}<br/>
-        ${!esCotizacion ? `<strong>Vence NCF:</strong> ${ncfVence}<br/>` : ""}
+        ${!esCotizacion && factura.ncf ? `<strong>Vence NCF:</strong> ${ncfVence}<br/>` : ""}
         <strong>Método:</strong> ${factura.metodo_pago || factura.method || "EFECTIVO"}<br/>
-        ${!esCotizacion ? `<strong>Tipo NCF:</strong> ${factura.ncf_tipo || "B02"}` : ""}
+        ${!esCotizacion ? (factura.ncf ? `<strong>Tipo NCF:</strong> ${factura.ncf_tipo || "B02"}` : `<strong>Documento:</strong> Interno`) : ""}
       </div>
-      ${!esCotizacion ? `<div class="doc-badge">${factura.ncf_tipo || "B02"}</div>` : ""}
+      ${!esCotizacion ? `<div class="doc-badge">${factura.ncf ? (factura.ncf_tipo || "B02") : "INTERNO"}</div>` : ""}
     </div>
   </div>
 
   ${banner}
 
-  ${!esCotizacion ? `
+  ${!esCotizacion ? (factura.ncf ? `
   <div class="ncf-box">
     <div>
       <div class="ncf-label">Número de Comprobante Fiscal (NCF)</div>
-      <div class="ncf-num">${factura.ncf || "—"}</div>
+      <div class="ncf-num">${factura.ncf}</div>
     </div>
     <div class="ncf-right">
       Tipo: ${factura.ncf_tipo || "B02"}<br/>
       Vencimiento: ${ncfVence}<br/>
       ${factura.estado === "CANCELADA" ? "⚠️ CANCELADA" : "✓ Vigente"}
     </div>
-  </div>` : ""}
+  </div>` : `
+  <div class="ncf-box">
+    <div>
+      <div class="ncf-label">Comprobante Interno — No Fiscal</div>
+      <div class="ncf-num">INT-${String(factura.id).padStart(5, "0")}</div>
+    </div>
+    <div class="ncf-right">
+      💎 Servicio cubierto por membresía<br/>
+      Sin valor fiscal — no consume NCF<br/>
+      ${factura.estado === "CANCELADA" ? "⚠️ CANCELADA" : "✓ Vigente"}
+    </div>
+  </div>`) : ""}
 
   <div class="dos-col">
     <div class="info-box">
@@ -833,6 +844,9 @@ export default function FacturaPage() {
       });
       const data = await res.json();
       if (data.error) { alert(data.error); return; }
+      if (data.factura?.ncf) {
+        alert(`✅ Cuota cobrada.\nSe emitió la factura ${data.factura.ncf} — ya está en el historial y en el cuadre del día.`);
+      }
       setCobrandoCuota(null);
       fetchData();
     } catch { alert("Error al cobrar la cuota de membresía"); }
