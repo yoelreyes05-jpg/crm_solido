@@ -517,6 +517,48 @@ export async function avisarTallerNuevaCita(cita) {
   }
 }
 
+/**
+ * Aviso al taller de una PRE-INSCRIPCIÓN a curso hecha desde el sitio web.
+ *
+ * Va por el mismo canal que el aviso de cita nueva a propósito: el taller ya
+ * mira ese buzón, y una pre-inscripción que nadie ve en 24 horas es un alumno
+ * perdido. No lanza: si Brevo falla, la fila ya quedó guardada en el CRM.
+ *
+ * @param {{nombre:string,telefono?:string,email?:string,curso:string,
+ *          fecha_proxima?:string,modalidad?:string,notas?:string}} datos
+ */
+export async function avisarTallerPreinscripcionCurso(datos) {
+  const destino = process.env.MAIL_TALLER || process.env.GMAIL_USER || MAIL_FROM_EMAIL;
+  try {
+    await enviarCorreoBrevo({
+      para: destino,
+      asunto: `🎓 Pre-inscripción web — ${datos.nombre} · ${datos.curso}`,
+      html: `
+        <div style="font-family:Arial,sans-serif;font-size:14px;color:#334155">
+          <h3 style="color:#0f172a">Nueva pre-inscripción desde el sitio web</h3>
+          <p>
+            <strong>Curso:</strong> ${datos.curso}<br/>
+            <strong>Inicio:</strong> ${datos.fecha_proxima ? fechaLarga(datos.fecha_proxima) : "por definir"}<br/>
+            <strong>Modalidad:</strong> ${datos.modalidad || "—"}<br/>
+            <strong>Alumno:</strong> ${datos.nombre}<br/>
+            <strong>Teléfono:</strong> ${datos.telefono || "—"}<br/>
+            <strong>Correo:</strong> ${datos.email || "—"}<br/>
+            <strong>Comentario:</strong> ${datos.notas || "—"}
+          </p>
+          <p style="color:#64748b">
+            Queda registrado en el CRM → Capacitaciones, con monto pagado en 0.
+            Confirmen el cupo y el pago por teléfono.
+          </p>
+        </div>`,
+      texto: `Pre-inscripción web: ${datos.nombre} — ${datos.curso} (${datos.telefono || "sin teléfono"})`,
+    });
+    return { ok: true };
+  } catch (e) {
+    console.warn("[cursos] aviso de pre-inscripción:", e.message);
+    return { ok: false, error: e.message };
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Recordatorios
 // ─────────────────────────────────────────────────────────────────────────────

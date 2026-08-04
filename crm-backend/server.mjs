@@ -7,7 +7,7 @@ import portalCliente from "./routes/portalCliente.mjs";
 import { notificarCambioEstado, esEventoNotificable } from "./services/notificarCliente.mjs";
 import {
   notificarCita, avisarTallerNuevaCita, eventoDesdeEstado,
-  enviarRecordatoriosPendientes,
+  enviarRecordatoriosPendientes, avisarTallerPreinscripcionCurso,
   fechaLarga as fechaLargaCita, hora12 as hora12Cita,
 } from "./services/notificarCita.mjs";
 import {
@@ -12664,6 +12664,188 @@ if (RECORDATORIOS_ACTIVOS) {
   // Railway manda la señal de apagado en un redespliegue.
   reloj.unref?.();
 }
+
+// ═════════════════════════════════════════════════════════════════════════════
+// 🎓 CURSOS — VITRINA PÚBLICA (sitio web, sin autenticación)
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// El portal de cursos de la web lee de aquí. No hay copia del catálogo en el
+// HTML a propósito: cuando alguien cambia una fecha en el CRM → Capacitaciones,
+// la web lo refleja en la siguiente carga sin que nadie toque el sitio. Ese era
+// justamente el problema con los listados escritos a mano.
+//
+// Sólo se expone lo que el cliente necesita ver. Ni alumnos, ni pagos, ni
+// márgenes: la tabla `capacitaciones_cursos` tiene columnas que no deben salir
+// a internet, por eso el `select` es explícito y no un `*`.
+
+/**
+ * Normaliza una fila de curso a lo que muestra la web y calcula los cupos
+ * disponibles. `null` en `cupo_disponible` significa "sin límite declarado".
+ */
+function cursoPublico(c, inscritosPorCurso) {
+  const inscritos = inscritosPorCurso.get(c.id) || 0;
+  const cupo = Number(c.cupo_maximo) > 0 ? Number(c.cupo_maximo) : null;
+  return {
+    id:            c.id,
+    nombre:        c.nombre,
+    instructor:    c.instructor || "",
+    descripcion:   c.descripcion || "",
+    horas:         Number(c.horas || 0),
+    precio:        Number(c.precio || 0),
+    modalidad:     c.modalidad || "Presencial",
+    fecha_proxima: c.fecha_proxima || null,
+    fecha_fin:     c.fecha_fin || null,
+    inscritos,
+    cupo_maximo:     cupo,
+    cupo_disponible: cupo === null ? null : Math.max(0, cupo - inscritos),
+    agotado:         cupo !== null && inscritos >= cupo,
+  };
+}
+
+// GET /cursos/publicos — catálogo para el sitio web.
+//
+// Se ocultan los cursos inactivos y los que ya terminaron. Un curso sin fecha
+// sí se muestra: normalmente es de matrícula abierta y el taller cuadra la
+// fecha por teléfono; esconderlo perdería inscripciones reales.
+app.get("/cursos/publicos", async (req, res) => {
+  try {
+    const hoy = new Date().toISOString().slice(0, 10);
+
+    // `cupo_maximo` viene de sql/migracion_cupo_maximo_cursos.sql. Si esa
+    // migración todavía no se ha corrido, Postgres rechaza el select entero y
+    // la web se quedaría sin cursos; por eso se reintenta sin esa columna en
+    // vez de devolver un error que el visitante no puede resolver.
+    const COLS = "id,nombre,instructor,descripcion,horas,precio,modalidad,estado,fecha_proxima,fecha_fin";
+    let { data: cursos, error } = await supabase
+      .from("capacitaciones_cursos")
+      .select(`${COLS},cupo_maximo`)
+      .eq("estado", "activo");
+    if (error) {
+      ({ data: cursos, error } = await supabase
+        .from("capacitaciones_cursos").select(COLS).eq("estado", "activo"));
+    }
+    if (error) return res.status(400).json({ error: error.message });
+
+    const vigentes = (cursos || []).filter((c) => {
+      const cierre = c.fecha_fin || c.fecha_proxima;
+      return !cierre || cierre >= hoy;
+    });
+    if (!vigentes.length) return res.json([]);
+
+    // Conteo de inscritos en una sola consulta. Los desertados no ocupan cupo.
+    const ids = vigentes.map((c) => c.id);
+    const { data: alumnos } = await supabase
+      .from("capacitaciones_alumnos")
+      .select("curso_id,estado")
+      .in("curso_id", ids);
+
+    const inscritosPorCurso = new Map();
+    for (const a of alumnos || []) {
+      if (a.estado === "desertado") continue;
+      inscritosPorCurso.set(a.curso_id, (inscritosPorCurso.get(a.curso_id) || 0) + 1);
+    }
+
+    // Primero los que tienen fecha, del más próximo al más lejano; los de
+    // matrícula abierta van al final para no empujar hacia abajo lo que arranca
+    // la semana que viene.
+    const salida = vigentes
+      .map((c) => cursoPublico(c, inscritosPorCurso))
+      .sort((a, b) => {
+        if (!a.fecha_proxima && !b.fecha_proxima) return a.nombre.localeCompare(b.nombre);
+        if (!a.fecha_proxima) return 1;
+        if (!b.fecha_proxima) return -1;
+        return a.fecha_proxima.localeCompare(b.fecha_proxima);
+      });
+
+    res.json(salida);
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// POST /cursos/preinscripcion — el visitante aparta su lugar desde la web.
+//
+// Entra como alumno normal con `monto_pagado: 0` y una nota que empieza por
+// "PRE-INSCRIPCIÓN WEB". Se evitó a propósito inventar un estado nuevo: el
+// módulo de Capacitaciones sólo pinta inscrito/completado/desertado, y un
+// cuarto valor saldría sin color ni filtro. La nota es visible en la ficha del
+// alumno, que es donde la secretaria mira antes de llamar.
+app.post("/cursos/preinscripcion", async (req, res) => {
+  try {
+    const curso_id = Number(req.body.curso_id);
+    const nombre   = String(req.body.nombre   || "").trim();
+    const telefono = String(req.body.telefono || "").trim();
+    const email    = String(req.body.email    || "").trim();
+    const comentario = String(req.body.comentario || "").trim().slice(0, 300);
+
+    if (!curso_id)     return res.status(400).json({ error: "Debes seleccionar un curso" });
+    if (nombre.length < 3) return res.status(400).json({ error: "Escribe tu nombre completo" });
+    if (!telefono && !email)
+      return res.status(400).json({ error: "Necesitamos un teléfono o un correo para contactarte" });
+    if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+      return res.status(400).json({ error: "Correo electrónico inválido" });
+
+    // El curso debe existir y estar activo: si no se valida aquí, un `curso_id`
+    // cualquiera crea un alumno huérfano que nadie encuentra después.
+    let { data: curso } = await supabase
+      .from("capacitaciones_cursos")
+      .select("id,nombre,estado,modalidad,fecha_proxima,cupo_maximo")
+      .eq("id", curso_id)
+      .maybeSingle();
+    if (!curso) {
+      // Igual que arriba: sin la migración de `cupo_maximo` el select falla y
+      // toda pre-inscripción se rechazaría con "curso no disponible".
+      ({ data: curso } = await supabase
+        .from("capacitaciones_cursos")
+        .select("id,nombre,estado,modalidad,fecha_proxima")
+        .eq("id", curso_id).maybeSingle());
+    }
+    if (!curso || curso.estado !== "activo")
+      return res.status(404).json({ error: "Ese curso ya no está disponible" });
+
+    // Duplicados: la misma persona dando dos veces al botón no debe generar
+    // dos alumnos. Se compara por teléfono o correo dentro del mismo curso.
+    const { data: previos } = await supabase
+      .from("capacitaciones_alumnos")
+      .select("id,telefono,email,estado")
+      .eq("curso_id", curso_id);
+    const yaEsta = (previos || []).some((a) =>
+      (telefono && (a.telefono || "").replace(/\D/g, "") === telefono.replace(/\D/g, "")) ||
+      (email    && (a.email    || "").toLowerCase() === email.toLowerCase())
+    );
+    if (yaEsta)
+      return res.json({ ok: true, duplicado: true,
+        mensaje: "Ya tenemos tu solicitud para este curso. Te contactaremos pronto." });
+
+    if (Number(curso.cupo_maximo) > 0 && (previos || []).filter(a => a.estado !== "desertado").length >= Number(curso.cupo_maximo))
+      return res.status(409).json({ error: "Este curso ya no tiene cupos disponibles" });
+
+    const nota = `PRE-INSCRIPCIÓN WEB${comentario ? " — " + comentario : ""}`;
+    const { data, error } = await supabase.from("capacitaciones_alumnos").insert([{
+      curso_id,
+      nombre,
+      telefono:          telefono || null,
+      email:             email || null,
+      estado:            "inscrito",
+      fecha_inscripcion: new Date().toISOString().slice(0, 10),
+      monto_pagado:      0,
+      notas:             nota,
+    }]).select().single();
+    if (error) return res.status(400).json({ error: error.message });
+
+    logAccion(req, { accion: "CREAR", modulo: "capacitaciones", registroId: data.id,
+      descripcion: `Pre-inscripción web — ${nombre} en "${curso.nombre}"`,
+      detalle: { origen: "WEB", curso_id, telefono, email } });
+
+    avisarTallerPreinscripcionCurso({
+      nombre, telefono, email,
+      curso: curso.nombre,
+      fecha_proxima: curso.fecha_proxima,
+      modalidad: curso.modalidad,
+      notas: comentario,
+    }).catch(() => {});
+
+    res.json({ ok: true, id: data.id, curso: curso.nombre });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
 
 // ═════════════════════════════════════════════════════════════════════════════
 // 🚀 SERVIDOR
