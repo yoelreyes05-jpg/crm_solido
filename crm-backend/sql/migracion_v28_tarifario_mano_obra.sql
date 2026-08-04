@@ -1,5 +1,5 @@
 -- ══════════════════════════════════════════════════════════════════════════
--- MIGRACION V27 - TARIFARIO DE MANO DE OBRA
+-- MIGRACION V28 - TARIFARIO DE MANO DE OBRA
 --
 -- Catalogo de operaciones del taller con su tiempo estandar y el precio por
 -- segmento de vehiculo. NO va en `inventario`: esa tabla lleva stock, minimo

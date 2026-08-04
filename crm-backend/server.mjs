@@ -10726,6 +10726,135 @@ app.get("/planes/cotizar", async (req, res) => {
   res.json(data[0]);
 });
 
+// ─── Diagnóstico: ¿por qué el precio no cambia según el cilindraje? ─────────
+// El cotizador depende de una cadena de configuración; si un eslabón falta,
+// devuelve 0 y el sistema cae al precio de catálogo — o sea, le cobra lo
+// mismo a un L4 que a un V6. Este endpoint dice exactamente qué falta.
+app.get("/planes/diagnostico-precios", async (req, res) => {
+  try {
+    const problemas = [];
+    const ok = [];
+
+    // 1. Tarifas por cilindraje
+    const { data: precios, error: errPre } = await supabase
+      .from("plan_precios").select("plan_id, cilindros, precio_mensual, precio_anual");
+    if (errPre) {
+      problemas.push({ paso: "plan_precios", gravedad: "ALTA",
+        detalle: `No existe la tabla plan_precios (${errPre.message})`,
+        solucion: "Corre migracion_v23_planes_mantenimiento.sql" });
+    } else if (!precios || precios.length === 0) {
+      problemas.push({ paso: "plan_precios", gravedad: "ALTA",
+        detalle: "La tabla plan_precios está VACÍA: no hay ninguna tarifa fijada por cilindraje.",
+        solucion: "Corre migracion_v27_autoenlace_y_tarifas.sql — siembra las tarifas de 4, 6 y 8 cilindros." });
+    } else {
+      const porPlan = {};
+      for (const p of precios) (porPlan[p.plan_id] ||= []).push(Number(p.cilindros));
+      ok.push(`plan_precios tiene ${precios.length} tarifas`);
+      for (const [planId, cils] of Object.entries(porPlan)) {
+        const faltan = [4, 6, 8].filter(c => !cils.includes(c));
+        if (faltan.length) problemas.push({ paso: "plan_precios", gravedad: "MEDIA",
+          detalle: `El plan #${planId} no tiene tarifa para ${faltan.join(" ni ")} cilindros`,
+          solucion: "Corre plan_generar_tarifas() o fija el precio a mano en plan_precios" });
+      }
+    }
+
+    // 2. Configuración de motor (aceite y filtro enlazados al inventario)
+    const { data: motor, error: errMotor } = await supabase
+      .from("plan_motor_config")
+      .select("cilindros, tipo_aceite, cuartos, aceite_item_id, filtro_item_id, activo");
+    if (errMotor) {
+      problemas.push({ paso: "plan_motor_config", gravedad: "ALTA",
+        detalle: `No existe plan_motor_config (${errMotor.message})`,
+        solucion: "Corre migracion_v23_planes_mantenimiento.sql" });
+    } else {
+      const activos = (motor || []).filter(m => m.activo !== false);
+      const sinEnlace = activos.filter(m => !m.aceite_item_id || !m.filtro_item_id);
+      if (activos.length === 0) {
+        problemas.push({ paso: "plan_motor_config", gravedad: "ALTA",
+          detalle: "No hay configuraciones de motor activas.",
+          solucion: "Corre migracion_v23_planes_mantenimiento.sql" });
+      } else if (sinEnlace.length) {
+        problemas.push({ paso: "plan_motor_config", gravedad: "ALTA",
+          detalle: `${sinEnlace.length} de ${activos.length} configuraciones NO tienen el aceite/filtro enlazado al inventario. `
+            + `Sin eso el aceite vale 0 y el cálculo da 0 para todos los cilindrajes.`,
+          ejemplos: sinEnlace.slice(0, 6).map(m =>
+            `${m.cilindros} cil · ${m.tipo_aceite}: ${!m.aceite_item_id ? "sin aceite" : ""}${!m.aceite_item_id && !m.filtro_item_id ? " y " : ""}${!m.filtro_item_id ? "sin filtro" : ""}`),
+          solucion: "Corre migracion_v27_autoenlace_y_tarifas.sql (auto-enlaza por nombre) y revisa el resultado." });
+      } else {
+        ok.push(`plan_motor_config: ${activos.length} configuraciones con aceite y filtro enlazados`);
+      }
+    }
+
+    // 3. Vehículos sin cilindraje → el cotizador los trata como 4 cilindros
+    const { count: totalVeh } = await supabase.from("vehiculos")
+      .select("id", { count: "exact", head: true });
+    const { count: sinCil } = await supabase.from("vehiculos")
+      .select("id", { count: "exact", head: true }).is("cilindros", null);
+    if (sinCil > 0) {
+      problemas.push({ paso: "vehiculos.cilindros", gravedad: sinCil === totalVeh ? "ALTA" : "MEDIA",
+        detalle: `${sinCil} de ${totalVeh} vehículos NO tienen cilindraje registrado. `
+          + "El cotizador los calcula como 4 cilindros — por eso un V6 puede pagar tarifa de L4.",
+        solucion: "Edita el vehículo en la pantalla Vehículos y pon los cilindros." });
+    } else if (totalVeh > 0) {
+      ok.push(`Los ${totalVeh} vehículos tienen cilindraje registrado`);
+    }
+
+    // 4. Prueba real: cotizar el primer plan contra un vehículo de cada cilindraje
+    const pruebas = [];
+    const { data: planes } = await supabase.from("plan_catalogo")
+      .select("id, nombre, precio_mensual").or("activo.is.null,activo.eq.true")
+      .order("orden").limit(1);
+    const plan = planes?.[0];
+    if (plan) {
+      for (const cil of [4, 6, 8]) {
+        const { data: veh } = await supabase.from("vehiculos")
+          .select("id, marca, modelo, cilindros").eq("cilindros", cil).limit(1).maybeSingle();
+        if (!veh) { pruebas.push({ cilindros: cil, resultado: "No tienes ningún vehículo de este cilindraje para probar" }); continue; }
+        const { data: cot, error: errCot } = await supabase.rpc("plan_cotizar_membresia",
+          { p_plan_id: plan.id, p_vehiculo_id: veh.id });
+        if (errCot) { pruebas.push({ cilindros: cil, vehiculo: `${veh.marca} ${veh.modelo}`, error: errCot.message }); continue; }
+        const c = cot?.[0] || {};
+        pruebas.push({
+          cilindros: cil,
+          vehiculo: `${veh.marca} ${veh.modelo}`,
+          precio_mensual: Number(c.precio_mensual || 0),
+          precio_anual: Number(c.precio_anual || 0),
+          cuartos_aceite: Number(c.cuartos || 0),
+          aceite: c.aceite_nombre,
+          precio_es_sugerido: c.precio_es_sugerido,
+          configurado: c.configurado,
+          aviso: c.aviso,
+        });
+      }
+      // ¿Todos los cilindrajes dan el mismo precio? Ese es el síntoma reportado.
+      const conPrecio = pruebas.filter(p => p.precio_mensual > 0);
+      const distintos = new Set(conPrecio.map(p => p.precio_mensual));
+      if (conPrecio.length > 1 && distintos.size === 1) {
+        problemas.push({ paso: "resultado", gravedad: "ALTA",
+          detalle: `Confirmado: el cotizador devuelve el MISMO precio (RD$ ${[...distintos][0]}) para todos los cilindrajes.`,
+          solucion: "Revisa los pasos de arriba — casi siempre es plan_precios vacía o el aceite sin enlazar." });
+      } else if (conPrecio.length === 0) {
+        problemas.push({ paso: "resultado", gravedad: "ALTA",
+          detalle: `El cotizador devuelve 0 en todos los casos, así que el sistema cae al precio de catálogo `
+            + `(RD$ ${Number(plan.precio_mensual || 0)}) — el mismo para cualquier vehículo.`,
+          solucion: "Corre migracion_v27_autoenlace_y_tarifas.sql" });
+      } else if (distintos.size > 1) {
+        ok.push(`El cotizador SÍ varía por cilindraje: ${conPrecio.map(p => `${p.cilindros}cil=RD$${p.precio_mensual}`).join(" · ")}`);
+      }
+    }
+
+    res.json({
+      estado: problemas.some(p => p.gravedad === "ALTA") ? "ROTO"
+        : problemas.length ? "PARCIAL" : "OK",
+      resumen: problemas.length === 0
+        ? "Todo bien: el precio de la membresía se calcula según el cilindraje."
+        : `${problemas.length} problema(s) encontrado(s).`,
+      problemas, funcionando: ok, pruebas,
+      plan_probado: plan ? { id: plan.id, nombre: plan.nombre, precio_catalogo: plan.precio_mensual } : null,
+    });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
 app.post("/planes", async (req, res) => {
   try {
     const { nombre, emoji, color, descripcion, precio_mensual, precio_anual, orden } = req.body;
@@ -10960,6 +11089,7 @@ app.post("/planes/membresias", async (req, res) => {
     let precioAnual   = Number(plan.precio_anual || 0);
     let precioMensual = Number(plan.precio_mensual || 0);
     let cotizado = false;
+    let avisoPrecio = null;   // se devuelve al front para que NO cobre a ciegas
     if (vehIds.length) {
       const { data: cot, error: errCot } = await supabase.rpc("plan_cotizar_membresia", {
         p_plan_id: Number(plan_id),
@@ -10969,9 +11099,23 @@ app.post("/planes/membresias", async (req, res) => {
         const c = cot[0];
         if (Number(c.precio_anual || 0) > 0)   { precioAnual = Number(c.precio_anual); cotizado = true; }
         if (Number(c.precio_mensual || 0) > 0) { precioMensual = Number(c.precio_mensual); cotizado = true; }
+        if (!cotizado) {
+          // El cotizador respondió pero sin precio: falta configuración. Sin
+          // este aviso, un V6 termina pagando la tarifa de catálogo (la de 4
+          // cilindros) y nadie se entera.
+          avisoPrecio = "⚠️ Se cobró el precio de catálogo: el cotizador no pudo calcular "
+            + `la tarifa por cilindraje. ${c.aviso || ""}`.trim()
+            + " Revisa Planes → Diagnóstico de precios.";
+        } else if (c.precio_es_sugerido) {
+          avisoPrecio = `ℹ️ Precio sugerido automáticamente: no hay tarifa fijada para ${c.cilindros} cilindros.`;
+        }
       } else if (errCot) {
         console.warn("[planes] no se pudo cotizar por cilindraje:", errCot.message);
+        avisoPrecio = `⚠️ Se cobró el precio de catálogo: falló el cotizador (${errCot.message}).`;
       }
+    } else {
+      avisoPrecio = "ℹ️ No se amarró ningún vehículo, así que se usó el precio de catálogo "
+        + "(tarifa de referencia de 4 cilindros).";
     }
     const monto = esAnual ? precioAnual : precioMensual;
 
@@ -11103,7 +11247,8 @@ app.post("/planes/membresias", async (req, res) => {
       cuotas: filasCuotas.map(c => ({ numero: c.numero, monto: c.monto,
         fecha_vencimiento: c.fecha_vencimiento, estado: c.estado })),
       factura: facturaCuota ? { id: facturaCuota.id, ncf: facturaCuota.ncf } : null,
-      aviso: [avisoFactura, avisoCuotas].filter(Boolean).join("\n") || null,
+      cotizado_por_cilindraje: cotizado,
+      aviso: [avisoPrecio, avisoFactura, avisoCuotas].filter(Boolean).join("\n") || null,
     });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });

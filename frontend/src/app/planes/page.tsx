@@ -460,6 +460,35 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
     return () => { cancelado = true; };
   }, [form.plan_id, vehSel]);
 
+  // Diagnóstico: pregunta al backend por qué el precio no varía por cilindraje
+  const verDiagnostico = async () => {
+    try {
+      const d = await fetch(`${API}/planes/diagnostico-precios`).then(r => r.json());
+      if (d.error) return alert("Error: " + d.error);
+      const lineas: string[] = [`ESTADO: ${d.estado}`, d.resumen, ""];
+      if (d.problemas?.length) {
+        lineas.push("PROBLEMAS:");
+        d.problemas.forEach((p: any, i: number) => {
+          lineas.push(`${i + 1}. [${p.gravedad}] ${p.detalle}`);
+          if (p.ejemplos?.length) lineas.push(`   Ej: ${p.ejemplos.join(" · ")}`);
+          lineas.push(`   → ${p.solucion}`);
+        });
+        lineas.push("");
+      }
+      if (d.pruebas?.length) {
+        lineas.push("PRUEBA REAL POR CILINDRAJE:");
+        d.pruebas.forEach((p: any) => {
+          lineas.push(p.resultado || p.error
+            ? `  ${p.cilindros} cil: ${p.resultado || "ERROR " + p.error}`
+            : `  ${p.cilindros} cil (${p.vehiculo}): ${fmt(p.precio_mensual)}/mes · ${p.cuartos_aceite} cuartos${p.aviso ? ` · ${p.aviso}` : ""}`);
+        });
+        lineas.push("");
+      }
+      if (d.funcionando?.length) lineas.push("OK: " + d.funcionando.join(" · "));
+      alert(lineas.join("\n"));
+    } catch { alert("No se pudo obtener el diagnóstico"); }
+  };
+
   const inscribir = async () => {
     if (!form.cliente_id || !form.plan_id) return alert("Selecciona cliente y plan");
     if (vehiculosDelCliente.length > 0 && vehSel.length === 0 &&
@@ -481,8 +510,11 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
       const pendientes = (d.cuotas || []).filter((c: any) => c.estado === "PENDIENTE").length;
       alert("✅ Membresía activada"
         + (nCuotas > 1 ? ` — ${nCuotas} cuotas` : "")
+        + (d.cotizado_por_cilindraje
+            ? "\n💰 Precio calculado según el cilindraje del vehículo."
+            : "")
         + (pendientes > 0 ? `\n💳 ${pendientes} cuota(s) pendiente(s): el cliente aparece en Facturación → "Por Cobrar" para pagarlas.` : "")
-        + (d.aviso ? `\n${d.aviso}` : ""));
+        + (d.aviso ? `\n\n${d.aviso}` : ""));
       setForm({ cliente_id: "", plan_id: "", modalidad: "TOTAL", metodo_pago: "EFECTIVO", cobrar_ahora: true });
       setVehSel([]);
       setBuscaCliente("");
@@ -1064,7 +1096,10 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
         )}
 
         {form.plan_id && !cotizacion && (
-          <div style={{ background: "#f8fafc", borderRadius: 9, padding: "10px 12px", fontSize: 13, marginBottom: 12, color: "#334155" }}>
+          <div style={{
+            background: vehSel.length > 0 && !cotizando ? "#fef2f2" : "#f8fafc",
+            border: vehSel.length > 0 && !cotizando ? "1px solid #fca5a5" : "1px solid transparent",
+            borderRadius: 9, padding: "10px 12px", fontSize: 13, marginBottom: 12, color: "#334155" }}>
             {form.cobrar_ahora ? "Cobro hoy (1ra cuota): " : "1ra cuota (a facturación): "}<b style={{ color: "#6366f1" }}>
               {(() => {
                 const p = planes.find(x => String(x.id) === String(form.plan_id));
@@ -1077,7 +1112,23 @@ function Miembros({ usuario, puedeCrear, puedeEditar }: any) {
               ? " · calculando precio del vehículo…"
               : vehSel.length === 0
                 ? " · precio de referencia. Selecciona el vehículo para el precio real según su cilindraje."
-                : " · entra a caja y a ingresos del plan automáticamente."}
+                : ""}
+            {/* Hay vehículo elegido pero el cotizador no devolvió precio: se
+                está por cobrar la tarifa de catálogo (la de 4 cilindros) a un
+                vehículo que quizás consume más aceite. Hay que decirlo. */}
+            {!cotizando && vehSel.length > 0 && (
+              <div style={{ marginTop: 8, color: "#b91c1c", fontWeight: 700, lineHeight: 1.5 }}>
+                ⚠️ Este es el precio de CATÁLOGO, no el calculado por cilindraje.
+                <div style={{ fontWeight: 400, fontSize: 12, marginTop: 4 }}>
+                  Un V6 pagaría lo mismo que un 4 cilindros aunque consuma más aceite.
+                  Falta configuración: revisa que el vehículo tenga <b>cilindraje</b> registrado
+                  y que se haya corrido <b>migracion_v27_autoenlace_y_tarifas.sql</b>.
+                </div>
+                <button onClick={verDiagnostico} style={{ ...S.btnGhost, marginTop: 8, color: "#b91c1c", borderColor: "#fca5a5" }}>
+                  🔎 Ver diagnóstico
+                </button>
+              </div>
+            )}
           </div>
         )}
 
