@@ -52,7 +52,17 @@ const MENU = [
   { href: "/asistente-correo",   icon: "✉️", label: "Asistente Correo",     key: "asistente-correo" },
 ];
 
-const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado", "/pantalla", "/menu"];
+// `/aloha/login` va aquí para que la pantalla de la tienda se pinte sola, sin
+// el sidebar oscuro del CRM alrededor. Es la mitad visual del aislamiento; la
+// otra mitad (las redirecciones) está en src/middleware.js.
+const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu"];
+
+/** A dónde mandar a alguien sin sesión, según dónde estaba. */
+function loginQueCorresponde(pathname: string) {
+  return pathname === "/aloha" || pathname.startsWith("/aloha/")
+    ? "/aloha/login"
+    : "/login";
+}
 
 export default function ClientLayout({ children }: { children: React.ReactNode }) {
   const router   = useRouter();
@@ -69,7 +79,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
   useEffect(() => {
     if (esPublica) { setListo(true); return; }
     const raw = localStorage.getItem("usuario");
-    if (!raw) { router.push("/login"); return; }
+    if (!raw) { router.push(loginQueCorresponde(pathname)); return; }
     setUsuario(JSON.parse(raw));
     setListo(true);
   }, [pathname]);
@@ -207,9 +217,16 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
               </span>
               <button
                 onClick={() => {
+                  // Cada quien sale por su propia puerta: el personal de la
+                  // tienda vuelve a ver la marca de Aloha, no el login del
+                  // taller. Si no, "Salir" los expulsaba a un sistema que no
+                  // es el suyo y parecía un error.
+                  const salida = String(usuario?.rol || "").toLowerCase() === "aloha"
+                    ? "/aloha/login"
+                    : "/login";
                   localStorage.removeItem("usuario");
                   document.cookie = "usuario=;path=/;max-age=0";
-                  window.location.href = "/login";
+                  window.location.href = salida;
                 }}
                 style={{
                   padding: "5px 12px", borderRadius: 7, border: "1px solid #334155",
