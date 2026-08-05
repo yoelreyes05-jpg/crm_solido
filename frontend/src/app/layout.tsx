@@ -114,7 +114,21 @@ const MODULOS: Modulo[] = [
 const MENU_FLAT = MODULOS.flatMap(m => m.items);
 
 // Rutas que NO usan el sidebar
-const RUTAS_PUBLICAS = ["/login", "/cliente", "/estado", "/pantalla", "/menu", "/"];
+//
+// `/aloha/login` está aquí porque es la puerta propia de la tienda: si no
+// figura como pública, este layout no encuentra sesión y manda al visitante
+// a /login — que es justo lo que la separación quería evitar.
+const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu", "/"];
+
+/** ¿Estamos dentro del territorio de Aloha Perfume Store? */
+function esZonaAloha(pathname: string) {
+  return pathname === "/aloha" || pathname.startsWith("/aloha/");
+}
+
+/** A qué login mandar a alguien sin sesión, según dónde estaba parado. */
+function loginQueCorresponde(pathname: string) {
+  return esZonaAloha(pathname) ? "/aloha/login" : "/login";
+}
 
 export default function RootLayout({ children }) {
   const router = useRouter();
@@ -132,7 +146,7 @@ export default function RootLayout({ children }) {
   useEffect(() => {
     if (esPublica) { setListo(true); return; }
     const u = localStorage.getItem("usuario");
-    if (!u) { router.push("/login"); return; }
+    if (!u) { router.push(loginQueCorresponde(pathname)); return; }
     setUsuario(JSON.parse(u));
     setListo(true);
     // Cargar estado de módulos desde localStorage
@@ -174,9 +188,14 @@ export default function RootLayout({ children }) {
   };
 
   const logout = () => {
+    // Cada quien sale por su propia puerta. Al personal de la tienda, caer en
+    // el login azul del taller le parece un error del sistema.
+    const salida = String(usuario?.rol || "").toLowerCase() === "aloha"
+      ? "/aloha/login"
+      : "/login";
     localStorage.removeItem("usuario");
     document.cookie = "usuario=;path=/;max-age=0";
-    router.push("/login");
+    router.push(salida);
   };
 
   if (!listo) return (
@@ -188,24 +207,30 @@ export default function RootLayout({ children }) {
   // SIN SIDEBAR: login y cliente
 
 // Para rutas públicas (login y cliente) agrega los meta tags PWA:
-if (esPublica) return (
+if (esPublica) {
+  // La puerta de Aloha se identifica como Aloha hasta en la pestaña del
+  // navegador y en el color de la barra del teléfono. Si heredara el azul y el
+  // logo del taller, la separación se rompería en el primer detalle que mira
+  // el usuario.
+  const marcaAloha = esZonaAloha(pathname);
+  const titulo     = marcaAloha ? "Aloha Perfume Store" : "Sólido Auto Servicio";
+  const colorTema  = marcaAloha ? "#fdf2f8" : "#080c14";
+  const icono      = marcaAloha ? "/logo-aloha.png" : "/logo.png";
+
+  return (
   <html lang="es">
   <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-        <meta name="theme-color" content="#111827" />
         <meta name="mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content="Sólido Auto" />
-        {/* Cambiado: Referencia al nuevo logo en el manifest e iconos */}
+        <meta name="apple-mobile-web-app-title" content={marcaAloha ? "Aloha" : "Sólido Auto"} />
         <link rel="manifest" href="/manifest.json" />
 
+        <meta name="theme-color" content={colorTema} />
 
-        <meta name="theme-color" content="#080c14" />
-
-
-        <link rel="apple-touch-icon" href="/logo.png" />
-        <link rel="icon" href="/logo.png" />
-        <title>Sólido Auto Servicio</title>
+        <link rel="apple-touch-icon" href={icono} />
+        <link rel="icon" href={icono} />
+        <title>{titulo}</title>
       </head>
       <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
         {children}
@@ -221,7 +246,7 @@ if (esPublica) return (
       </body>
     </html>
   );
-
+}
 
   if (!usuario) return (
     <html lang="es">
