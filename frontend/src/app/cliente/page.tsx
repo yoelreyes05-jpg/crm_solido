@@ -272,6 +272,28 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   ];
   const fichaFilas = FICHA.filter(([, v]) => v !== null && v !== undefined && v !== "");
 
+  // ── Fotos de la recepción ──
+  // El backend ya las normaliza a {slot,label,src}. Se conserva el respaldo de
+  // leer `fotos_slots` / `fotos` en crudo por si el expediente viene de un
+  // snapshot guardado antes de que existiera esa normalización.
+  const fotosExp: any[] = (() => {
+    const norm = detalleCompleto?.fotos || h.fotos;
+    if (Array.isArray(norm) && norm.length > 0) return norm;
+
+    const LBL: Record<string,string> = {
+      frente:"Frente", trasero:"Trasero", lateral_izq:"Lateral izquierdo",
+      lateral_der:"Lateral derecho", interior:"Interior", tablero:"Tablero",
+      danos_visibles:"Daños visibles",
+    };
+    const slots = inspec?.fotos_slots || {};
+    const deSlots = Object.keys(LBL).filter(k => slots[k])
+      .map(k => ({ slot:k, label:LBL[k], src:slots[k] }));
+    const legacy = (Array.isArray(inspec?.fotos) ? inspec.fotos : [])
+      .filter((f: any) => f?.data)
+      .map((f: any, i: number) => ({ slot:`extra_${i}`, label:f.label || "Foto", src:f.data }));
+    return [...deSlots, ...legacy];
+  })();
+
   // ── Duración de cada etapa ──
   // Saber que estuvo 3 días esperando aprobación explica la factura mejor que
   // cualquier nota. Se calcula sobre el log, que ya viene ordenado.
@@ -415,6 +437,19 @@ ${fichaFilas.length > 0 ? `
     ${fichaFilas.map(([label, valor]) =>
       `<div class="row"><span class="label">${label}</span><span style="font-weight:600${label === "VIN / Chasis" ? ";font-family:monospace;font-size:12px" : ""}">${valor}</span></div>`
     ).join("")}
+  </div>
+</div>` : ""}
+
+<!-- ══ Fotos de la recepción ══ -->
+${fotosExp.length > 0 ? `
+<h3>📸 Fotos del Vehículo al Recibirlo</h3>
+<div class="card">
+  <div style="display:flex;gap:10px;flex-wrap:wrap">
+    ${fotosExp.map((f: any) => `
+      <div style="text-align:center">
+        <img src="${f.src}" style="width:140px;height:105px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0" />
+        <div style="font-size:10px;color:#6b7280;margin-top:3px">${f.label}</div>
+      </div>`).join("")}
   </div>
 </div>` : ""}
 
@@ -688,6 +723,8 @@ export default function ClienteApp() {
   const [instalable, setInstalable]         = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [showRepuestos, setShowRepuestos]   = useState(false);
+  // Foto ampliada a pantalla completa (null = cerrado)
+  const [fotoZoom, setFotoZoom]             = useState<string | null>(null);
   const [loadingRepuestos, setLoadingRepuestos] = useState(false);
   const [repuestoAbierto, setRepuestoAbierto]   = useState<number | null>(null);
   const [esIOS, setEsIOS]                   = useState(false);
@@ -798,11 +835,15 @@ export default function ClienteApp() {
     try {
       const [estado, hist] = await Promise.all([
         cargarEstado(),
-        cargarHistorial().catch(() => ({ historial: [] })),
+        cargarHistorial().catch(() => ({ historial: [], vehiculo: null, fotos: [] })),
       ]);
 
       setResultado({
         vehiculo: estado.vehiculo,
+        // Las fotos salen de la inspección de recepción, no de `vehiculos`.
+        // /estado y /historial las calculan por caminos distintos (órdenes
+        // vivas vs. snapshot archivado); se toma la que haya traído alguna.
+        fotos: (estado.fotos?.length ? estado.fotos : hist.fotos) || [],
         ordenes: estado.ordenes || [],
         diagnosticos: estado.diagnosticos || [],
         cotizaciones: estado.cotizaciones || [],
@@ -1066,6 +1107,45 @@ export default function ClienteApp() {
         .car-ficha-fila { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
         .car-ficha-lbl  { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.5px; }
         .car-ficha-val  { font-size:13px; color:#e2e8f0; font-weight:600; text-align:right; word-break:break-all; }
+
+        /* ── Fotos del vehículo (tomadas en la recepción) ── */
+        .car-foto {
+          width:96px; height:72px; object-fit:cover; border-radius:12px;
+          border:1px solid rgba(255,255,255,0.18); cursor:pointer; flex-shrink:0;
+          background:#0f1729;
+        }
+        .car-fotos { position:relative; margin-top:16px; padding-top:14px;
+          border-top:1px solid rgba(255,255,255,0.09); }
+        .car-fotos-titulo {
+          font-size:11px; color:#64748b; text-transform:uppercase;
+          letter-spacing:.5px; margin-bottom:10px;
+        }
+        /* Tira horizontal: en celular es más natural deslizar que envolver. */
+        .car-fotos-tira {
+          display:flex; gap:10px; overflow-x:auto; padding-bottom:4px;
+          scrollbar-width:none;
+        }
+        .car-fotos-tira::-webkit-scrollbar { display:none; }
+        .car-foto-mini {
+          flex-shrink:0; background:none; border:none; padding:0; cursor:pointer;
+          display:flex; flex-direction:column; gap:4px; align-items:center;
+        }
+        .car-foto-mini img {
+          width:104px; height:78px; object-fit:cover; border-radius:10px;
+          border:1px solid rgba(255,255,255,0.14); display:block;
+        }
+        .car-foto-mini span { font-size:10px; color:#64748b; }
+
+        .foto-zoom {
+          position:fixed; inset:0; z-index:9999; background:rgba(2,6,23,0.94);
+          display:flex; flex-direction:column; align-items:center;
+          justify-content:center; gap:14px; padding:20px; cursor:zoom-out;
+        }
+        .foto-zoom img {
+          max-width:100%; max-height:82vh; object-fit:contain;
+          border-radius:14px; border:1px solid rgba(255,255,255,0.12);
+        }
+        .foto-zoom-cerrar { font-size:12px; color:#64748b; }
         /* ── Cotización pendiente de aprobación ── */
         .cot-card {
           background: linear-gradient(160deg, rgba(217,119,6,.14), rgba(15,23,42,.6));
@@ -1608,7 +1688,17 @@ export default function ClienteApp() {
                 {/* VEHÍCULO */}
                 <div className="car-card fade-up">
                   <div className="car-main">
-                    <span className="car-emoji">🚗</span>
+                    {/* Si la recepción tomó foto del frente, se muestra en vez
+                        del emoji. Es la única foto real del vehículo que existe
+                        en el sistema: `vehiculos` no tiene columna de imagen. */}
+                    {(() => {
+                      const fotos: any[] = resultado.fotos || [];
+                      const portada = fotos.find((f: any) => f.slot === "frente") || fotos[0];
+                      return portada
+                        // eslint-disable-next-line @next/next/no-img-element
+                        ? <img src={portada.src} alt={portada.label} className="car-foto" onClick={() => setFotoZoom(portada.src)} />
+                        : <span className="car-emoji">🚗</span>;
+                    })()}
                     <div>
                       <div className="car-marca">
                         {resultado.vehiculo.marca} {resultado.vehiculo.modelo}
@@ -1654,6 +1744,30 @@ export default function ClienteApp() {
                       </div>
                     );
                   })()}
+
+                  {/* Galería de la recepción. Tocar una foto la amplía. */}
+                  {(resultado.fotos || []).length > 0 && (
+                    <div className="car-fotos">
+                      <div className="car-fotos-titulo">
+                        📸 Fotos de recepción ({resultado.fotos.length})
+                      </div>
+                      <div className="car-fotos-tira">
+                        {resultado.fotos.map((f: any) => (
+                          <button
+                            key={f.slot}
+                            type="button"
+                            className="car-foto-mini"
+                            onClick={() => setFotoZoom(f.src)}
+                            title={f.label}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={f.src} alt={f.label} />
+                            <span>{f.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* ESTADO */}
@@ -1995,7 +2109,16 @@ export default function ClienteApp() {
                           const fmtFH = (v: any) => v ? new Date(v).toLocaleString("es-DO",{year:"numeric",month:"short",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
                           const zonas: any[] = Array.isArray(insp.zonas_danio) ? insp.zonas_danio : [];
                           const fotoSlots: Record<string,string> = (insp.fotos_slots && typeof insp.fotos_slots === "object") ? insp.fotos_slots : {};
-                          const fotosSlotArr = Object.entries(fotoSlots).filter(([,v]) => v).map(([k,v]) => ({ data: v, label: k.replace(/_/g," ") }));
+                          // Etiquetas legibles: `k.replace(/_/g," ")` producía
+                          // "lateral izq" y "danos visibles" en pantalla.
+                          const SLOT_LBL: Record<string,string> = {
+                            frente:"Frente", trasero:"Trasero",
+                            lateral_izq:"Lateral izquierdo", lateral_der:"Lateral derecho",
+                            interior:"Interior", tablero:"Tablero", danos_visibles:"Daños visibles",
+                          };
+                          const fotosSlotArr = Object.entries(fotoSlots)
+                            .filter(([,v]) => v)
+                            .map(([k,v]) => ({ data: v, label: SLOT_LBL[k] || k.replace(/_/g," ") }));
                           const fotosExtra: any[] = Array.isArray(insp.fotos) ? insp.fotos : [];
                           const todasFotos = [...fotosSlotArr, ...fotosExtra].slice(0, 12);
                           const combPct = Number(insp.nivel_combustible || 0);
@@ -2120,7 +2243,8 @@ export default function ClienteApp() {
                                   <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>📷 Fotos de Recepción</div>
                                   <div style={{ display:"grid", gridTemplateColumns:"repeat(auto-fill,minmax(120px,1fr))", gap:8 }}>
                                     {todasFotos.map((f: any, i: number) => (
-                                      <div key={i} style={{ borderRadius:8, overflow:"hidden", border:"1px solid rgba(148,163,184,0.1)", background:"rgba(15,23,42,0.5)" }}>
+                                      <div key={i} onClick={() => setFotoZoom(f.data)}
+                                        style={{ borderRadius:8, overflow:"hidden", cursor:"zoom-in", border:"1px solid rgba(148,163,184,0.1)", background:"rgba(15,23,42,0.5)" }}>
                                         <img src={f.data} alt={f.label||""} loading="lazy"
                                           style={{ width:"100%", aspectRatio:"4/3", objectFit:"cover", display:"block" }}
                                           onError={(e) => { (e.target as HTMLImageElement).style.display="none"; }} />
@@ -2493,6 +2617,21 @@ export default function ClienteApp() {
 
         {/* BOTÓN FLOTANTE WHATSAPP */}
         <a href="https://wa.me/18495692027" target="_blank" className="wa-float">💬</a>
+
+        {/* Foto ampliada. Se cierra tocando cualquier parte del fondo. */}
+        {fotoZoom && (
+          <div
+            className="foto-zoom"
+            onClick={() => setFotoZoom(null)}
+            role="button"
+            tabIndex={0}
+            onKeyDown={(e) => { if (e.key === "Escape" || e.key === "Enter") setFotoZoom(null); }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={fotoZoom} alt="Foto del vehículo" />
+            <div className="foto-zoom-cerrar">Toca para cerrar</div>
+          </div>
+        )}
       </div>
     </>
   );

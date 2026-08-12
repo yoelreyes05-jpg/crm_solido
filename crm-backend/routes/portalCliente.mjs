@@ -773,10 +773,51 @@ router.get("/estado", requiereSesion, ruta(async (req, res) => {
     (m) => m.proximo_fecha && new Date(m.proximo_fecha) <= en30dias
   );
 
+  // ── Fotos del vehículo ──
+  // `vehiculos` no guarda fotos. Las únicas que existen se toman en la
+  // recepción y viven en `inspeccion_vehiculo`, en dos formatos que conviven:
+  // `fotos_slots` (objeto de 7 slots con data URL) y `fotos` (array legacy
+  // [{data,label}]). Se busca la inspección más reciente de este vehículo,
+  // sea cual sea la orden, para que la tarjeta tenga foto aunque el servicio
+  // que la generó ya se haya entregado.
+  let fotos = [];
+  const idsOrdenes = ordenes.map((o) => o.id);
+  if (idsOrdenes.length > 0) {
+    const { data: insp, error: iErr } = await supabase
+      .from("inspeccion_vehiculo")
+      .select("orden_id, fotos_slots, fotos, created_at")
+      .in("orden_id", idsOrdenes)
+      .order("created_at", { ascending: false });
+
+    if (iErr) {
+      console.error("[portal] /estado fotos:", iErr.message);
+      avisos.push(`fotos: ${iErr.message}`);
+    } else {
+      const ETIQUETAS = {
+        frente: "Frente", trasero: "Trasero",
+        lateral_izq: "Lateral izquierdo", lateral_der: "Lateral derecho",
+        interior: "Interior", tablero: "Tablero", danos_visibles: "Daños visibles",
+      };
+      // La primera inspección que traiga alguna foto es la más reciente.
+      for (const ins of insp || []) {
+        const slots = ins.fotos_slots || {};
+        const deSlots = Object.keys(ETIQUETAS)
+          .filter((k) => slots[k])
+          .map((k) => ({ slot: k, label: ETIQUETAS[k], src: slots[k], orden_id: ins.orden_id }));
+        const deLegacy = (Array.isArray(ins.fotos) ? ins.fotos : [])
+          .filter((f) => f && f.data)
+          .map((f, i) => ({ slot: `extra_${i}`, label: f.label || "Foto", src: f.data, orden_id: ins.orden_id }));
+        const todas = [...deSlots, ...deLegacy];
+        if (todas.length > 0) { fotos = todas; break; }
+      }
+    }
+  }
+
   res.json({
     error: false,
     cliente: { nombre: cliRes.data?.nombre || "" },
     vehiculo,
+    fotos,
     orden_actual: ordenActual,
     linea_tiempo: linea,
     ordenes,
@@ -847,6 +888,7 @@ router.get("/historial", requiereSesion, ruta(async (req, res) => {
     error: false,
     historial: r.cuerpo?.historial || [],
     vehiculo: r.cuerpo?.vehiculo || null,
+    fotos: r.cuerpo?.fotos || [],
   });
 }));
 

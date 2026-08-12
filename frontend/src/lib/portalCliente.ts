@@ -44,9 +44,22 @@ export type Sesion = {
   vehiculo: Vehiculo;
 };
 
+/**
+ * Foto del vehículo tomada en la recepción.
+ * Vive en `inspeccion_vehiculo` (fotos_slots / fotos); `vehiculos` no guarda
+ * ninguna. El backend normaliza los dos formatos a esta forma.
+ */
+export type FotoVehiculo = {
+  slot: string;
+  label: string;
+  src: string;
+  orden_id?: number;
+};
+
 export type EstadoPortal = {
   cliente: { nombre: string };
   vehiculo: Vehiculo;
+  fotos: FotoVehiculo[];
   orden_actual: any | null;
   linea_tiempo: { etapa: string; fecha: string }[];
   ordenes: any[];
@@ -243,7 +256,7 @@ export function cargarEstado() {
 }
 
 export function cargarHistorial() {
-  return pedir<{ historial: any[] }>("/historial");
+  return pedir<{ historial: any[]; vehiculo: Vehiculo | null; fotos: FotoVehiculo[] }>("/historial");
 }
 
 /**

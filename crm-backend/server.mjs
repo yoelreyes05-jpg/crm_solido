@@ -4508,6 +4508,7 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       vehiculo: vehiculo || null,
       tecnico_nombre,
       fechas_proceso,
+      fotos: normalizarFotosInspeccion(inspeccion || hist.inspeccion_data),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4602,6 +4603,7 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
       vehiculo:        vehiculo || null,
       tecnico_nombre,
       fechas_proceso,
+      fotos:           normalizarFotosInspeccion(inspeccion),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4665,6 +4667,47 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
 });
 
 // =====================================================
+// 📸 HELPER COMPARTIDO — Fotos del vehículo
+//
+// La tabla `vehiculos` NO tiene columna de foto. Las únicas fotos del vehículo
+// que existen en el sistema se toman en la recepción y viven en
+// `inspeccion_vehiculo`, en dos formatos que conviven:
+//
+//   fotos_slots  JSONB  {frente, trasero, lateral_izq, lateral_der,
+//                        interior, tablero, danos_visibles}  → cada uno un
+//                        data URL base64 (formato actual, migración fase2)
+//   fotos        JSONB  [{data, label}]                      → formato legacy
+//
+// Esta función normaliza ambos a una sola lista, en el mismo orden que usa la
+// hoja impresa de /ordenes/[id], para que la PWA no tenga que conocer los dos.
+// =====================================================
+const FOTO_SLOT_LABELS = {
+  frente:         "Frente",
+  trasero:        "Trasero",
+  lateral_izq:    "Lateral izquierdo",
+  lateral_der:    "Lateral derecho",
+  interior:       "Interior",
+  tablero:        "Tablero",
+  danos_visibles: "Daños visibles",
+};
+
+function normalizarFotosInspeccion(inspeccion) {
+  if (!inspeccion) return [];
+
+  const slots = inspeccion.fotos_slots || {};
+  const desdeSlots = Object.keys(FOTO_SLOT_LABELS)
+    .filter(k => slots[k])
+    .map(k => ({ slot: k, label: FOTO_SLOT_LABELS[k], src: slots[k] }));
+
+  const legacy = Array.isArray(inspeccion.fotos) ? inspeccion.fotos : [];
+  const desdeLegacy = legacy
+    .filter(f => f && f.data)
+    .map((f, i) => ({ slot: `extra_${i}`, label: f.label || f.tipo || "Foto", src: f.data }));
+
+  return [...desdeSlots, ...desdeLegacy];
+}
+
+// =====================================================
 // 🔍 HELPER COMPARTIDO — Consulta historial por placa
 // Replica EXACTAMENTE la lógica de la PWA del cliente.
 // Usa select("*") para órdenes — evita fallos por columnas que pueden
@@ -4716,18 +4759,31 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   let todasOrdenes = [];
 
   if (vehiculo) {
-    // Intento principal: filtrar por vehiculo_id
+    // ── 3a. Órdenes del vehículo ──
+    //
+    // No basta con `.eq("vehiculo_id", id)`. En esta base existen órdenes con
+    // `vehiculo_id` en NULL que solo se pueden reconocer por el cliente y por
+    // la placa escrita dentro de `vehiculo_info` — por eso /portal/estado usa
+    // un `.or(...)` con esa misma condición. Cuando el historial filtraba solo
+    // por vehiculo_id, una orden abierta y visible en la pantalla de estado no
+    // aparecía aquí, y la función caía en el fallback "sin servicios todavía"
+    // aunque el vehículo sí estuviera en el taller.
     let ordenesRaw = null;
+
+    const filtro = vehiculo.cliente_id
+      ? `vehiculo_id.eq.${vehiculo.id},and(cliente_id.eq.${vehiculo.cliente_id},vehiculo_id.is.null)`
+      : `vehiculo_id.eq.${vehiculo.id}`;
+
     const { data: ordPrimary, error: oErr } = await supabase
       .from("ordenes_trabajo")
       .select("*")
-      .eq("vehiculo_id", vehiculo.id)
+      .or(filtro)
       .order("created_at", { ascending: false });
 
     if (oErr) {
       console.error("🤖 TG[ordenes]:", oErr.message);
-      dbg(`ERROR ordenes vehiculo_id: ${oErr.message}`);
-      // Fallback: traer todas del cliente y filtrar por vehiculo_id en memoria
+      dbg(`ERROR ordenes or(): ${oErr.message}`);
+      // Fallback: traer todas las del cliente y filtrar en memoria.
       if (vehiculo.cliente_id) {
         dbg(`Fallback por cliente_id=${vehiculo.cliente_id}`);
         const { data: ordFb, error: oErrFb } = await supabase
@@ -4739,7 +4795,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           dbg(`ERROR fallback: ${oErrFb.message}`);
         } else {
           ordenesRaw = (ordFb || []).filter(o =>
-            String(o.vehiculo_id) === String(vehiculo.id)
+            String(o.vehiculo_id) === String(vehiculo.id) || o.vehiculo_id == null
           );
           dbg(`fallback_ordenes=${ordenesRaw.length}`);
         }
@@ -4747,6 +4803,20 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
     } else {
       ordenesRaw = ordPrimary || [];
       dbg(`ordenes_encontradas=${ordenesRaw.length}`);
+    }
+
+    // Las órdenes huérfanas (sin vehiculo_id) pueden ser de OTRO vehículo del
+    // mismo cliente. Si `vehiculo_info` menciona una placa, tiene que ser esta;
+    // si no menciona ninguna, no hay forma de descartarla y se acepta.
+    if (ordenesRaw && ordenesRaw.length > 0) {
+      const antes = ordenesRaw.length;
+      ordenesRaw = ordenesRaw.filter(o => {
+        if (String(o.vehiculo_id) === String(vehiculo.id)) return true;
+        const info = String(o.vehiculo_info || o.vehiculo_placa || "")
+          .toUpperCase().replace(/[\s\-_]/g, "");
+        return !info || info.includes(placaNorm);
+      });
+      if (antes !== ordenesRaw.length) dbg(`huerfanas_descartadas=${antes - ordenesRaw.length}`);
     }
 
     if (ordenesRaw && ordenesRaw.length > 0) {
@@ -4889,6 +4959,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           // hoja impresa sea idéntica esté la orden abierta o ya archivada.
           timeline_data:             logPorOrden[o.id] || [],
           inspeccion_data:           inspeccionPorOrden[o.id] || null,
+          fotos:                     normalizarFotosInspeccion(inspeccionPorOrden[o.id]),
           codigos_falla:             diag?.scanner_resultado || diag?.codigos_falla || null,
           resultado_qc:              o.resultado_qc     || null,
           observaciones_qc:          o.observaciones_qc || null,
@@ -4943,7 +5014,14 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   // uno en curso. `vehiculo_data` va aparte y no se hace spread encima de la
   // fila, para no pisar el snapshot histórico con valores de hoy.
   const histConFicha = vehiculo
-    ? histFiltrado.map(h => ({ ...h, vehiculo_data: vehiculo }))
+    ? histFiltrado.map(h => ({
+        ...h,
+        vehiculo_data: vehiculo,
+        // El snapshot `inspeccion_data` conserva las fotos tomadas en la
+        // recepción de ese servicio, así que un servicio archivado sigue
+        // mostrando sus fotos aunque la orden ya no exista.
+        fotos: normalizarFotosInspeccion(h.inspeccion_data),
+      }))
     : histFiltrado;
 
   const historial = [...todasOrdenes, ...histConFicha];
@@ -4987,8 +5065,15 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   }
 
   const ref = historial[0];
+
+  // Fotos del vehículo para la tarjeta principal: las de la recepción más
+  // reciente que tenga alguna. `historial` ya viene de lo más nuevo a lo más
+  // viejo, así que el primer servicio con fotos es el actual.
+  const fotosVehiculo = (historial.find(h => Array.isArray(h.fotos) && h.fotos.length > 0)?.fotos) || [];
+
   return {
     found: true,
+    fotos: fotosVehiculo,
     // La fila completa de `vehiculos` primero (vin, motor, combustible,
     // cilindros, tipo_aceite, viscosidad, cuartos_aceite, km_actual...) y encima
     // los identificadores del último servicio como respaldo, para los casos en
