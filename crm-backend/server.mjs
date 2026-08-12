@@ -4431,9 +4431,21 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       : null;
 
     // 7. Estado historial (auditoría de transiciones)
-    const estado_historial = ordenId
-      ? await safe(() => supabase.from("estado_historial").select("*").eq("orden_id", ordenId).order("created_at"))
+    //
+    // ⚠️ Antes esto consultaba la tabla `estado_historial`, que NO existe: la
+    // real es `orden_trabajo_log` (sql/fase1_orden_trabajo_log.sql). Como el
+    // error lo tragaba `safe()`, la línea de tiempo salía vacía SIEMPRE en los
+    // servicios ya cerrados y nadie se enteraba.
+    //
+    // Se usa el snapshot `timeline_data` como respaldo: si la orden ya se
+    // archivó, el log vive congelado dentro de la fila de vehiculo_historial.
+    let estado_historial = ordenId
+      ? await safe(() => supabase.from("orden_trabajo_log").select("*").eq("orden_id", ordenId).order("created_at"))
       : null;
+
+    if ((!estado_historial || estado_historial.length === 0) && Array.isArray(hist.timeline_data)) {
+      estado_historial = hist.timeline_data;
+    }
 
     // 8. Inspección vehicular de recepción
     const inspeccion = ordenId
@@ -4445,18 +4457,57 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       ? await safe(() => supabase.from("clientes").select("nombre,telefono,email").eq("id", hist.cliente_id).maybeSingle())
       : null;
 
+    // 10. Ficha completa del vehículo.
+    //     Este endpoint no la devolvía y el de órdenes activas sí, así que la
+    //     PWA imprimía la hoja del servicio cerrado sin datos del vehículo.
+    //     Se busca por vehiculo_id y, si el registro es viejo y no lo tiene,
+    //     por placa.
+    let vehiculo = hist.vehiculo_id
+      ? await safe(() => supabase.from("vehiculos").select("*").eq("id", hist.vehiculo_id).maybeSingle())
+      : null;
+    if (!vehiculo && hist.placa) {
+      vehiculo = await safe(() =>
+        supabase.from("vehiculos").select("*").ilike("placa", hist.placa).limit(1).maybeSingle()
+      );
+    }
+
+    // 11. Fechas del proceso: de la orden si sigue viva, del snapshot si no.
+    const fechas_proceso = orden ? {
+      recibido:             orden.created_at                 || null,
+      diagnostico:          orden.fecha_diagnostico          || null,
+      esperando_aprobacion: orden.fecha_esperando_aprobacion || null,
+      aprobacion:           orden.fecha_aprobacion           || null,
+      inicio_reparacion:    orden.fecha_inicio_reparacion    || null,
+      control_calidad:      orden.fecha_control_calidad      || null,
+      listo:                orden.fecha_listo                || null,
+      entrega:              orden.fecha_entrega              || null,
+    } : (hist.fechas_proceso && typeof hist.fechas_proceso === "object" ? hist.fechas_proceso : {});
+
+    const tecnico_nombre = diag?.tecnico_nombre || hist.tecnico_nombre || orden?.tecnico_nombre || null;
+
+    // Los avances viven en `avances_reparacion` mientras la orden está viva;
+    // al archivarse quedan congelados en el snapshot `avances_data`.
+    const avancesFinal = Array.isArray(avances) && avances.length > 0
+      ? avances
+      : (Array.isArray(hist.avances_data) ? hist.avances_data : []);
+
     res.json({
       historial: hist,
       diagnostico: diag,
       orden,
-      avances: Array.isArray(avances) ? avances : [],
+      avances: avancesFinal,
       cotizacion,
       cotizacion_items: Array.isArray(cotizacion_items) ? cotizacion_items : [],
       factura,
       factura_items: Array.isArray(factura_items) ? factura_items : [],
       estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
-      inspeccion: inspeccion || null,
+      inspeccion: inspeccion || (hist.inspeccion_data && Object.keys(hist.inspeccion_data).length > 0 ? hist.inspeccion_data : null),
       cliente: cliente || null,
+      // ── Claves que ya devolvía /vehiculo-historial/orden/:id/detalle ──
+      // Sin ellas el frontend tenía que ramificar según el tipo de expediente.
+      vehiculo: vehiculo || null,
+      tecnico_nombre,
+      fechas_proceso,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4628,9 +4679,14 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   dbg(`placa_input="${placa}" → normalizada="${placaNorm}"`);
 
   // ── 1. Buscar vehículo — igual que la PWA: traer todos y filtrar client-side ──
+  //
+  // select("*") y no una lista de columnas: la lista dejaba fuera vin, motor,
+  // combustible, cilindros, tipo_aceite, viscosidad, cuartos_aceite y km_actual,
+  // así que la ficha del vehículo llegaba a la PWA con cinco campos y la hoja
+  // impresa salía casi vacía.
   const { data: todosVehiculos, error: vErr } = await supabase
     .from("vehiculos")
-    .select("id, marca, modelo, placa, ano, color, cliente_id");
+    .select("*");
   if (vErr) {
     console.error("🤖 TG[vehiculos]:", vErr.message);
     dbg(`ERROR vehiculos: ${vErr.message}`);
@@ -4719,6 +4775,11 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
       (diags || []).forEach(d => { diagPorOrden[d.orden_id] = d; });
 
       // ── 5. Avances de todos los diagnósticos de una vez ──
+      //
+      // Se traen TODOS los avances, no los primeros 4. El recorte existía para
+      // la tarjeta resumen del bot, pero esta misma función alimenta el
+      // expediente que imprime el cliente, y ahí truncar el trabajo del técnico
+      // es perder información del servicio que pagó.
       const diagIds = (diags || []).map(d => d.id);
       let avancesPorDiag = {};
       if (diagIds.length > 0) {
@@ -4730,10 +4791,44 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
         if (aErr) console.error("🤖 TG[avances]:", aErr.message);
         (avancesAll || []).forEach(a => {
           if (!avancesPorDiag[a.diagnostico_id]) avancesPorDiag[a.diagnostico_id] = [];
-          if (avancesPorDiag[a.diagnostico_id].length < 4)
-            avancesPorDiag[a.diagnostico_id].push(a);
+          avancesPorDiag[a.diagnostico_id].push(a);
         });
       }
+
+      // ── 5b. Línea de tiempo e inspección de recepción, en batch ──
+      //
+      // Faltaban por completo: una orden todavía abierta no tiene fila en
+      // `vehiculo_historial`, así que no existía el snapshot `timeline_data` y
+      // nadie consultaba `orden_trabajo_log`. Resultado: el expediente del
+      // servicio en curso —justo el que el cliente más quiere ver— se imprimía
+      // sin ninguna etapa del proceso.
+      let logPorOrden       = {};
+      let inspeccionPorOrden = {};
+
+      const [{ data: logsAll, error: lErr }, { data: inspAll, error: iErr }] = await Promise.all([
+        supabase.from("orden_trabajo_log")
+          .select("orden_id, estado_anterior, estado_nuevo, usuario_nombre, motivo, created_at")
+          .in("orden_id", ordenIds)
+          .order("created_at", { ascending: true }),
+        supabase.from("inspeccion_vehiculo")
+          .select("*")
+          .in("orden_id", ordenIds)
+          .order("created_at", { ascending: false }),
+      ]);
+
+      if (lErr) console.error("🤖 TG[orden_trabajo_log]:", lErr.message);
+      if (iErr) console.error("🤖 TG[inspeccion_vehiculo]:", iErr.message);
+
+      (logsAll || []).forEach(l => {
+        if (!logPorOrden[l.orden_id]) logPorOrden[l.orden_id] = [];
+        logPorOrden[l.orden_id].push(l);
+      });
+      // Orden descendente por fecha: nos quedamos con la inspección más reciente.
+      (inspAll || []).forEach(i => {
+        if (!inspeccionPorOrden[i.orden_id]) inspeccionPorOrden[i.orden_id] = i;
+      });
+
+      dbg(`logs=${(logsAll || []).length} inspecciones=${(inspAll || []).length}`);
 
       // ── 6. Construir entradas enriquecidas por orden ──
       todasOrdenes = ordenesRaw.map(o => {
@@ -4759,6 +4854,17 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           modelo:                    vehiculo.modelo,
           ano:                       vehiculo.ano,
           color:                     vehiculo.color,
+          // Ficha técnica completa, con el mismo nombre de clave que usa el
+          // snapshot de `vehiculo_historial`, para que la PWA no ramifique.
+          vehiculo_data:             vehiculo,
+          vin:                       vehiculo.vin            || null,
+          motor:                     vehiculo.motor          || null,
+          combustible:               vehiculo.combustible    || null,
+          cilindros:                 vehiculo.cilindros      || null,
+          tipo_aceite:               vehiculo.tipo_aceite    || null,
+          viscosidad:                vehiculo.viscosidad     || null,
+          cuartos_aceite:            vehiculo.cuartos_aceite || null,
+          km_actual:                 vehiculo.km_actual      || null,
           estado:                    o.estado || "RECIBIDO",
           numero_orden:              o.numero_orden || `OT-${String(o.id).padStart(4, "0")}`,
           tipo_servicio:             diag?.tipo_servicio || o.descripcion || "Servicio en proceso",
@@ -4778,6 +4884,25 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           created_at:                o.created_at,
           // Nombres que espera la PWA en su vista de detalle:
           avances_data:              diag ? (avancesPorDiag[diag.id] || []) : [],
+          // ── Proceso por el que ha pasado la orden ──
+          // Mismas claves que el snapshot de `vehiculo_historial`, para que la
+          // hoja impresa sea idéntica esté la orden abierta o ya archivada.
+          timeline_data:             logPorOrden[o.id] || [],
+          inspeccion_data:           inspeccionPorOrden[o.id] || null,
+          codigos_falla:             diag?.scanner_resultado || diag?.codigos_falla || null,
+          resultado_qc:              o.resultado_qc     || null,
+          observaciones_qc:          o.observaciones_qc || null,
+          checklist_qc:              o.checklist_qc     || {},
+          fechas_proceso: {
+            recibido:             o.created_at                 || null,
+            diagnostico:          o.fecha_diagnostico          || null,
+            esperando_aprobacion: o.fecha_esperando_aprobacion || null,
+            aprobacion:           o.fecha_aprobacion           || null,
+            inicio_reparacion:    o.fecha_inicio_reparacion    || null,
+            control_calidad:      o.fecha_control_calidad      || null,
+            listo:                o.fecha_listo                || null,
+            entrega:              o.fecha_entrega              || null,
+          },
           // Cliente (para imprimir expediente sin esperar detalle async)
           cliente_nombre:            null, // se rellena abajo si hay cliente
           cliente_telefono:          null,
@@ -4811,22 +4936,50 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   const histFiltrado = (histData || []).filter(h =>
     !h.numero_orden || !numerosDeOrdenes.has(h.numero_orden)
   );
-  const historial = [...todasOrdenes, ...histFiltrado];
+
+  // `vehiculo_historial` guarda del vehículo solo placa/marca/modelo/ano/color:
+  // era el snapshot de lo que existía cuando se archivó. Se le adjunta la ficha
+  // técnica viva para que un servicio cerrado imprima con los mismos datos que
+  // uno en curso. `vehiculo_data` va aparte y no se hace spread encima de la
+  // fila, para no pisar el snapshot histórico con valores de hoy.
+  const histConFicha = vehiculo
+    ? histFiltrado.map(h => ({ ...h, vehiculo_data: vehiculo }))
+    : histFiltrado;
+
+  const historial = [...todasOrdenes, ...histConFicha];
 
   console.log(`🤖 TG[placa:${placaNorm}] vehiculo=${vehiculo?.id ?? "no"} ordenes=${todasOrdenes.length} historial=${histFiltrado.length}`);
 
   if (historial.length === 0) {
     if (vehiculo) {
+      // Vehículo dado de alta pero sin ninguna orden todavía.
+      //
+      // Esta entrada sintética se imprimía como una hoja en blanco que solo
+      // decía "Vehículo registrado": no llevaba ficha del vehículo, ni cliente,
+      // ni fecha real de alta. Ahora carga la ficha completa y marca
+      // `_sin_servicios` para que la PWA imprima la ficha del vehículo en vez
+      // de un expediente de servicio que no existe.
+      const clienteAlta = vehiculo.cliente_id
+        ? (await supabase.from("clientes").select("nombre, telefono")
+            .eq("id", vehiculo.cliente_id).maybeSingle()).data
+        : null;
+
       return {
         found: true,
-        vehiculo: { placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
+        vehiculo: { ...vehiculo },
         ultimo_estado: "RECIBIDO",
         historial: [{
-          id: `veh_${vehiculo.id}`, placa: vehiculo.placa,
-          marca: vehiculo.marca, modelo: vehiculo.modelo,
-          ano: vehiculo.ano, color: vehiculo.color,
-          estado: "RECIBIDO", tipo_servicio: "Vehículo registrado",
-          created_at: new Date().toISOString(), _activa: false,
+          ...vehiculo,
+          id:               `veh_${vehiculo.id}`,
+          estado:           "REGISTRADO",
+          tipo_servicio:    "Vehículo registrado — sin servicios todavía",
+          fecha_servicio:   vehiculo.created_at || null,
+          created_at:       vehiculo.created_at || new Date().toISOString(),
+          cliente_nombre:   clienteAlta?.nombre   || null,
+          cliente_telefono: clienteAlta?.telefono || null,
+          vehiculo_data:    vehiculo,
+          _activa:          false,
+          _sin_servicios:   true,
         }],
       };
     }
@@ -4836,12 +4989,17 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   const ref = historial[0];
   return {
     found: true,
+    // La fila completa de `vehiculos` primero (vin, motor, combustible,
+    // cilindros, tipo_aceite, viscosidad, cuartos_aceite, km_actual...) y encima
+    // los identificadores del último servicio como respaldo, para los casos en
+    // que el vehículo ya no esté en la tabla pero sí en el historial.
     vehiculo: {
-      placa:  ref.placa  || vehiculo?.placa  || placaNorm,
-      marca:  ref.marca  || vehiculo?.marca  || "",
-      modelo: ref.modelo || vehiculo?.modelo || "",
-      ano:    ref.ano    || vehiculo?.ano    || null,
-      color:  ref.color  || vehiculo?.color  || null,
+      ...(vehiculo || {}),
+      placa:  vehiculo?.placa  || ref.placa  || placaNorm,
+      marca:  vehiculo?.marca  || ref.marca  || "",
+      modelo: vehiculo?.modelo || ref.modelo || "",
+      ano:    vehiculo?.ano    || ref.ano    || null,
+      color:  vehiculo?.color  || ref.color  || null,
     },
     ultimo_estado: ref.estado,
     historial,

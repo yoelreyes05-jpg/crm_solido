@@ -30,6 +30,26 @@ function imprimirHistorialCompleto(resultado: any, historialPerm: any[]) {
   const fmtMoney = (n: number) => Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 });
   const fmtDate  = (d: string) => d ? new Date(d).toLocaleDateString("es-DO", { year: "numeric", month: "long", day: "numeric" }) : "—";
 
+  // Ficha técnica: el backend ahora devuelve la fila completa de `vehiculos`,
+  // no solo placa/marca/modelo/año/color. Se omiten los campos vacíos para no
+  // imprimir una tabla llena de guiones.
+  const FICHA: [string, any][] = [
+    ["Placa",             v.placa],
+    ["Marca",             v.marca],
+    ["Modelo",            v.modelo],
+    ["Año",               v.ano],
+    ["Color",             v.color],
+    ["VIN / Chasis",      v.vin],
+    ["Motor",             v.motor],
+    ["Combustible",       v.combustible],
+    ["Cilindros",         v.cilindros],
+    ["Tipo de aceite",    v.tipo_aceite],
+    ["Viscosidad",        v.viscosidad],
+    ["Cuartos de aceite", v.cuartos_aceite],
+    ["Kilometraje",       v.km_actual ? `${Number(v.km_actual).toLocaleString("es-DO")} km` : null],
+  ];
+  const fichaFilas = FICHA.filter(([, val]) => val !== null && val !== undefined && val !== "");
+
   // Sección por diagnóstico
   const diagSections = diagnosticos.map((d: any) => {
     const items: any[] = d.repuestos_items || [];
@@ -143,6 +163,20 @@ function imprimirHistorialCompleto(resultado: any, historialPerm: any[]) {
   Historial Completo de Servicio
 </div>
 
+${fichaFilas.length > 0 ? `
+<div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #0f766e">
+  Ficha del Vehículo
+</div>
+<div style="background:#fff;border:1px solid #e2e8f0;border-radius:10px;padding:14px 16px;margin-bottom:18px">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
+    ${fichaFilas.map(([label, valor]) => `
+      <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:5px">
+        <span style="color:#64748b">${label}</span>
+        <span style="font-weight:600${label === "VIN / Chasis" ? ";font-family:monospace;font-size:12px" : ""}">${valor}</span>
+      </div>`).join("")}
+  </div>
+</div>` : ""}
+
 ${diagnosticos.length > 0 ? `
 <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f1f5f9;padding:6px 12px;border-radius:6px;margin-bottom:12px;border-left:4px solid #1e40af">
   Diagnósticos Técnicos (${diagnosticos.length})
@@ -214,6 +248,44 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
 
   const cotItems  = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle : (Array.isArray(cot.items) ? cot.items : []);
   const facItems: any[] = Array.isArray(fac.items) ? fac.items : [];
+
+  // ── Ficha técnica del vehículo ──
+  // El backend la manda en `vehiculo` (detalle) o `vehiculo_data` (listado).
+  // `h` queda como último recurso porque las entradas de orden llevan los
+  // campos sueltos en la raíz.
+  const veh: any = detalleCompleto?.vehiculo || h.vehiculo_data || h || {};
+
+  const FICHA: [string, any][] = [
+    ["Placa",            veh.placa],
+    ["Marca",            veh.marca],
+    ["Modelo",           veh.modelo],
+    ["Año",              veh.ano],
+    ["Color",            veh.color],
+    ["VIN / Chasis",     veh.vin],
+    ["Motor",            veh.motor],
+    ["Combustible",      veh.combustible],
+    ["Cilindros",        veh.cilindros],
+    ["Tipo de aceite",   veh.tipo_aceite],
+    ["Viscosidad",       veh.viscosidad],
+    ["Cuartos de aceite",veh.cuartos_aceite],
+    ["Kilometraje",      veh.km_actual ? `${Number(veh.km_actual).toLocaleString("es-DO")} km` : null],
+  ];
+  const fichaFilas = FICHA.filter(([, v]) => v !== null && v !== undefined && v !== "");
+
+  // ── Duración de cada etapa ──
+  // Saber que estuvo 3 días esperando aprobación explica la factura mejor que
+  // cualquier nota. Se calcula sobre el log, que ya viene ordenado.
+  const duracion = (desde: any, hasta: any): string => {
+    if (!desde || !hasta) return "";
+    const ms = new Date(hasta).getTime() - new Date(desde).getTime();
+    if (!Number.isFinite(ms) || ms < 0) return "";
+    const min = Math.round(ms / 60000);
+    if (min < 60) return `${min} min`;
+    const hrs = min / 60;
+    if (hrs < 24) return `${hrs.toFixed(1).replace(".0", "")} h`;
+    const dias = hrs / 24;
+    return `${dias.toFixed(1).replace(".0", "")} días`;
+  };
 
   // ── Campos enriquecidos ──
   const rawTrabItems = detalleCompleto?.diagnostico?.trabajos_realizados_items
@@ -307,8 +379,16 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
 </div>
 
 <div style="text-align:center;font-size:15px;font-weight:800;color:#1e40af;border:2px solid #1e40af;padding:7px;border-radius:8px;margin-bottom:18px;text-transform:uppercase;letter-spacing:1px">
-  Expediente de Servicio — ${h.tipo_servicio || "Servicio"}
+  ${h._sin_servicios ? "Ficha del Vehículo" : `Expediente de Servicio — ${h.tipo_servicio || "Servicio"}`}
 </div>
+
+<!-- Vehículo dado de alta sin órdenes: se imprime la ficha, no un expediente
+     vacío. Antes esta hoja salía con el título "Vehículo registrado" y nada más. -->
+${h._sin_servicios ? `
+<div style="background:#fffbeb;border:1px solid #fde68a;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:13px;color:#92400e">
+  Este vehículo está registrado en el taller pero todavía no tiene servicios realizados.
+  ${h.created_at ? `Fecha de registro: <strong>${fmtDate(h.created_at)}</strong>.` : ""}
+</div>` : ""}
 
 <!-- ══ Motivo de entrada ══
      Destacado y en mayúsculas: es el dato que más se consulta de un vistazo,
@@ -322,10 +402,21 @@ ${h.motivo_entrada ? `
 <!-- ══ Datos generales ══ -->
 <div class="card">
   <div class="row"><span class="label">Fecha de servicio</span><span>${fmtDate(h.fecha_servicio)}</span></div>
-  ${h.tecnico_nombre ? `<div class="row"><span class="label">Técnico asignado</span><span>${h.tecnico_nombre}</span></div>` : ""}
+  ${(h.tecnico_nombre || detalleCompleto?.tecnico_nombre) ? `<div class="row"><span class="label">Técnico asignado</span><span>${h.tecnico_nombre || detalleCompleto?.tecnico_nombre}</span></div>` : ""}
   ${h.cliente_nombre ? `<div class="row"><span class="label">Cliente</span><span style="text-transform:uppercase;font-weight:700">${h.cliente_nombre}</span></div>` : ""}
   ${h.cliente_telefono ? `<div class="row"><span class="label">Teléfono</span><span>${h.cliente_telefono}</span></div>` : ""}
 </div>
+
+<!-- ══ Ficha técnica del vehículo ══ -->
+${fichaFilas.length > 0 ? `
+<h3>🚗 Ficha del Vehículo</h3>
+<div class="card">
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
+    ${fichaFilas.map(([label, valor]) =>
+      `<div class="row"><span class="label">${label}</span><span style="font-weight:600${label === "VIN / Chasis" ? ";font-family:monospace;font-size:12px" : ""}">${valor}</span></div>`
+    ).join("")}
+  </div>
+</div>` : ""}
 
 <!-- ══ Trabajo solicitado ══ -->
 ${descripcionTrabajo && descripcionTrabajo !== h.motivo_entrada ? `
@@ -517,17 +608,27 @@ ${(usuarioEntrego || fechaEntrega || firmaEntrega) ? `
 
 <!-- ══ Línea de tiempo ══ -->
 ${timeline.length > 0 ? `
-<h3>📅 Línea de Tiempo</h3>
+<h3>📅 Por Dónde Pasó su Vehículo</h3>
 <div class="card">
-  ${timeline.map((t: any, i: number) => `
+  ${timeline.map((t: any, i: number) => {
+    const dur = duracion(t.created_at, timeline[i+1]?.created_at);
+    return `
     <div style="display:flex;gap:10px;${i < timeline.length-1 ? "margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9" : ""}">
-      <div style="width:8px;height:8px;border-radius:50%;background:#3b82f6;flex-shrink:0;margin-top:5px"></div>
-      <div>
+      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
+        <div style="width:22px;height:22px;border-radius:50%;background:#1e40af;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">${i+1}</div>
+        ${i < timeline.length-1 ? `<div style="width:2px;flex:1;background:#dbeafe;margin-top:2px"></div>` : ""}
+      </div>
+      <div style="flex:1">
         <div style="font-size:13px;font-weight:700;color:#1e293b">${(t.estado_nuevo||"").replace(/_/g," ").replace(/\b\w/g,(c: string)=>c.toUpperCase())}</div>
         <div style="font-size:11px;color:#64748b">${fmtDT(t.created_at)}${t.usuario_nombre ? ` · ${t.usuario_nombre}` : ""}</div>
+        ${dur ? `<div style="font-size:11px;color:#1e40af;margin-top:2px">⏱ Permaneció en esta etapa ${dur}</div>` : ""}
         ${t.motivo ? `<div style="font-size:11px;color:#92400e;background:#fffbeb;border-radius:4px;padding:2px 6px;margin-top:2px">${t.motivo}</div>` : ""}
       </div>
-    </div>`).join("")}
+    </div>`; }).join("")}
+  ${(() => {
+    const total = duracion(timeline[0]?.created_at, timeline[timeline.length-1]?.created_at);
+    return total ? `<div style="margin-top:10px;padding-top:8px;border-top:2px solid #dbeafe;font-size:12px;text-align:right;color:#1e40af"><strong>Tiempo total en el taller: ${total}</strong></div>` : "";
+  })()}
 </div>` : ""}
 
 <!-- ══ Fechas del proceso ══ -->
@@ -953,6 +1054,18 @@ export default function ClienteApp() {
         .car-emoji { font-size:52px; }
         .car-marca { font-family:'Syne',sans-serif; font-size:22px; font-weight:800; color:#fff; }
         .car-meta  { font-size:13px; color:#64748b; margin-top:4px; }
+
+        /* Ficha técnica dentro de la tarjeta del vehículo. Dos columnas en
+           pantallas normales, una sola en celulares estrechos. */
+        .car-ficha {
+          position:relative; margin-top:16px; padding-top:14px;
+          border-top:1px solid rgba(255,255,255,0.09);
+          display:grid; grid-template-columns:1fr 1fr; gap:8px 18px;
+        }
+        @media (max-width:400px) { .car-ficha { grid-template-columns:1fr; } }
+        .car-ficha-fila { display:flex; justify-content:space-between; gap:10px; align-items:baseline; }
+        .car-ficha-lbl  { font-size:11px; color:#64748b; text-transform:uppercase; letter-spacing:.5px; }
+        .car-ficha-val  { font-size:13px; color:#e2e8f0; font-weight:600; text-align:right; word-break:break-all; }
         /* ── Cotización pendiente de aprobación ── */
         .cot-card {
           background: linear-gradient(160deg, rgba(217,119,6,.14), rgba(15,23,42,.6));
@@ -1507,6 +1620,40 @@ export default function ClienteApp() {
                       <div className="placa-badge">{resultado.vehiculo.placa}</div>
                     </div>
                   </div>
+
+                  {/* Ficha técnica — el backend ya devuelve la fila completa de
+                      `vehiculos`. Se ocultan los campos vacíos para no mostrar
+                      una lista de guiones en vehículos sin VIN capturado. */}
+                  {(() => {
+                    const v = resultado.vehiculo || {};
+                    const filas: [string, any][] = ([
+                      ["VIN",          v.vin],
+                      ["Motor",        v.motor],
+                      ["Combustible",  v.combustible],
+                      ["Cilindros",    v.cilindros],
+                      ["Aceite",       v.tipo_aceite],
+                      ["Viscosidad",   v.viscosidad],
+                      ["Capacidad",    v.cuartos_aceite ? `${v.cuartos_aceite} qt` : null],
+                      ["Kilometraje",  v.km_actual ? `${Number(v.km_actual).toLocaleString("es-DO")} km` : null],
+                    ] as [string, any][]).filter(([, val]) => val !== null && val !== undefined && val !== "");
+
+                    if (filas.length === 0) return null;
+                    return (
+                      <div className="car-ficha">
+                        {filas.map(([label, val]) => (
+                          <div key={label} className="car-ficha-fila">
+                            <span className="car-ficha-lbl">{label}</span>
+                            <span
+                              className="car-ficha-val"
+                              style={label === "VIN" ? { fontFamily: "monospace", fontSize: 11 } : undefined}
+                            >
+                              {val}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
 
                 {/* ESTADO */}
