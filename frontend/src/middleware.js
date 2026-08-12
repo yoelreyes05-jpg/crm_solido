@@ -11,6 +11,11 @@ const RUTAS_PUBLICAS = [
   "/catalogo",
   "/repuestos",
   "/menu",
+  // Pantalla del altavoz: se deja encendida todo el día en la PC conectada a
+  // las bocinas del taller. Sin esto, el middleware la manda a /login y los
+  // llamados dejan de sonar en cuanto expira la cookie. Solo lee la cola de
+  // anuncios y marca lo que ya sonó.
+  "/altavoz/receptor",
   "/manifest.json",
   "/sw.js",
 ];

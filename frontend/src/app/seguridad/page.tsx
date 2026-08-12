@@ -53,6 +53,17 @@ export default function SeguridadPage() {
   const { puedeCrear: puedeAnunciar } = usePermisos("altavoz");
 
   const [tab, setTab] = useState<"panorama" | "camaras" | "alarma" | "altavoz" | "bitacora">("panorama");
+
+  // El sidebar enlaza a /seguridad?tab=altavoz. Se lee de window y no con
+  // useSearchParams para no obligar a envolver la página en <Suspense>, que
+  // es lo que exige Next en el App Router.
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const t = new URLSearchParams(window.location.search).get("tab");
+    if (t && ["panorama", "camaras", "alarma", "altavoz", "bitacora"].includes(t)) {
+      setTab(t as any);
+    }
+  }, []);
   const [cargando, setCargando] = useState(true);
   const [msg, setMsg] = useState<{ tipo: "ok" | "error" | "info"; texto: string } | null>(null);
 

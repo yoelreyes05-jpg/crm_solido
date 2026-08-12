@@ -101,6 +101,16 @@ const MODULOS: Modulo[] = [
     ],
   },
   {
+    id: "seguridad", label: "Seguridad", icon: "🛡️", color: "#dc2626",
+    items: [
+      { href: "/seguridad",        icon: "🛡️", label: "Cámaras y Alarma", key: "seguridad", iconBg: "linear-gradient(145deg,#7f1d1d,#dc2626)", iconShadow: "0 4px 12px rgba(220,38,38,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      // Lleva a la misma página, pestaña de altavoz. Se le da entrada propia
+      // porque para recepción es la función que más usa del módulo.
+      { href: "/seguridad?tab=altavoz", icon: "📢", label: "Altavoz", key: "altavoz", iconBg: "linear-gradient(145deg,#78350f,#f59e0b)", iconShadow: "0 4px 12px rgba(245,158,11,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/altavoz/receptor", icon: "🔊", label: "Receptor (PC bocinas)", key: "altavoz", iconBg: "linear-gradient(145deg,#134e4a,#0f766e)", iconShadow: "0 4px 12px rgba(15,118,110,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+    ],
+  },
+  {
     id: "config", label: "Configuración", icon: "⚙️", color: "#6b7280",
     items: [
       { href: "/configuracion", icon: "⚙️", label: "Configuración", key: "configuracion", iconBg: "linear-gradient(145deg,#111827,#374151)", iconShadow: "0 4px 12px rgba(55,65,81,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
@@ -118,7 +128,13 @@ const MENU_FLAT = MODULOS.flatMap(m => m.items);
 // `/aloha/login` está aquí porque es la puerta propia de la tienda: si no
 // figura como pública, este layout no encuentra sesión y manda al visitante
 // a /login — que es justo lo que la separación quería evitar.
-const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu", "/"];
+// `/altavoz/receptor` va aquí por la misma razón que `/pantalla`: es una
+// pantalla que se deja encendida todo el día en una computadora del taller.
+// Si exigiera sesión, alguien dejaría abierta la del gerente de forma
+// permanente en una PC compartida — peor que el riesgo que se quiere evitar.
+// Lo único que expone es el texto de los llamados ("Ramón a recepción"), y
+// solo puede leer la cola y marcar lo que ya sonó.
+const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu", "/altavoz/receptor", "/"];
 
 /** ¿Estamos dentro del territorio de Aloha Perfume Store? */
 function esZonaAloha(pathname: string) {
