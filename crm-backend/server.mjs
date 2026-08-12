@@ -4,6 +4,7 @@ import express from "express";
 import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import portalCliente from "./routes/portalCliente.mjs";
+import seguridad from "./routes/seguridad.mjs";
 import { notificarCambioEstado, esEventoNotificable } from "./services/notificarCliente.mjs";
 import {
   notificarCita, avisarTallerNuevaCita, eventoDesdeEstado,
@@ -60,6 +61,13 @@ app.use(express.json({ limit: "10mb" }));
 // Aquí el cliente se identifica y el backend devuelve SOLO su vehículo.
 // Ver crm-backend/sql/portal_cliente.sql y PORTAL_CLIENTE.md.
 app.use("/portal", portalCliente);
+
+// =====================================================
+// 🛡️ SEGURIDAD Y ALTAVOZ — /seguridad/*
+// =====================================================
+// Cámaras, zonas de alarma, bitácora y llamados por altavoz.
+// Ver crm-backend/sql/migracion_v31_seguridad_altavoz.sql
+app.use("/seguridad", seguridad);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
@@ -9265,6 +9273,45 @@ const IA_TOOLS = [
       },
     },
   },
+  {
+    type: "function",
+    function: {
+      name: "estado_seguridad",
+      description: "Estado del módulo de SEGURIDAD del taller: si la alarma está armada o desarmada y en qué modo, quién la dejó así y desde cuándo; cuántas cámaras hay, cuáles están en línea, fuera de línea o todavía por instalar; zonas de alarma abiertas o con falla; y los últimos eventos de la bitácora. Úsalo para '¿está armada la alarma?', '¿quién desarmó anoche?', '¿hay cámaras caídas?', '¿cómo va la seguridad?', '¿cuántas cámaras faltan por instalar?'.",
+      parameters: { type: "object", properties: {}, required: [] },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "llamar_por_altavoz",
+      description: "Envía un anuncio por las bocinas del taller para llamar a un técnico o avisar al personal. Úsalo SOLO cuando el usuario pida explícitamente llamar o anunciar por altavoz — por ejemplo 'llama a Ramón por el altavoz', 'anuncia que el cliente de la placa X está esperando', 'avisa al lavador que lo buscan'. Nunca lo uses por iniciativa propia.",
+      parameters: {
+        type: "object",
+        properties: {
+          mensaje:      { type: "string", description: "Texto exacto que se va a locutar. Frase corta y clara, máximo 300 caracteres." },
+          destinatario: { type: "string", description: "A quién se llama: nombre del técnico, puesto ('el lavador') o 'todo el personal'." },
+          tipo:         { type: "string", description: "LLAMADO (default), AVISO, CLIENTE o EMERGENCIA. EMERGENCIA se salta la cola." },
+          repeticiones: { type: "number", description: "Cuántas veces repetir el anuncio, 1 a 5 (default 2)." },
+        },
+        required: ["mensaje"],
+      },
+    },
+  },
+  {
+    type: "function",
+    function: {
+      name: "historial_altavoz",
+      description: "Últimos anuncios enviados por el altavoz del taller: qué se dijo, quién lo envió, si ya sonó o sigue en cola. Úsalo para '¿a quién han llamado hoy?', '¿sonó el llamado a Ramón?', '¿hay anuncios pendientes?'.",
+      parameters: {
+        type: "object",
+        properties: {
+          limit: { type: "number", description: "Máximo de resultados (default 15)" },
+        },
+        required: [],
+      },
+    },
+  },
 ];
 
 async function ejecutarHerramientaIA(nombre, args) {
@@ -9837,6 +9884,108 @@ async function ejecutarHerramientaIA(nombre, args) {
         };
       }
 
+      // ── SEGURIDAD Y ALTAVOZ (migración v31) ──────────────────────────────
+      case "estado_seguridad": {
+        const [cfg, cam, zon, ev, cola] = await Promise.all([
+          supabase.from("config_sistema").select("valor").eq("clave", "seguridad_alarma").maybeSingle(),
+          supabase.from("seguridad_camaras").select("codigo, nombre, ubicacion, estado").eq("activo", true),
+          supabase.from("seguridad_zonas").select("codigo, nombre, estado, siempre_activa").eq("activo", true),
+          supabase.from("seguridad_eventos").select("tipo, descripcion, severidad, usuario_nombre, created_at")
+            .order("created_at", { ascending: false }).limit(10),
+          supabase.from("altavoz_anuncios").select("id").eq("estado", "PENDIENTE"),
+        ]);
+
+        const alarma  = cfg.data?.valor || { armada: false, modo: "DESARMADA" };
+        const camaras = cam.data || [];
+        const zonas   = zon.data || [];
+
+        return {
+          alarma: {
+            armada: alarma.armada,
+            modo:   alarma.modo,
+            // Estos dos responden "¿quién dejó el taller sin alarma?"
+            cambiada_por: alarma.por || "sin registro",
+            desde:        alarma.desde || null,
+            forzada:      alarma.forzada || false,
+          },
+          camaras: {
+            total:            camaras.length,
+            en_linea:         camaras.filter(c => c.estado === "EN_LINEA").length,
+            fuera_de_linea:   camaras.filter(c => c.estado === "FUERA_DE_LINEA")
+                                     .map(c => `${c.codigo} ${c.nombre} (${c.ubicacion})`),
+            en_reparacion:    camaras.filter(c => c.estado === "EN_REPARACION")
+                                     .map(c => `${c.codigo} ${c.nombre}`),
+            por_instalar:     camaras.filter(c => c.estado === "PLANIFICADA").length,
+            listado_por_instalar: camaras.filter(c => c.estado === "PLANIFICADA")
+                                         .map(c => `${c.codigo} ${c.nombre} — ${c.ubicacion}`),
+          },
+          zonas: {
+            total:     zonas.length,
+            abiertas:  zonas.filter(z => z.estado === "ABIERTA").map(z => `${z.codigo} ${z.nombre}`),
+            con_falla: zonas.filter(z => z.estado === "FALLA").map(z => `${z.codigo} ${z.nombre}`),
+            por_instalar: zonas.filter(z => z.estado === "PLANIFICADA").length,
+          },
+          anuncios_en_cola: (cola.data || []).length,
+          eventos_recientes: ev.data || [],
+        };
+      }
+
+      case "llamar_por_altavoz": {
+        const mensaje = String(args.mensaje || "").trim();
+        if (!mensaje) return { error: "Falta el mensaje que se va a anunciar." };
+        if (mensaje.length > 300) return { error: "El mensaje excede 300 caracteres." };
+
+        const esEmergencia = String(args.tipo || "").toUpperCase() === "EMERGENCIA";
+
+        const { data, error } = await supabase.from("altavoz_anuncios").insert([{
+          mensaje,
+          tipo: (args.tipo || "LLAMADO").toUpperCase(),
+          destinatario: args.destinatario || null,
+          usuario_nombre: "Asistente Sólido",
+          repeticiones: Math.min(Math.max(Number(args.repeticiones) || 2, 1), 5),
+          prioridad: esEmergencia ? 1 : 5,
+        }]).select().maybeSingle();
+        if (error) return { error: error.message };
+
+        await supabase.from("seguridad_eventos").insert([{
+          tipo: "ANUNCIO",
+          severidad: esEmergencia ? "critico" : "info",
+          descripcion: `Anuncio por altavoz desde el asistente${args.destinatario ? ` a ${args.destinatario}` : ""}: "${mensaje}"`,
+          usuario_nombre: "Asistente Sólido",
+        }]).then(() => {}, () => {});
+
+        // Si nadie tiene el receptor abierto en la PC del taller, el anuncio
+        // se queda en cola. Hay que decirlo: si no, el usuario cree que el
+        // técnico ya fue llamado y se queda esperándolo.
+        const hace2min = new Date(Date.now() - 2 * 60_000).toISOString();
+        const { data: vivo } = await supabase.from("altavoz_anuncios")
+          .select("id").eq("estado", "REPRODUCIDO").gte("reproducido_at", hace2min).limit(1);
+
+        return {
+          enviado: true,
+          anuncio_id: data?.id,
+          mensaje_locutado: mensaje,
+          receptor_activo: (vivo || []).length > 0,
+          advertencia: (vivo || []).length > 0
+            ? null
+            : "El anuncio quedó en cola: no se detecta un receptor activo. Hay que abrir /altavoz/receptor en la PC del taller conectada a las bocinas para que suene.",
+        };
+      }
+
+      case "historial_altavoz": {
+        const { data, error } = await supabase
+          .from("altavoz_anuncios")
+          .select("mensaje, tipo, destinatario, estado, usuario_nombre, created_at, reproducido_at")
+          .order("created_at", { ascending: false })
+          .limit(Math.min(Number(args.limit) || 15, 50));
+        if (error) return { error: error.message };
+        return {
+          total: (data || []).length,
+          anuncios: data || [],
+          pendientes: (data || []).filter(a => a.estado === "PENDIENTE").length,
+        };
+      }
+
       default:
         return { error: `Herramienta desconocida: ${nombre}` };
     }
@@ -9874,6 +10023,9 @@ HERRAMIENTAS DISPONIBLES Y CUÁNDO USARLAS:
 - membresia_cliente: plan de UN cliente por nombre — plan, estado, fecha de renovación, lavados/diagnósticos restantes del mes, descuentos, multiplicador de puntos y vehículos cubiertos. Úsalo para "¿qué plan tiene X?", "¿cuántos lavados le quedan a X?".
 - resumen_citas: agenda de CITAS — cuántas hay hoy/mañana/próximos días, pendientes de confirmar y la lista de próximas citas (con origen WEB si la agendó el cliente en línea). Úsalo para "¿qué citas hay hoy?", "¿quién viene mañana?", "¿hay citas sin confirmar?".
 - buscar_citas: buscar citas por fecha, estado, cliente o placa. Úsalo para "citas de la semana que viene", "citas de Juan", "citas canceladas".
+- estado_seguridad: estado de la SEGURIDAD del taller — alarma armada o no y quién la dejó así, cámaras en línea / caídas / por instalar, zonas abiertas o con falla, y últimos eventos de la bitácora. Úsalo para "¿está armada la alarma?", "¿quién desarmó anoche?", "¿hay cámaras caídas?", "¿cuántas cámaras faltan por instalar?".
+- llamar_por_altavoz: envía un anuncio por las bocinas del taller. ÚSALO SOLO si te lo piden explícitamente ("llama a Ramón por el altavoz", "anuncia que el cliente de la placa X espera"). Nunca por iniciativa propia.
+- historial_altavoz: qué se ha anunciado, quién lo envió y si ya sonó o sigue en cola.
 
 CONTEXTO DE MÓDULOS (novedades):
 - El taller ahora tiene un carril rápido de CAR WASH (lavado de vehículos) con estados EN_LAVADO → LISTO → ENTREGADO. El lavado lo registra recepción, lo marca LISTO el técnico de lavado (rol "lavador") y recepción lo cobra/entrega. No se entrega sin factura.
@@ -9919,6 +10071,10 @@ SERVICIOS:
 - Mis Lavados: panel del técnico de lavado (rol "lavador") con los vehículos que tiene asignados.
 - Capacitaciones: cursos, alumnos, ingresos y tasas de deserción.
 
+SEGURIDAD (módulo nuevo):
+- Seguridad: cámaras del taller, zonas de alarma, armado/desarmado y bitácora. Las CÁMARAS todavía NO están instaladas: el módulo lleva el plano de las 8 posiciones previstas (entrada, patio de recepción, bahías, almacén, caja, car wash, parqueo trasero y cafetería) con su estado — PLANIFICADA → INSTALADA → EN_LINEA / FUERA_DE_LINEA. Cuando se conecte el DVR se guarda la URL rtsp de cada canal y el estado pasa a EN_LINEA. La ALARMA tiene tres modos: TOTAL (taller cerrado), PERIMETRAL (se trabaja adentro con los accesos armados) y DESARMADA. No deja armar con una zona abierta salvo que se fuerce, y todo queda en la bitácora con nombre y hora. Las zonas 24 horas (humo, botón de pánico) están activas aunque la alarma esté desarmada.
+- Altavoz: llamados por las bocinas del taller. No hay equipo de audio en red: el anuncio entra en una cola y una computadora del taller con la pantalla /altavoz/receptor abierta lo locuta en voz alta. Si nadie tiene esa pantalla abierta, el anuncio queda PENDIENTE — cuando avises de un llamado, aclara siempre si el receptor estaba activo o si quedó en cola. Hay frases rápidas listas (llamar a recepción, cliente esperando, vehículo listo, repuesto disponible, mover vehículo, reunión, emergencia, fin de jornada) y el anuncio se repite de 1 a 5 veces porque en un taller con ruido rara vez se oye a la primera.
+
 ADMINISTRACIÓN:
 - Mantenimiento: planes y alertas de mantenimiento preventivo.
 - Inteligencia Predictiva: análisis predictivo e inteligencia de negocio.
@@ -9939,7 +10095,8 @@ REGLAS:
 4. Si no hay resultados: "No encontré ningún registro con ese criterio."
 5. Montos en formato "RD$ X,XXX.XX".
 6. Responde en español dominicano, breve y directo.
-7. Incluye fechas de entrega cuando estén disponibles (campo fecha_entrega o estado ENTREGADO).`;
+7. Incluye fechas de entrega cuando estén disponibles (campo fecha_entrega o estado ENTREGADO).
+8. Para anunciar por altavoz necesitas que te lo pidan. Confirma el texto exacto que vas a locutar antes de enviarlo si el mensaje no viene literal, y después informa si sonó o si quedó en cola porque no hay receptor abierto. Nunca uses el tipo EMERGENCIA salvo que el usuario diga expresamente que es una emergencia.`;
 
     const mensajes = [
       { role: "system", content: systemPrompt },

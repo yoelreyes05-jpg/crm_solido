@@ -64,6 +64,9 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "permisos",        label: "Permisos de Roles",      descripcion: "Gestión de acceso por rol",                            grupo: "Admin"     },
   { key: "auditoria",       label: "Auditoría",              descripcion: "Registro de acciones sensibles (quién hizo qué y cuándo)", grupo: "Admin" },
   { key: "capacitaciones",  label: "Capacitaciones",         descripcion: "Cursos, alumnos, ingresos y tasas de deserción",       grupo: "Admin"     },
+  // Seguridad
+  { key: "seguridad",       label: "Seguridad",              descripcion: "Cámaras, zonas de alarma, armado/desarmado y bitácora de seguridad", grupo: "Seguridad" },
+  { key: "altavoz",         label: "Altavoz",                descripcion: "Llamar técnicos y anunciar por las bocinas del taller", grupo: "Seguridad" },
 ];
 
 // ── Shortcuts de conjuntos de permisos ───────────────────────────────────────
@@ -119,6 +122,10 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
     capacitaciones:  OPERACION,
+    // Atiende el mostrador: es quien llama a los técnicos por bocina.
+    // Ve el estado de seguridad pero no arma ni desarma la alarma.
+    seguridad:       VER,
+    altavoz:         OPERACION,
   },
 
   tecnico: {
@@ -151,6 +158,10 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
     capacitaciones:  VER,
+    // El técnico recibe los llamados, no los emite. Ajustable desde /permisos
+    // si en la práctica necesita avisar al almacén por bocina.
+    seguridad:       NADA,
+    altavoz:         NADA,
   },
 
   almacen: {
@@ -181,6 +192,9 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
     capacitaciones:  NADA,
+    // Anuncia por bocina cuando llega un repuesto que un técnico espera.
+    seguridad:       NADA,
+    altavoz:         OPERACION,
   },
 
   cafeteria: {
@@ -276,6 +290,9 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
     capacitaciones:  NADA,
+    // Aloha es un negocio independiente: no toca la seguridad del taller.
+    seguridad:       NADA,
+    altavoz:         NADA,
   },
 
   // Vendedor — crea el cliente y emite/despacha la factura de una pieza,
