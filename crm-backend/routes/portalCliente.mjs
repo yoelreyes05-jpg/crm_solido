@@ -873,10 +873,17 @@ router.get("/historial", requiereSesion, ruta(async (req, res) => {
   const { data: veh } = await supabase
     .from("vehiculos").select("placa").eq("id", vehiculoId).maybeSingle();
 
-  if (!veh?.placa) return res.json({ error: false, historial: [] });
-
+  // Se manda SIEMPRE el vehiculo_id, no solo la placa.
+  //
+  // El endpoint interno resolvía el vehículo comparando el texto de la placa,
+  // y esta ruta ya sabe exactamente de qué vehículo se trata: la sesión lo
+  // fijó al autenticar. Depender del texto hacía que la pantalla de estado
+  // (que filtra por id) mostrara la orden en curso mientras el historial la
+  // daba por inexistente. La placa queda como respaldo para el resto.
   const r = await pedirInterno(
-    `/vehiculo-historial/placa/${encodeURIComponent(veh.placa)}`
+    `/vehiculo-historial/placa/${encodeURIComponent(veh?.placa || "-")}` +
+    `?vehiculo_id=${vehiculoId}` +
+    (req.query.debug === "1" ? "&debug=1" : "")
   );
 
   if (!r.ok) {
@@ -889,6 +896,7 @@ router.get("/historial", requiereSesion, ruta(async (req, res) => {
     historial: r.cuerpo?.historial || [],
     vehiculo: r.cuerpo?.vehiculo || null,
     fotos: r.cuerpo?.fotos || [],
+    ...(r.cuerpo?.debug ? { debug: r.cuerpo.debug } : {}),
   });
 }));
 

@@ -4612,12 +4612,29 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
 
 // GET /vehiculo-historial/placa/:placa — consulta pública para PWA del cliente y web
 // Busca en AMBAS fuentes: órdenes activas + historial cerrado
+//
+// ?vehiculo_id=N  → salta la búsqueda por texto. Quien ya conoce el vehículo
+//                   (el portal del cliente lo tiene en la sesión) no debería
+//                   depender de que la placa escrita coincida carácter a
+//                   carácter con la guardada.
+// ?debug=1        → devuelve el registro paso a paso de la consulta. La función
+//                   siempre lo ha ido acumulando, pero solo salía por consola.
 app.get("/vehiculo-historial/placa/:placa", async (req, res) => {
   try {
-    const resultado = await consultarHistorialPorPlaca(req.params.placa);
-    if (!resultado.found) return res.json({ found: false, historial: [] });
+    const resultado = await consultarHistorialPorPlaca(req.params.placa, {
+      vehiculoId: req.query.vehiculo_id ? Number(req.query.vehiculo_id) : null,
+      debug: req.query.debug === "1",
+    });
+    if (!resultado.found) {
+      return res.json({
+        found: false,
+        historial: [],
+        ...(resultado.debug ? { debug: resultado.debug } : {}),
+      });
+    }
     res.json(resultado);
   } catch (err) {
+    console.error("❌ /vehiculo-historial/placa:", err);
     res.status(500).json({ error: err.message });
   }
 });
@@ -4713,46 +4730,101 @@ function normalizarFotosInspeccion(inspeccion) {
 // Usa select("*") para órdenes — evita fallos por columnas que pueden
 // tener distintos nombres según la migración que esté aplicada.
 // =====================================================
-async function consultarHistorialPorPlaca(placa, _debug = false) {
+async function consultarHistorialPorPlaca(placa, opciones = {}) {
+  // `opciones` acepta { vehiculoId, debug }. Se mantiene compatibilidad con la
+  // firma vieja `(placa, true)` que usaba el bot de Telegram.
+  const opts = typeof opciones === "boolean" ? { debug: opciones } : (opciones || {});
+
   const dbgLog = [];
   const dbg = (msg) => { console.log("🤖 TG_DBG:", msg); dbgLog.push(msg); };
 
   // Normalizar: mayúsculas, sin espacios ni guiones
-  const placaNorm = placa.toUpperCase().replace(/[\s\-_]/g, "").trim();
-  dbg(`placa_input="${placa}" → normalizada="${placaNorm}"`);
+  const placaNorm = String(placa || "").toUpperCase().replace(/[\s\-_]/g, "").trim();
+  dbg(`placa_input="${placa}" → normalizada="${placaNorm}" vehiculoId=${opts.vehiculoId ?? "no"}`);
 
-  // ── 1. Buscar vehículo — igual que la PWA: traer todos y filtrar client-side ──
+  // ── 1. Buscar vehículo ────────────────────────────────────────────────────
   //
-  // select("*") y no una lista de columnas: la lista dejaba fuera vin, motor,
-  // combustible, cilindros, tipo_aceite, viscosidad, cuartos_aceite y km_actual,
-  // así que la ficha del vehículo llegaba a la PWA con cinco campos y la hoja
-  // impresa salía casi vacía.
-  const { data: todosVehiculos, error: vErr } = await supabase
-    .from("vehiculos")
-    .select("*");
-  if (vErr) {
-    console.error("🤖 TG[vehiculos]:", vErr.message);
-    dbg(`ERROR vehiculos: ${vErr.message}`);
-  }
-  dbg(`vehiculos_en_bd=${(todosVehiculos || []).length}`);
+  // Antes esto hacía `.select("*")` sobre TODA la tabla `vehiculos` y comparaba
+  // las placas en memoria. Dos problemas graves:
+  //
+  //   1. PostgREST corta la respuesta en 1000 filas por defecto. Pasado ese
+  //      número, los vehículos que no entraban simplemente "no existían".
+  //   2. La comparación exacta en JavaScript fallaba ante cualquier diferencia
+  //      de formato que la normalización no cubriera (acentos, caracteres
+  //      invisibles pegados desde Excel, la letra O contra el cero).
+  //
+  // Ahora se busca en la base: por id cuando quien llama ya lo sabe —el portal
+  // del cliente conoce el vehículo de la sesión y antes lo descartaba para
+  // re-buscarlo por texto— y si no, por placa con ilike, que es lo que hace el
+  // resto del sistema.
+  let vehiculo = null;
 
-  const vehiculo = (todosVehiculos || []).find(v =>
-    v.placa?.toUpperCase().replace(/[\s\-_]/g, "") === placaNorm
-  );
-  dbg(`vehiculo_encontrado=${vehiculo ? `id=${vehiculo.id} placa="${vehiculo.placa}"` : "NO"}`);
-
-  // ── 2. Historial cerrado (vehiculo_historial) — búsqueda flexible ──
-  const placaConGuion = placaNorm.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2");
-  const { data: histData, error: hErr } = await supabase
-    .from("vehiculo_historial")
-    .select("*")
-    .or(`placa.ilike.${placaNorm},placa.ilike.${placaConGuion}`)
-    .order("created_at", { ascending: false });
-  if (hErr) {
-    console.error("🤖 TG[historial]:", hErr.message);
-    dbg(`ERROR historial: ${hErr.message}`);
+  if (opts.vehiculoId) {
+    const { data, error } = await supabase
+      .from("vehiculos").select("*").eq("id", opts.vehiculoId).maybeSingle();
+    if (error) dbg(`ERROR vehiculo por id: ${error.message}`);
+    vehiculo = data || null;
+    dbg(`busqueda_por_id=${vehiculo ? "OK" : "sin resultado"}`);
   }
-  dbg(`vehiculo_historial_rows=${(histData || []).length}`);
+
+  if (!vehiculo && placaNorm) {
+    // Variantes habituales: sin guion, con guion (B1234 ↔ B-1234).
+    const conGuion = placaNorm.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2");
+    const { data, error } = await supabase
+      .from("vehiculos").select("*")
+      .or(`placa.ilike.${placaNorm},placa.ilike.${conGuion}`)
+      .limit(5);
+    if (error) dbg(`ERROR vehiculo por placa: ${error.message}`);
+    vehiculo = (data || [])[0] || null;
+    dbg(`busqueda_por_placa=${(data || []).length} resultados`);
+
+    // Último recurso: barrido en memoria para placas guardadas con formatos
+    // raros. Acotado a 2000 filas y solo si las dos búsquedas anteriores
+    // fallaron, así no es el camino normal.
+    if (!vehiculo) {
+      const { data: todos } = await supabase
+        .from("vehiculos").select("*").limit(2000);
+      vehiculo = (todos || []).find(v =>
+        String(v.placa || "").toUpperCase().replace(/[\s\-_]/g, "") === placaNorm
+      ) || null;
+      dbg(`barrido_memoria=${(todos || []).length} filas → ${vehiculo ? "encontrado" : "NO"}`);
+    }
+  }
+
+  dbg(`vehiculo_encontrado=${vehiculo ? `id=${vehiculo.id} placa="${vehiculo.placa}" cliente_id=${vehiculo.cliente_id}` : "NO"}`);
+
+  // ── 2. Historial cerrado (vehiculo_historial) ──
+  //
+  // Se busca por vehiculo_id además de por placa: los registros nuevos lo
+  // traen y es el vínculo fiable. La placa queda como respaldo para las filas
+  // antiguas que se archivaron sin él. Si entramos por vehiculoId y no había
+  // placa en la petición, se usa la del vehículo encontrado — antes el `.or()`
+  // se armaba con una cadena vacía y devolvía cero filas.
+  const placaBusqueda = placaNorm
+    || String(vehiculo?.placa || "").toUpperCase().replace(/[\s\-_]/g, "").trim();
+  const placaConGuion = placaBusqueda.replace(/^([A-Z]{1,2})(\d+)$/, "$1-$2");
+
+  const condicionesHist = [];
+  if (vehiculo?.id) condicionesHist.push(`vehiculo_id.eq.${vehiculo.id}`);
+  if (placaBusqueda) {
+    condicionesHist.push(`placa.ilike.${placaBusqueda}`);
+    if (placaConGuion !== placaBusqueda) condicionesHist.push(`placa.ilike.${placaConGuion}`);
+  }
+
+  let histData = [];
+  if (condicionesHist.length > 0) {
+    const { data, error: hErr } = await supabase
+      .from("vehiculo_historial")
+      .select("*")
+      .or(condicionesHist.join(","))
+      .order("created_at", { ascending: false });
+    if (hErr) {
+      console.error("🤖 TG[historial]:", hErr.message);
+      dbg(`ERROR historial: ${hErr.message}`);
+    }
+    histData = data || [];
+  }
+  dbg(`vehiculo_historial_rows=${histData.length}`);
 
   // ── 3. Todas las órdenes del vehículo SIN filtro de estado (igual que la PWA) ──
   // Usamos select("*") para no fallar si alguna columna tiene distinto nombre en BD.
@@ -4814,7 +4886,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
         if (String(o.vehiculo_id) === String(vehiculo.id)) return true;
         const info = String(o.vehiculo_info || o.vehiculo_placa || "")
           .toUpperCase().replace(/[\s\-_]/g, "");
-        return !info || info.includes(placaNorm);
+        return !info || !placaBusqueda || info.includes(placaBusqueda);
       });
       if (antes !== ordenesRaw.length) dbg(`huerfanas_descartadas=${antes - ordenesRaw.length}`);
     }
@@ -5026,7 +5098,10 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
 
   const historial = [...todasOrdenes, ...histConFicha];
 
-  console.log(`🤖 TG[placa:${placaNorm}] vehiculo=${vehiculo?.id ?? "no"} ordenes=${todasOrdenes.length} historial=${histFiltrado.length}`);
+  dbg(`RESULTADO ordenes=${todasOrdenes.length} historial_cerrado=${histFiltrado.length} total=${historial.length}`);
+  console.log(`🤖 TG[placa:${placaBusqueda}] vehiculo=${vehiculo?.id ?? "no"} ordenes=${todasOrdenes.length} historial=${histFiltrado.length}`);
+
+  const conDebug = (obj) => (opts.debug ? { ...obj, debug: dbgLog } : obj);
 
   if (historial.length === 0) {
     if (vehiculo) {
@@ -5042,10 +5117,10 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
             .eq("id", vehiculo.cliente_id).maybeSingle()).data
         : null;
 
-      return {
+      return conDebug({
         found: true,
         vehiculo: { ...vehiculo },
-        ultimo_estado: "RECIBIDO",
+        ultimo_estado: "REGISTRADO",
         historial: [{
           ...vehiculo,
           id:               `veh_${vehiculo.id}`,
@@ -5059,9 +5134,9 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
           _activa:          false,
           _sin_servicios:   true,
         }],
-      };
+      });
     }
-    return { found: false, historial: [] };
+    return conDebug({ found: false, historial: [] });
   }
 
   const ref = historial[0];
@@ -5071,7 +5146,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
   // viejo, así que el primer servicio con fotos es el actual.
   const fotosVehiculo = (historial.find(h => Array.isArray(h.fotos) && h.fotos.length > 0)?.fotos) || [];
 
-  return {
+  return conDebug({
     found: true,
     fotos: fotosVehiculo,
     // La fila completa de `vehiculos` primero (vin, motor, combustible,
@@ -5080,7 +5155,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
     // que el vehículo ya no esté en la tabla pero sí en el historial.
     vehiculo: {
       ...(vehiculo || {}),
-      placa:  vehiculo?.placa  || ref.placa  || placaNorm,
+      placa:  vehiculo?.placa  || ref.placa  || placaBusqueda,
       marca:  vehiculo?.marca  || ref.marca  || "",
       modelo: vehiculo?.modelo || ref.modelo || "",
       ano:    vehiculo?.ano    || ref.ano    || null,
@@ -5088,7 +5163,7 @@ async function consultarHistorialPorPlaca(placa, _debug = false) {
     },
     ultimo_estado: ref.estado,
     historial,
-  };
+  });
 }
 
 // =====================================================

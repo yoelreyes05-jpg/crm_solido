@@ -747,6 +747,7 @@ export default function ClienteApp() {
   const [histDetalle, setHistDetalle]       = useState<any>(null);
   const [histDetalleCompleto, setHistDetalleCompleto] = useState<any>(null);
   const [loadingDetalle, setLoadingDetalle] = useState(false);
+  const [errorDetalle, setErrorDetalle]     = useState("");
 
   useEffect(() => {
     const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
@@ -903,6 +904,7 @@ export default function ClienteApp() {
     setHistDetalleCompleto(null);
     setTab("histperm");
     setLoadingDetalle(true);
+    setErrorDetalle("");
     try {
       // Se pasa el registro completo, no solo el id: las órdenes activas usan
       // otra ruta (llevan id "orden_XX" y aún no están en vehiculo_historial).
@@ -912,6 +914,10 @@ export default function ClienteApp() {
       setHistDetalleCompleto(data);
     } catch (e: any) {
       if (e?.status === 401) { setSesion(null); setResultado(null); }
+      // Antes cualquier otro error se tragaba en silencio: el panel se quedaba
+      // vacío y no había forma de saber si el servicio no tenía datos o si la
+      // petición había fallado.
+      else setErrorDetalle(e?.message || "No se pudo cargar el detalle de este servicio.");
     }
     finally { setLoadingDetalle(false); }
   };
@@ -2014,8 +2020,8 @@ export default function ClienteApp() {
                               <div
                                 key={h.id || idx}
                                 className="hist-item"
-                                onClick={() => abrirDetalleHist(h)}
-                                style={{ cursor:"pointer" }}
+                                onClick={h._sin_servicios ? undefined : () => abrirDetalleHist(h)}
+                                style={{ cursor: h._sin_servicios ? "default" : "pointer" }}
                               >
                                 <div className="hist-servicio">{h.tipo_servicio || "Servicio"}</div>
                                 <div className="hist-meta">
@@ -2059,6 +2065,13 @@ export default function ClienteApp() {
                           <div style={{ textAlign:"center", padding:"14px 0", fontSize:13, color:"#64748b", marginBottom:10 }}>
                             <span style={{ display:"inline-block", animation:"spin 1s linear infinite", marginRight:8 }}>⏳</span>
                             Cargando expediente completo...
+                          </div>
+                        )}
+
+                        {!loadingDetalle && errorDetalle && (
+                          <div style={{ background:"rgba(239,68,68,0.1)", border:"1px solid rgba(239,68,68,0.3)", color:"#fca5a5",
+                            borderRadius:10, padding:"10px 12px", fontSize:12.5, marginBottom:10, lineHeight:1.5 }}>
+                            ⚠️ {errorDetalle}
                           </div>
                         )}
 
@@ -2545,7 +2558,12 @@ export default function ClienteApp() {
                                 <div
                                   key={h.id}
                                   className={`hist-item ${abierto ? "open" : ""}`}
-                                  onClick={() => abrirDetalleHist(h)}
+                                  /* La ficha "sin servicios" no tiene expediente
+                                     que abrir: su id es "veh_N" y no coincide
+                                     con ninguna ruta de detalle, así que tocarla
+                                     daba 404 y parecía que la app se colgaba. */
+                                  onClick={h._sin_servicios ? undefined : () => abrirDetalleHist(h)}
+                                  style={h._sin_servicios ? { cursor:"default" } : undefined}
                                 >
                                   {/* Cabecera: tipo de servicio + estado */}
                                   <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:4 }}>
