@@ -81,6 +81,17 @@ const MODULOS: Modulo[] = [
     ],
   },
   {
+    id: "asa", label: "Flota ASA", icon: "🚚", color: "#0f766e",
+    items: [
+      { href: "/asa",               icon: "🚚", label: "Tablero de flota", key: "asa", iconBg: "linear-gradient(145deg,#134e4a,#0f766e)", iconShadow: "0 4px 12px rgba(15,118,110,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/asa/vehiculos",     icon: "🚗", label: "Vehículos",        key: "asa", iconBg: "linear-gradient(145deg,#0c4a6e,#0ea5e9)", iconShadow: "0 4px 12px rgba(14,165,233,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/asa/fallas",        icon: "🔧", label: "Fallas",           key: "asa", iconBg: "linear-gradient(145deg,#7f1d1d,#dc2626)", iconShadow: "0 4px 12px rgba(220,38,38,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/asa/gastos",        icon: "💰", label: "Gastos de flota",  key: "asa", iconBg: "linear-gradient(145deg,#14532d,#22c55e)", iconShadow: "0 4px 12px rgba(34,197,94,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/asa/reportes",      icon: "📊", label: "Reportes",         key: "asa", iconBg: "linear-gradient(145deg,#3730a3,#6366f1)", iconShadow: "0 4px 12px rgba(99,102,241,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+      { href: "/asa/configuracion", icon: "⚙️", label: "Config. ASA",      key: "asa", iconBg: "linear-gradient(145deg,#111827,#374151)", iconShadow: "0 4px 12px rgba(55,65,81,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
+    ],
+  },
+  {
     id: "cafeteria_tv", label: "Cafetería", icon: "☕", color: "#b45309",
     items: [
       { href: "/cafeteria", icon: "☕", label: "Cafetería POS", key: "cafeteria", iconBg: "linear-gradient(145deg,#431407,#b45309)", iconShadow: "0 4px 12px rgba(180,83,9,0.55),inset 0 1px 0 rgba(255,255,255,0.25)" },
@@ -134,7 +145,11 @@ const MENU_FLAT = MODULOS.flatMap(m => m.items);
 // permanente en una PC compartida — peor que el riesgo que se quiere evitar.
 // Lo único que expone es el texto de los llamados ("Ramón a recepción"), y
 // solo puede leer la cola y marcar lo que ya sonó.
-const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu", "/altavoz/receptor", "/"];
+// `/asa/chequeo` va aqui porque la llena el conductor desde su celular en el
+// patio. Darle cuenta del CRM a cada chofer para que reporte una goma baja
+// seria abrirle facturacion y clientes; el parte que envia solo puede
+// escribir su propio chequeo del dia.
+const RUTAS_PUBLICAS = ["/login", "/aloha/login", "/cliente", "/estado", "/pantalla", "/menu", "/altavoz/receptor", "/asa/chequeo", "/"];
 
 /** ¿Estamos dentro del territorio de Aloha Perfume Store? */
 function esZonaAloha(pathname: string) {

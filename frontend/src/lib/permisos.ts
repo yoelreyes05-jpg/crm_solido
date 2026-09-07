@@ -64,6 +64,8 @@ export const MODULOS_SISTEMA: ModuloInfo[] = [
   { key: "permisos",        label: "Permisos de Roles",      descripcion: "Gestión de acceso por rol",                            grupo: "Admin"     },
   { key: "auditoria",       label: "Auditoría",              descripcion: "Registro de acciones sensibles (quién hizo qué y cuándo)", grupo: "Admin" },
   { key: "capacitaciones",  label: "Capacitaciones",         descripcion: "Cursos, alumnos, ingresos y tasas de deserción",       grupo: "Admin"     },
+  // Flota
+  { key: "asa",             label: "Flota ASA",              descripcion: "Vehículos de la empresa, chequeo diario del conductor, fallas, fotos, gastos y costo por kilómetro", grupo: "Flota" },
   // Seguridad
   { key: "seguridad",       label: "Seguridad",              descripcion: "Cámaras, zonas de alarma, armado/desarmado y bitácora de seguridad", grupo: "Seguridad" },
   { key: "altavoz",         label: "Altavoz",                descripcion: "Llamar técnicos y anunciar por las bocinas del taller", grupo: "Seguridad" },
@@ -126,6 +128,9 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     // Ve el estado de seguridad pero no arma ni desarma la alarma.
     seguridad:       VER,
     altavoz:         OPERACION,
+    // Lleva la agenda del taller: ve la flota y registra gastos, pero no da de
+    // baja unidades ni toca el catalogo.
+    asa:             OPERACION,
   },
 
   tecnico: {
@@ -162,6 +167,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     // si en la práctica necesita avisar al almacén por bocina.
     seguridad:       NADA,
     altavoz:         NADA,
+    asa:             NADA,
   },
 
   almacen: {
@@ -195,6 +201,8 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     // Anuncia por bocina cuando llega un repuesto que un técnico espera.
     seguridad:       NADA,
     altavoz:         OPERACION,
+    // Suele ser quien tanquea y compra las gomas.
+    asa:             OPERACION,
   },
 
   cafeteria: {
@@ -224,6 +232,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+    asa:             NADA,
   },
 
   // Técnico de lavado — solo ve su panel de lavados asignados
@@ -255,6 +264,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     usuarios:        NADA,
     configuracion:   NADA,
     permisos:        NADA,
+    asa:             NADA,
   },
 
   // Aloha — encargado de ALOHA Perfume Store. Solo ve su módulo,
@@ -293,6 +303,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     // Aloha es un negocio independiente: no toca la seguridad del taller.
     seguridad:       NADA,
     altavoz:         NADA,
+    asa:             NADA,
   },
 
   // Vendedor — crea el cliente y emite/despacha la factura de una pieza,
@@ -328,6 +339,7 @@ export const PERMISOS_DEFAULT: PermisosConfig = {
     configuracion:   NADA,
     permisos:        NADA,
     capacitaciones:  NADA,
+    asa:             NADA,
   },
 };
 

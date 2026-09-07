@@ -5,6 +5,7 @@ import cors from "cors";
 import { createClient } from "@supabase/supabase-js";
 import portalCliente from "./routes/portalCliente.mjs";
 import seguridad from "./routes/seguridad.mjs";
+import asa from "./routes/asa.mjs";
 import { notificarCambioEstado, esEventoNotificable } from "./services/notificarCliente.mjs";
 import {
   notificarCita, avisarTallerNuevaCita, eventoDesdeEstado,
@@ -68,6 +69,15 @@ app.use("/portal", portalCliente);
 // Cámaras, zonas de alarma, bitácora y llamados por altavoz.
 // Ver crm-backend/sql/migracion_v31_seguridad_altavoz.sql
 app.use("/seguridad", seguridad);
+
+// =====================================================
+// 🚚 MODULO ASA — FLOTA Y TRANSPORTACION — /asa/*
+// =====================================================
+// Vehiculos de la empresa, parte diario del conductor, fallas, fotos y
+// gastos. Las rutas /asa/publico/* son las de la pantalla del conductor y
+// no piden sesion a proposito (ver comentario en routes/asa.mjs).
+// Ver crm-backend/sql/migracion_v32_asa_flota.sql
+app.use("/asa", asa);
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
