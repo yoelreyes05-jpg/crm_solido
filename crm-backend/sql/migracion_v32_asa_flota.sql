@@ -6,8 +6,17 @@
 -- todo lo que se gasta en el. Con eso el encargado de transportacion sabe
 -- cuanto cuesta cada unidad por kilometro y cual conviene reemplazar.
 --
--- Prefijo `asa_` en todas las tablas: el modulo es independiente del resto
--- del CRM (no toca `vehiculos`, que son los de los clientes del taller).
+-- Prefijo `asa_flota_` en todas las tablas.
+--
+-- No `asa_` a secas: ese prefijo ya lo ocupan las tablas del ERP de ASA
+-- (plagas/IPM, fichas clinicas, mascotas, estetica, POS, nomina,
+-- contabilidad). El primer intento de esta migracion uso `asa_`, choco contra
+-- el `asa_empleados` de ese ERP -- cuyo id es uuid -- y fallo al crear la
+-- llave foranea. Por eso tambien la columna se llama `conductor_id` y no
+-- `empleado_id`: confundir los empleados del ERP con los conductores de la
+-- flota fue justo el error.
+--
+-- Tampoco toca `vehiculos`, que son los de los clientes del taller.
 --
 -- REGLA DE DISENO: el conductor no escribe. Todo el parte diario se llena a
 -- toques -- el checklist arranca en BIEN y solo se toca lo que esta mal, el
@@ -20,14 +29,51 @@
 
 
 -- ══════════════════════════════════════════════════════════════════════════
--- 1. EMPLEADOS (CONDUCTORES)
+-- 0. PREFLIGHT
+--
+-- Avisa si alguna tabla `asa_flota_` ya existe con otro tipo de id. Sin esto,
+-- el fallo aparece mas abajo como un error de llave foranea que no dice de
+-- donde viene el problema -- que fue exactamente lo que paso la primera vez.
+-- ══════════════════════════════════════════════════════════════════════════
+
+DO $preflight$
+DECLARE
+  t       text;
+  tipo_id text;
+  chocan  text := '';
+  tablas  text[] := ARRAY[
+    'asa_flota_conductores', 'asa_flota_vehiculos', 'asa_flota_asignaciones',
+    'asa_flota_checklist_items', 'asa_flota_fallas_catalogo', 'asa_flota_chequeos',
+    'asa_flota_chequeo_items', 'asa_flota_fallas_reportadas', 'asa_flota_fotos',
+    'asa_flota_gastos', 'asa_flota_documentos', 'asa_flota_mantenimientos'
+  ];
+BEGIN
+  FOREACH t IN ARRAY tablas LOOP
+    SELECT data_type INTO tipo_id
+      FROM information_schema.columns
+     WHERE table_schema = 'public' AND table_name = t AND column_name = 'id';
+    IF tipo_id IS NOT NULL AND tipo_id <> 'bigint' THEN
+      chocan := chocan || t || ' (id ' || tipo_id || '), ';
+    END IF;
+  END LOOP;
+
+  IF chocan <> '' THEN
+    RAISE EXCEPTION
+      'Ya existen tablas asa_flota_ con otro tipo de id: %. Revisalas antes de seguir.',
+      rtrim(chocan, ', ');
+  END IF;
+END $preflight$;
+
+
+-- ══════════════════════════════════════════════════════════════════════════
+-- 1. CONDUCTORES
 --
 -- Tabla propia y no `usuarios`: el conductor no entra al CRM, solo abre la
 -- pantalla de chequeo y toca su nombre. Darle una cuenta del sistema seria
 -- darle acceso a cosas que no necesita.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_empleados (
+CREATE TABLE IF NOT EXISTS asa_flota_conductores (
   id                 BIGSERIAL PRIMARY KEY,
   nombre             TEXT NOT NULL,
   cedula             TEXT,
@@ -44,14 +90,14 @@ CREATE TABLE IF NOT EXISTS asa_empleados (
   updated_at         TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_emp_activo ON asa_empleados(activo);
+CREATE INDEX IF NOT EXISTS idx_asaflota_emp_activo ON asa_flota_conductores(activo);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- 2. VEHICULOS DE LA FLOTA
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_vehiculos (
+CREATE TABLE IF NOT EXISTS asa_flota_vehiculos (
   id                BIGSERIAL PRIMARY KEY,
   codigo            TEXT NOT NULL UNIQUE,            -- ASA-01
   placa             TEXT NOT NULL,
@@ -68,7 +114,7 @@ CREATE TABLE IF NOT EXISTS asa_vehiculos (
   km_inicial        NUMERIC(12,1) NOT NULL DEFAULT 0,  -- odometro al entrar a la flota
   km_actual         NUMERIC(12,1) NOT NULL DEFAULT 0,  -- ultimo leido en un chequeo
   km_actualizado    TIMESTAMPTZ,
-  empleado_id       BIGINT REFERENCES asa_empleados(id) ON DELETE SET NULL,
+  conductor_id       BIGINT REFERENCES asa_flota_conductores(id) ON DELETE SET NULL,
   departamento      TEXT,
   estado            TEXT NOT NULL DEFAULT 'ACTIVO'
                       CHECK (estado IN ('ACTIVO','EN_TALLER','FUERA_SERVICIO','VENDIDO')),
@@ -83,24 +129,24 @@ CREATE TABLE IF NOT EXISTS asa_vehiculos (
   updated_at        TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_veh_activo   ON asa_vehiculos(activo);
-CREATE INDEX IF NOT EXISTS idx_asa_veh_estado   ON asa_vehiculos(estado);
-CREATE INDEX IF NOT EXISTS idx_asa_veh_empleado ON asa_vehiculos(empleado_id);
-CREATE INDEX IF NOT EXISTS idx_asa_veh_placa    ON asa_vehiculos(placa);
+CREATE INDEX IF NOT EXISTS idx_asaflota_veh_activo   ON asa_flota_vehiculos(activo);
+CREATE INDEX IF NOT EXISTS idx_asaflota_veh_estado   ON asa_flota_vehiculos(estado);
+CREATE INDEX IF NOT EXISTS idx_asaflota_veh_conductor ON asa_flota_vehiculos(conductor_id);
+CREATE INDEX IF NOT EXISTS idx_asaflota_veh_placa    ON asa_flota_vehiculos(placa);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- 3. ASIGNACIONES (HISTORICO DE QUIEN MANEJA QUE)
 --
--- `asa_vehiculos.empleado_id` dice quien lo tiene HOY. Esta tabla dice quien
+-- `asa_flota_vehiculos.conductor_id` dice quien lo tiene HOY. Esta tabla dice quien
 -- lo tenia el dia que aparecio el golpe. Sin el historico, el reclamo por un
 -- dano siempre cae en el que maneja ahora.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_asignaciones (
+CREATE TABLE IF NOT EXISTS asa_flota_asignaciones (
   id           BIGSERIAL PRIMARY KEY,
-  vehiculo_id  BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
-  empleado_id  BIGINT NOT NULL REFERENCES asa_empleados(id) ON DELETE CASCADE,
+  vehiculo_id  BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
+  conductor_id  BIGINT NOT NULL REFERENCES asa_flota_conductores(id) ON DELETE CASCADE,
   desde        DATE NOT NULL DEFAULT CURRENT_DATE,
   hasta        DATE,
   km_entrega   NUMERIC(12,1),
@@ -110,8 +156,8 @@ CREATE TABLE IF NOT EXISTS asa_asignaciones (
   created_at   TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_asig_veh    ON asa_asignaciones(vehiculo_id);
-CREATE INDEX IF NOT EXISTS idx_asa_asig_activa ON asa_asignaciones(vehiculo_id) WHERE hasta IS NULL;
+CREATE INDEX IF NOT EXISTS idx_asaflota_asig_veh    ON asa_flota_asignaciones(vehiculo_id);
+CREATE INDEX IF NOT EXISTS idx_asaflota_asig_activa ON asa_flota_asignaciones(vehiculo_id) WHERE hasta IS NULL;
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -121,7 +167,7 @@ CREATE INDEX IF NOT EXISTS idx_asa_asig_activa ON asa_asignaciones(vehiculo_id) 
 -- se guarda como BIEN. Editable desde la interfaz sin migracion nueva.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_checklist_items (
+CREATE TABLE IF NOT EXISTS asa_flota_checklist_items (
   id        BIGSERIAL PRIMARY KEY,
   codigo    TEXT NOT NULL UNIQUE,
   categoria TEXT NOT NULL,
@@ -132,7 +178,7 @@ CREATE TABLE IF NOT EXISTS asa_checklist_items (
   activo    BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-INSERT INTO asa_checklist_items (codigo, categoria, etiqueta, icono, critico, orden) VALUES
+INSERT INTO asa_flota_checklist_items (codigo, categoria, etiqueta, icono, critico, orden) VALUES
   ('luces_delanteras','LUCES','Luces delanteras','💡',TRUE, 10),
   ('luces_traseras','LUCES','Luces traseras y de freno','🔴',TRUE, 20),
   ('direccionales','LUCES','Direccionales','🔶',TRUE, 30),
@@ -174,7 +220,7 @@ ON CONFLICT (codigo) DO UPDATE SET
 -- escogiendo "Otro" y se pierde el dato.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_fallas_catalogo (
+CREATE TABLE IF NOT EXISTS asa_flota_fallas_catalogo (
   id               BIGSERIAL PRIMARY KEY,
   codigo           TEXT NOT NULL UNIQUE,
   categoria        TEXT NOT NULL,
@@ -187,7 +233,7 @@ CREATE TABLE IF NOT EXISTS asa_fallas_catalogo (
   activo           BOOLEAN NOT NULL DEFAULT TRUE
 );
 
-INSERT INTO asa_fallas_catalogo (codigo, categoria, etiqueta, icono, severidad, detiene_vehiculo, orden) VALUES
+INSERT INTO asa_flota_fallas_catalogo (codigo, categoria, etiqueta, icono, severidad, detiene_vehiculo, orden) VALUES
   ('no_arranca','MOTOR','No arranca','🔌','GRAVE',TRUE,10),
   ('arranca_dificil','MOTOR','Le cuesta arrancar','🔑','MODERADA',FALSE,20),
   ('se_calienta','MOTOR','Se calienta','🌡️','GRAVE',TRUE,30),
@@ -251,11 +297,11 @@ ON CONFLICT (codigo) DO UPDATE SET
 -- Sirve de respaldo si manana alguien cambia el catalogo de items.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_chequeos (
+CREATE TABLE IF NOT EXISTS asa_flota_chequeos (
   id                  BIGSERIAL PRIMARY KEY,
-  vehiculo_id         BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
-  empleado_id         BIGINT REFERENCES asa_empleados(id) ON DELETE SET NULL,
-  empleado_nombre     TEXT,                             -- congelado por si el empleado se borra
+  vehiculo_id         BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
+  conductor_id         BIGINT REFERENCES asa_flota_conductores(id) ON DELETE SET NULL,
+  conductor_nombre     TEXT,                             -- congelado por si el conductor se borra
   fecha               DATE NOT NULL DEFAULT CURRENT_DATE,
   turno               TEXT NOT NULL DEFAULT 'SALIDA'
                         CHECK (turno IN ('SALIDA','ENTRADA')),
@@ -276,20 +322,20 @@ CREATE TABLE IF NOT EXISTS asa_chequeos (
 
 -- Un parte por vehiculo, dia y turno. El indice unico es lo que hace que
 -- tocar "Guardar" dos veces no genere dos partes.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_asa_chq_unico
-  ON asa_chequeos(vehiculo_id, fecha, turno);
-CREATE INDEX IF NOT EXISTS idx_asa_chq_fecha ON asa_chequeos(fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_asa_chq_veh   ON asa_chequeos(vehiculo_id, fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_asa_chq_emp   ON asa_chequeos(empleado_id, fecha DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asaflota_chq_unico
+  ON asa_flota_chequeos(vehiculo_id, fecha, turno);
+CREATE INDEX IF NOT EXISTS idx_asaflota_chq_fecha ON asa_flota_chequeos(fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_chq_veh   ON asa_flota_chequeos(vehiculo_id, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_chq_emp   ON asa_flota_chequeos(conductor_id, fecha DESC);
 
 
 -- Solo se guardan los items que NO salieron bien. Lo que no esta aqui, esta
 -- bien. 25 items por vehiculo por dia serian 9,000 filas al ano por unidad
 -- para decir casi siempre lo mismo.
-CREATE TABLE IF NOT EXISTS asa_chequeo_items (
+CREATE TABLE IF NOT EXISTS asa_flota_chequeo_items (
   id            BIGSERIAL PRIMARY KEY,
-  chequeo_id    BIGINT NOT NULL REFERENCES asa_chequeos(id) ON DELETE CASCADE,
-  vehiculo_id   BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
+  chequeo_id    BIGINT NOT NULL REFERENCES asa_flota_chequeos(id) ON DELETE CASCADE,
+  vehiculo_id   BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
   fecha         DATE NOT NULL DEFAULT CURRENT_DATE,
   item_codigo   TEXT NOT NULL,
   item_etiqueta TEXT,
@@ -298,8 +344,8 @@ CREATE TABLE IF NOT EXISTS asa_chequeo_items (
   created_at    TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_chqit_chq  ON asa_chequeo_items(chequeo_id);
-CREATE INDEX IF NOT EXISTS idx_asa_chqit_item ON asa_chequeo_items(item_codigo, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_chqit_chq  ON asa_flota_chequeo_items(chequeo_id);
+CREATE INDEX IF NOT EXISTS idx_asaflota_chqit_item ON asa_flota_chequeo_items(item_codigo, fecha DESC);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -310,12 +356,12 @@ CREATE INDEX IF NOT EXISTS idx_asa_chqit_item ON asa_chequeo_items(item_codigo, 
 -- otra -- si no, el tablero se llena de duplicados de la misma goma baja.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_fallas_reportadas (
+CREATE TABLE IF NOT EXISTS asa_flota_fallas_reportadas (
   id               BIGSERIAL PRIMARY KEY,
-  vehiculo_id      BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
-  chequeo_id       BIGINT REFERENCES asa_chequeos(id) ON DELETE SET NULL,
-  empleado_id      BIGINT REFERENCES asa_empleados(id) ON DELETE SET NULL,
-  empleado_nombre  TEXT,
+  vehiculo_id      BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
+  chequeo_id       BIGINT REFERENCES asa_flota_chequeos(id) ON DELETE SET NULL,
+  conductor_id      BIGINT REFERENCES asa_flota_conductores(id) ON DELETE SET NULL,
+  conductor_nombre  TEXT,
   falla_codigo     TEXT NOT NULL,
   falla_etiqueta   TEXT,
   categoria        TEXT,
@@ -334,27 +380,27 @@ CREATE TABLE IF NOT EXISTS asa_fallas_reportadas (
   created_at       TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_falla_veh    ON asa_fallas_reportadas(vehiculo_id, estado);
-CREATE INDEX IF NOT EXISTS idx_asa_falla_estado ON asa_fallas_reportadas(estado);
+CREATE INDEX IF NOT EXISTS idx_asaflota_falla_veh    ON asa_flota_fallas_reportadas(vehiculo_id, estado);
+CREATE INDEX IF NOT EXISTS idx_asaflota_falla_estado ON asa_flota_fallas_reportadas(estado);
 -- Una sola falla abierta por vehiculo y codigo.
-CREATE UNIQUE INDEX IF NOT EXISTS idx_asa_falla_abierta_unica
-  ON asa_fallas_reportadas(vehiculo_id, falla_codigo)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asaflota_falla_abierta_unica
+  ON asa_flota_fallas_reportadas(vehiculo_id, falla_codigo)
   WHERE estado IN ('ABIERTA','EN_REVISION','EN_TALLER');
 
 
 -- ══════════════════════════════════════════════════════════════════════════
 -- 8. FOTOS
 --
--- Los archivos van a Supabase Storage (bucket `asa-fotos`); aqui solo la URL.
+-- Los archivos van a Supabase Storage (bucket `asa-flota-fotos`); aqui solo la URL.
 -- Guardar la imagen en la tabla como base64 -- que es lo que hace hoy la
 -- cafeteria -- multiplicaria por vehiculos x angulos x 365 dias.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_fotos (
+CREATE TABLE IF NOT EXISTS asa_flota_fotos (
   id          BIGSERIAL PRIMARY KEY,
-  vehiculo_id BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
-  chequeo_id  BIGINT REFERENCES asa_chequeos(id) ON DELETE CASCADE,
-  empleado_id BIGINT REFERENCES asa_empleados(id) ON DELETE SET NULL,
+  vehiculo_id BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
+  chequeo_id  BIGINT REFERENCES asa_flota_chequeos(id) ON DELETE CASCADE,
+  conductor_id BIGINT REFERENCES asa_flota_conductores(id) ON DELETE SET NULL,
   fecha       DATE NOT NULL DEFAULT CURRENT_DATE,
   angulo      TEXT NOT NULL DEFAULT 'OTRO'
                 CHECK (angulo IN ('FRONTAL','TRASERA','LATERAL_IZQ','LATERAL_DER','TABLERO','INTERIOR','DANO','RECIBO','OTRO')),
@@ -365,8 +411,8 @@ CREATE TABLE IF NOT EXISTS asa_fotos (
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_fotos_veh ON asa_fotos(vehiculo_id, fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_asa_fotos_chq ON asa_fotos(chequeo_id);
+CREATE INDEX IF NOT EXISTS idx_asaflota_flota_fotos_veh ON asa_flota_fotos(vehiculo_id, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_flota_fotos_chq ON asa_flota_fotos(chequeo_id);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -376,10 +422,10 @@ CREATE INDEX IF NOT EXISTS idx_asa_fotos_chq ON asa_fotos(chequeo_id);
 -- combustible, y son los que permiten calcular km/galon sin pedir otro dato.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_gastos (
+CREATE TABLE IF NOT EXISTS asa_flota_gastos (
   id             BIGSERIAL PRIMARY KEY,
-  vehiculo_id    BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
-  empleado_id    BIGINT REFERENCES asa_empleados(id) ON DELETE SET NULL,
+  vehiculo_id    BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
+  conductor_id    BIGINT REFERENCES asa_flota_conductores(id) ON DELETE SET NULL,
   fecha          DATE NOT NULL DEFAULT CURRENT_DATE,
   tipo           TEXT NOT NULL DEFAULT 'COMBUSTIBLE'
                    CHECK (tipo IN ('COMBUSTIBLE','MANTENIMIENTO','REPARACION','GOMAS','DOCUMENTOS','SEGURO','PEAJE','PARQUEO','MULTA','LAVADO','ACCESORIOS','OTRO')),
@@ -398,9 +444,9 @@ CREATE TABLE IF NOT EXISTS asa_gastos (
   created_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_gastos_veh   ON asa_gastos(vehiculo_id, fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_asa_gastos_tipo  ON asa_gastos(tipo, fecha DESC);
-CREATE INDEX IF NOT EXISTS idx_asa_gastos_fecha ON asa_gastos(fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_flota_gastos_veh   ON asa_flota_gastos(vehiculo_id, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_flota_gastos_tipo  ON asa_flota_gastos(tipo, fecha DESC);
+CREATE INDEX IF NOT EXISTS idx_asaflota_flota_gastos_fecha ON asa_flota_gastos(fecha DESC);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -411,9 +457,9 @@ CREATE INDEX IF NOT EXISTS idx_asa_gastos_fecha ON asa_gastos(fecha DESC);
 -- unidades nadie lo lleva de memoria.
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_documentos (
+CREATE TABLE IF NOT EXISTS asa_flota_documentos (
   id          BIGSERIAL PRIMARY KEY,
-  vehiculo_id BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
+  vehiculo_id BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
   tipo        TEXT NOT NULL DEFAULT 'MARBETE'
                 CHECK (tipo IN ('MARBETE','SEGURO','INSPECCION','PLACA','CONTRATO','GARANTIA','OTRO')),
   numero      TEXT,
@@ -429,8 +475,8 @@ CREATE TABLE IF NOT EXISTS asa_documentos (
   updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE INDEX IF NOT EXISTS idx_asa_doc_veh   ON asa_documentos(vehiculo_id);
-CREATE INDEX IF NOT EXISTS idx_asa_doc_vence ON asa_documentos(vence) WHERE activo;
+CREATE INDEX IF NOT EXISTS idx_asaflota_doc_veh   ON asa_flota_documentos(vehiculo_id);
+CREATE INDEX IF NOT EXISTS idx_asaflota_doc_vence ON asa_flota_documentos(vence) WHERE activo;
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -440,9 +486,9 @@ CREATE INDEX IF NOT EXISTS idx_asa_doc_vence ON asa_documentos(vence) WHERE acti
 -- el, el cambio de aceite se hace "cuando alguien se acuerda".
 -- ══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS asa_mantenimientos (
+CREATE TABLE IF NOT EXISTS asa_flota_mantenimientos (
   id             BIGSERIAL PRIMARY KEY,
-  vehiculo_id    BIGINT NOT NULL REFERENCES asa_vehiculos(id) ON DELETE CASCADE,
+  vehiculo_id    BIGINT NOT NULL REFERENCES asa_flota_vehiculos(id) ON DELETE CASCADE,
   tipo           TEXT NOT NULL,                        -- ACEITE, GOMAS, FRENOS, CORREA...
   etiqueta       TEXT NOT NULL,
   intervalo_km   NUMERIC(10,1),
@@ -457,8 +503,8 @@ CREATE TABLE IF NOT EXISTS asa_mantenimientos (
   updated_at     TIMESTAMPTZ DEFAULT NOW()
 );
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_asa_mant_unico ON asa_mantenimientos(vehiculo_id, tipo);
-CREATE INDEX IF NOT EXISTS idx_asa_mant_veh ON asa_mantenimientos(vehiculo_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_asaflota_mant_unico ON asa_flota_mantenimientos(vehiculo_id, tipo);
+CREATE INDEX IF NOT EXISTS idx_asaflota_mant_veh ON asa_flota_mantenimientos(vehiculo_id);
 
 
 -- ══════════════════════════════════════════════════════════════════════════
@@ -466,8 +512,8 @@ CREATE INDEX IF NOT EXISTS idx_asa_mant_veh ON asa_mantenimientos(vehiculo_id);
 -- ══════════════════════════════════════════════════════════════════════════
 
 -- Resumen por vehiculo: km recorridos, gasto acumulado y costo por km.
-DROP VIEW IF EXISTS asa_v_resumen_vehiculo;
-CREATE VIEW asa_v_resumen_vehiculo AS
+DROP VIEW IF EXISTS asa_flota_v_resumen_vehiculo;
+CREATE VIEW asa_flota_v_resumen_vehiculo AS
 SELECT
   v.id,
   v.codigo,
@@ -479,7 +525,7 @@ SELECT
   v.km_inicial,
   v.km_actual,
   GREATEST(v.km_actual - v.km_inicial, 0)                      AS km_recorridos,
-  e.nombre                                                     AS empleado,
+  e.nombre                                                     AS conductor,
   COALESCE(g.total_gastado, 0)                                 AS total_gastado,
   COALESCE(g.total_combustible, 0)                             AS total_combustible,
   COALESCE(g.total_mantenimiento, 0)                           AS total_mantenimiento,
@@ -497,8 +543,8 @@ SELECT
   c.ultimo_chequeo,
   c.chequeos_total,
   COALESCE(f.fallas_abiertas, 0)                               AS fallas_abiertas
-FROM asa_vehiculos v
-LEFT JOIN asa_empleados e ON e.id = v.empleado_id
+FROM asa_flota_vehiculos v
+LEFT JOIN asa_flota_conductores e ON e.id = v.conductor_id
 LEFT JOIN (
   SELECT vehiculo_id,
          SUM(monto)                                                    AS total_gastado,
@@ -508,15 +554,15 @@ LEFT JOIN (
          SUM(monto) FILTER (WHERE tipo IN ('DOCUMENTOS','SEGURO'))     AS total_documentos,
          SUM(monto) FILTER (WHERE tipo IN ('MULTA','PEAJE','PARQUEO')) AS total_multas,
          SUM(galones)                                                  AS galones
-  FROM asa_gastos GROUP BY vehiculo_id
+  FROM asa_flota_gastos GROUP BY vehiculo_id
 ) g ON g.vehiculo_id = v.id
 LEFT JOIN (
   SELECT vehiculo_id, MAX(fecha) AS ultimo_chequeo, COUNT(*) AS chequeos_total
-  FROM asa_chequeos GROUP BY vehiculo_id
+  FROM asa_flota_chequeos GROUP BY vehiculo_id
 ) c ON c.vehiculo_id = v.id
 LEFT JOIN (
   SELECT vehiculo_id, COUNT(*) AS fallas_abiertas
-  FROM asa_fallas_reportadas
+  FROM asa_flota_fallas_reportadas
   WHERE estado IN ('ABIERTA','EN_REVISION','EN_TALLER')
   GROUP BY vehiculo_id
 ) f ON f.vehiculo_id = v.id
@@ -524,8 +570,8 @@ WHERE v.activo;
 
 
 -- Documentos por vencer o vencidos.
-DROP VIEW IF EXISTS asa_v_documentos_alerta;
-CREATE VIEW asa_v_documentos_alerta AS
+DROP VIEW IF EXISTS asa_flota_v_documentos_alerta;
+CREATE VIEW asa_flota_v_documentos_alerta AS
 SELECT
   d.id, d.vehiculo_id, v.codigo, v.placa, d.tipo, d.numero, d.compania,
   d.vence, d.alerta_dias,
@@ -535,15 +581,15 @@ SELECT
     WHEN d.vence <= CURRENT_DATE + d.alerta_dias THEN 'POR_VENCER'
     ELSE 'VIGENTE'
   END AS situacion
-FROM asa_documentos d
-JOIN asa_vehiculos v ON v.id = d.vehiculo_id
+FROM asa_flota_documentos d
+JOIN asa_flota_vehiculos v ON v.id = d.vehiculo_id
 WHERE d.activo AND v.activo AND d.vence IS NOT NULL;
 
 
 -- Las fallas que mas se repiten. Un mismo codigo saliendo en tres unidades
 -- distintas no es mala suerte: es el suplidor o el tipo de ruta.
-DROP VIEW IF EXISTS asa_v_fallas_frecuentes;
-CREATE VIEW asa_v_fallas_frecuentes AS
+DROP VIEW IF EXISTS asa_flota_v_fallas_frecuentes;
+CREATE VIEW asa_flota_v_fallas_frecuentes AS
 SELECT
   falla_codigo, falla_etiqueta, categoria, severidad,
   COUNT(*)                                        AS reportes,
@@ -551,7 +597,7 @@ SELECT
   COUNT(DISTINCT vehiculo_id)                     AS vehiculos_afectados,
   COUNT(*) FILTER (WHERE estado IN ('ABIERTA','EN_REVISION','EN_TALLER')) AS abiertas,
   SUM(COALESCE(costo_reparacion,0))               AS costo_acumulado
-FROM asa_fallas_reportadas
+FROM asa_flota_fallas_reportadas
 GROUP BY falla_codigo, falla_etiqueta, categoria, severidad;
 
 
@@ -560,7 +606,7 @@ GROUP BY falla_codigo, falla_etiqueta, categoria, severidad;
 -- ══════════════════════════════════════════════════════════════════════════
 
 INSERT INTO config_sistema (clave, valor)
-VALUES ('asa_config', '{
+VALUES ('asa_flota_config', '{
   "nombre_modulo": "ASA",
   "exigir_fotos": true,
   "frecuencia_fotos": "DIARIA",
@@ -582,7 +628,7 @@ ON CONFLICT (clave) DO NOTHING;
 -- ══════════════════════════════════════════════════════════════════════════
 
 INSERT INTO storage.buckets (id, name, public)
-VALUES ('asa-fotos', 'asa-fotos', TRUE)
+VALUES ('asa-flota-fotos', 'asa-flota-fotos', TRUE)
 ON CONFLICT (id) DO UPDATE SET public = TRUE;
 
 -- La escritura la hace el backend con la service key, que salta RLS.
@@ -591,10 +637,10 @@ BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname = 'storage' AND tablename = 'objects'
-      AND policyname = 'asa_fotos_lectura_publica'
+      AND policyname = 'asa_flota_fotos_lectura_publica'
   ) THEN
-    CREATE POLICY asa_fotos_lectura_publica ON storage.objects
-      FOR SELECT USING (bucket_id = 'asa-fotos');
+    CREATE POLICY asa_flota_fotos_lectura_publica ON storage.objects
+      FOR SELECT USING (bucket_id = 'asa-flota-fotos');
   END IF;
 END $$;
 
@@ -602,13 +648,13 @@ END $$;
 -- ══════════════════════════════════════════════════════════════════════════
 -- VERIFICACION
 -- ══════════════════════════════════════════════════════════════════════════
--- SELECT COUNT(*) FROM asa_checklist_items;    -- 25
--- SELECT COUNT(*) FROM asa_fallas_catalogo;    -- 43
--- SELECT * FROM asa_v_resumen_vehiculo;
--- SELECT * FROM asa_v_documentos_alerta WHERE situacion <> 'VIGENTE';
+-- SELECT COUNT(*) FROM asa_flota_checklist_items;    -- 25
+-- SELECT COUNT(*) FROM asa_flota_fallas_catalogo;    -- 43
+-- SELECT * FROM asa_flota_v_resumen_vehiculo;
+-- SELECT * FROM asa_flota_v_documentos_alerta WHERE situacion <> 'VIGENTE';
 --
 -- Vehiculos que no reportaron hoy:
--- SELECT v.codigo, v.placa FROM asa_vehiculos v
+-- SELECT v.codigo, v.placa FROM asa_flota_vehiculos v
 --  WHERE v.activo AND v.requiere_chequeo
---    AND NOT EXISTS (SELECT 1 FROM asa_chequeos c
+--    AND NOT EXISTS (SELECT 1 FROM asa_flota_chequeos c
 --                     WHERE c.vehiculo_id = v.id AND c.fecha = CURRENT_DATE);

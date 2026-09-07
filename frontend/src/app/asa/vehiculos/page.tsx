@@ -27,7 +27,7 @@ const ESTADOS = ["ACTIVO", "EN_TALLER", "FUERA_SERVICIO", "VENDIDO"];
 const vacio = {
   codigo: "", placa: "", marca: "", modelo: "", anio: "", color: "", chasis: "",
   tipo: "CAMIONETA", combustible: "GASOLINA", capacidad_tanque: "",
-  km_inicial: "", km_actual: "", empleado_id: "", departamento: "",
+  km_inicial: "", km_actual: "", conductor_id: "", departamento: "",
   estado: "ACTIVO", requiere_chequeo: true, requiere_fotos: true,
   fecha_adquisicion: "", costo_adquisicion: "", notas: "",
 };
@@ -36,7 +36,7 @@ export default function VehiculosASAPage() {
   const { puedeVer, puedeCrear, puedeEditar, puedeEliminar } = usePermisos("asa");
 
   const [vehiculos, setVehiculos] = useState<any[]>([]);
-  const [empleados, setEmpleados] = useState<any[]>([]);
+  const [conductores, setConductores] = useState<any[]>([]);
   const [cargando, setCargando]   = useState(true);
   const [busqueda, setBusqueda]   = useState("");
   const [form, setForm]           = useState<any>(vacio);
@@ -50,10 +50,10 @@ export default function VehiculosASAPage() {
     try {
       const [v, e] = await Promise.all([
         asaGet<any>("/vehiculos"),
-        asaGet<any>("/empleados"),
+        asaGet<any>("/conductores"),
       ]);
       setVehiculos(v.vehiculos || []);
-      setEmpleados(e.empleados || []);
+      setConductores(e.conductores || []);
     } catch { /* la tabla queda vacía y el aviso lo da el dashboard */ }
     finally { setCargando(false); }
   };
@@ -63,7 +63,7 @@ export default function VehiculosASAPage() {
     const q = busqueda.trim().toLowerCase();
     if (!q) return vehiculos;
     return vehiculos.filter(v =>
-      `${v.codigo} ${v.placa} ${v.marca} ${v.modelo} ${v.asa_empleados?.nombre || ""}`.toLowerCase().includes(q));
+      `${v.codigo} ${v.placa} ${v.marca} ${v.modelo} ${v.asa_flota_conductores?.nombre || ""}`.toLowerCase().includes(q));
   }, [vehiculos, busqueda]);
 
   const abrirNuevo = () => { setForm(vacio); setEditId(null); setAbierto(true); };
@@ -73,7 +73,7 @@ export default function VehiculosASAPage() {
       ...vacio, ...v,
       anio: v.anio ?? "", capacidad_tanque: v.capacidad_tanque ?? "",
       km_inicial: v.km_inicial ?? "", km_actual: v.km_actual ?? "",
-      empleado_id: v.empleado_id ?? "", costo_adquisicion: v.costo_adquisicion ?? "",
+      conductor_id: v.conductor_id ?? "", costo_adquisicion: v.costo_adquisicion ?? "",
       fecha_adquisicion: v.fecha_adquisicion ?? "",
     });
     setEditId(v.id);
@@ -91,11 +91,11 @@ export default function VehiculosASAPage() {
         capacidad_tanque: form.capacidad_tanque === "" ? null : Number(form.capacidad_tanque),
         km_inicial: form.km_inicial === "" ? null : Number(form.km_inicial),
         km_actual: form.km_actual === "" ? 0 : Number(form.km_actual),
-        empleado_id: form.empleado_id === "" ? null : Number(form.empleado_id),
+        conductor_id: form.conductor_id === "" ? null : Number(form.conductor_id),
         costo_adquisicion: form.costo_adquisicion === "" ? null : Number(form.costo_adquisicion),
         fecha_adquisicion: form.fecha_adquisicion || null,
       };
-      delete cuerpo.asa_empleados; delete cuerpo.resumen;
+      delete cuerpo.asa_flota_conductores; delete cuerpo.resumen;
       if (editId) await asaEnviar(`/vehiculos/${editId}`, "PATCH", cuerpo, auditHeaders());
       else await asaEnviar("/vehiculos", "POST", cuerpo, auditHeaders());
       setAbierto(false);
@@ -110,10 +110,10 @@ export default function VehiculosASAPage() {
     catch (e: any) { alert(e.message); }
   };
 
-  const asignar = async (empleado_id: number, km_entrega: string) => {
+  const asignar = async (conductor_id: number, km_entrega: string) => {
     try {
       await asaEnviar("/asignaciones", "POST", {
-        vehiculo_id: asignando.id, empleado_id,
+        vehiculo_id: asignando.id, conductor_id,
         km_entrega: km_entrega === "" ? null : Number(km_entrega),
       }, auditHeaders());
       setAsignando(null);
@@ -177,7 +177,7 @@ export default function VehiculosASAPage() {
                 <div style={{ padding: "12px 16px", display: "grid", gap: 8 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                     <span style={{ color: "#64748b" }}>Conductor</span>
-                    <b>{v.asa_empleados?.nombre || <span style={{ color: "#cbd5e1" }}>sin asignar</span>}</b>
+                    <b>{v.asa_flota_conductores?.nombre || <span style={{ color: "#cbd5e1" }}>sin asignar</span>}</b>
                   </div>
                   <div style={{ display: "flex", justifyContent: "space-between", fontSize: 13 }}>
                     <span style={{ color: "#64748b" }}>Kilometraje</span>
@@ -246,9 +246,9 @@ export default function VehiculosASAPage() {
               {campo("Departamento", "departamento")}
               <div>
                 <label style={S.label}>Conductor asignado</label>
-                <select value={form.empleado_id ?? ""} onChange={e => setForm({ ...form, empleado_id: e.target.value })} style={S.input}>
+                <select value={form.conductor_id ?? ""} onChange={e => setForm({ ...form, conductor_id: e.target.value })} style={S.input}>
                   <option value="">— sin asignar —</option>
-                  {empleados.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                  {conductores.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
                 </select>
               </div>
               {campo("Km al entrar a la flota", "km_inicial", "number")}
@@ -296,15 +296,15 @@ export default function VehiculosASAPage() {
 
       {/* Asignación */}
       {asignando && (
-        <ModalAsignar vehiculo={asignando} empleados={empleados}
+        <ModalAsignar vehiculo={asignando} conductores={conductores}
                       onCerrar={() => setAsignando(null)} onAsignar={asignar} />
       )}
     </div>
   );
 }
 
-function ModalAsignar({ vehiculo, empleados, onCerrar, onAsignar }: any) {
-  const [empleadoId, setEmpleadoId] = useState<string>("");
+function ModalAsignar({ vehiculo, conductores, onCerrar, onAsignar }: any) {
+  const [conductorId, setConductorId] = useState<string>("");
   const [kmEntrega, setKmEntrega]   = useState<string>(String(Math.round(Number(vehiculo.km_actual || 0))));
 
   return (
@@ -320,9 +320,9 @@ function ModalAsignar({ vehiculo, empleados, onCerrar, onAsignar }: any) {
         </p>
 
         <label style={S.label}>Conductor</label>
-        <select value={empleadoId} onChange={e => setEmpleadoId(e.target.value)} style={S.input}>
+        <select value={conductorId} onChange={e => setConductorId(e.target.value)} style={S.input}>
           <option value="">— escoger —</option>
-          {empleados.map((e: any) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+          {conductores.map((e: any) => <option key={e.id} value={e.id}>{e.nombre}</option>)}
         </select>
 
         <div style={{ marginTop: 12 }}>
@@ -332,7 +332,7 @@ function ModalAsignar({ vehiculo, empleados, onCerrar, onAsignar }: any) {
 
         <div style={{ display: "flex", gap: 10, marginTop: 20, justifyContent: "flex-end" }}>
           <button onClick={onCerrar} style={S.btnGhost}>Cancelar</button>
-          <button onClick={() => empleadoId ? onAsignar(Number(empleadoId), kmEntrega) : alert("Escoge un conductor.")}
+          <button onClick={() => conductorId ? onAsignar(Number(conductorId), kmEntrega) : alert("Escoge un conductor.")}
                   style={S.btn}>Asignar</button>
         </div>
       </div>

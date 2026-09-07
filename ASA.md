@@ -14,8 +14,11 @@ enlace. No toca la tabla `vehiculos`, que son los de los clientes del taller.
 
 1. **Base de datos** — correr `crm-backend/sql/migracion_v32_asa_flota.sql` en el
    SQL editor de Supabase. Es idempotente: se puede correr varias veces. Crea las
-   12 tablas, las 3 vistas, el bucket de fotos `asa-fotos` y siembra el checklist
+   12 tablas, las 3 vistas, el bucket de fotos `asa-flota-fotos` y siembra el checklist
    (25 puntos) y el catálogo de fallas (43).
+   > El prefijo es `asa_flota_` y no `asa_`: ese ya lo ocupa el ERP de ASA
+   > (plagas/IPM, fichas clinicas, POS, nomina). Este modulo no toca ninguna
+   > de esas tablas.
 2. **Backend** — ya está montado en `server.mjs` (`app.use("/asa", asa)`).
    Desplegar Railway. Verificar con `GET /asa/salud`: devuelve el conteo de cada
    tabla y avisa si falta el bucket.
@@ -146,7 +149,7 @@ señala como siguiente paso, ordenado por lo que rinde más con lo que ya tienes
   conductor guarda un parte con algo crítico. Es la diferencia entre enterarte a
   las 7:05 y a las 11.
 - **Vencimiento de licencia del conductor.** El campo ya existe en
-  `asa_empleados`; falta que entre a la vista de alertas junto con los documentos
+  `asa_flota_conductores`; falta que entre a la vista de alertas junto con los documentos
   del vehículo.
 - **Enlazar una falla con una orden del taller.** Sólido es el taller: cuando una
   falla pasa a `EN_TALLER` debería poder crear la orden de trabajo y traer de
@@ -195,7 +198,7 @@ GET    /asa/fallas               PATCH /asa/fallas/:id
 GET    /asa/gastos               POST|PATCH|DELETE
 GET    /asa/documentos           POST|PATCH|DELETE
 GET    /asa/mantenimientos       POST|PATCH|DELETE
-GET    /asa/empleados            POST|PATCH|DELETE
+GET    /asa/conductores            POST|PATCH|DELETE
 GET    /asa/checklist            POST|PATCH|DELETE
 GET    /asa/catalogo-fallas      POST|PATCH|DELETE
 GET    /asa/fotos                DELETE /asa/fotos/:id
@@ -207,13 +210,13 @@ GET    /asa/salud
 
 ## Tablas
 
-`asa_empleados` · `asa_vehiculos` · `asa_asignaciones` · `asa_checklist_items` ·
-`asa_fallas_catalogo` · `asa_chequeos` · `asa_chequeo_items` ·
-`asa_fallas_reportadas` · `asa_fotos` · `asa_gastos` · `asa_documentos` ·
-`asa_mantenimientos`
+`asa_flota_conductores` · `asa_flota_vehiculos` · `asa_flota_asignaciones` · `asa_flota_checklist_items` ·
+`asa_flota_fallas_catalogo` · `asa_flota_chequeos` · `asa_flota_chequeo_items` ·
+`asa_flota_fallas_reportadas` · `asa_flota_fotos` · `asa_flota_gastos` · `asa_flota_documentos` ·
+`asa_flota_mantenimientos`
 
-Vistas: `asa_v_resumen_vehiculo` · `asa_v_documentos_alerta` ·
-`asa_v_fallas_frecuentes`
+Vistas: `asa_flota_v_resumen_vehiculo` · `asa_flota_v_documentos_alerta` ·
+`asa_flota_v_fallas_frecuentes`
 
 Configuración: `config_sistema` clave `asa_config`.
-Storage: bucket `asa-fotos` (lectura pública, escritura solo desde el backend).
+Storage: bucket `asa-flota-fotos` (lectura pública, escritura solo desde el backend).

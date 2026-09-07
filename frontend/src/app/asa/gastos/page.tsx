@@ -21,7 +21,7 @@ import {
 const vacio = {
   vehiculo_id: "", tipo: "COMBUSTIBLE", fecha: hoyRD(), descripcion: "",
   monto: "", galones: "", km: "", tanque_lleno: true,
-  suplidor: "", ncf: "", metodo_pago: "EFECTIVO", empleado_id: "", notas: "",
+  suplidor: "", ncf: "", metodo_pago: "EFECTIVO", conductor_id: "", notas: "",
 };
 
 // `useSearchParams` obliga a un límite de Suspense o `next build` falla al
@@ -41,7 +41,7 @@ function GastosASA() {
 
   const [gastos, setGastos]       = useState<any[]>([]);
   const [vehiculos, setVehiculos] = useState<any[]>([]);
-  const [empleados, setEmpleados] = useState<any[]>([]);
+  const [conductores, setConductores] = useState<any[]>([]);
   const [form, setForm]           = useState<any>(vacio);
   const [guardando, setGuardando] = useState(false);
   const [cargando, setCargando]   = useState(true);
@@ -61,11 +61,11 @@ function GastosASA() {
       const [g, v, e] = await Promise.all([
         asaGet<any>(`/gastos?${p.toString()}`),
         asaGet<any>("/vehiculos"),
-        asaGet<any>("/empleados"),
+        asaGet<any>("/conductores"),
       ]);
       setGastos(g.gastos || []);
       setVehiculos(v.vehiculos || []);
-      setEmpleados(e.empleados || []);
+      setConductores(e.conductores || []);
     } catch { /* silencio: la pantalla muestra la lista vacía */ }
     finally { setCargando(false); }
   };
@@ -92,7 +92,7 @@ function GastosASA() {
     try {
       await asaEnviar("/gastos", "POST", {
         vehiculo_id: Number(form.vehiculo_id),
-        empleado_id: form.empleado_id === "" ? null : Number(form.empleado_id),
+        conductor_id: form.conductor_id === "" ? null : Number(form.conductor_id),
         tipo: form.tipo, fecha: form.fecha,
         descripcion: form.descripcion || null,
         monto: Number(form.monto),
@@ -185,9 +185,9 @@ function GastosASA() {
 
             <div>
               <label style={S.label}>Conductor</label>
-              <select value={form.empleado_id} onChange={e => setForm({ ...form, empleado_id: e.target.value })} style={S.input}>
+              <select value={form.conductor_id} onChange={e => setForm({ ...form, conductor_id: e.target.value })} style={S.input}>
                 <option value="">— ninguno —</option>
-                {empleados.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+                {conductores.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
             </div>
             <div><label style={S.label}>Suplidor</label>

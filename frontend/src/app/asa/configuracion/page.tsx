@@ -18,7 +18,7 @@ import { S, ANGULOS, asaGet, asaEnviar } from "@/lib/asa";
 // ─────────────────────────────────────────────────────────────────────────────
 
 const PESTANAS = [
-  { id: "empleados",  label: "Conductores",  icono: "👥" },
+  { id: "conductores",  label: "Conductores",  icono: "👥" },
   { id: "checklist",  label: "Checklist",    icono: "✅" },
   { id: "fallas",     label: "Fallas",       icono: "🔧" },
   { id: "ajustes",    label: "Ajustes",      icono: "⚙️" },
@@ -26,7 +26,7 @@ const PESTANAS = [
 
 export default function ConfigASAPage() {
   const { puedeVer, puedeEditar } = usePermisos("asa");
-  const [tab, setTab] = useState("empleados");
+  const [tab, setTab] = useState("conductores");
 
   if (!puedeVer) return <div style={{ padding: 40 }}>No tienes acceso al módulo ASA.</div>;
 
@@ -52,7 +52,7 @@ export default function ConfigASAPage() {
         ))}
       </div>
 
-      {tab === "empleados" && <Empleados puedeEditar={puedeEditar} />}
+      {tab === "conductores" && <Conductores puedeEditar={puedeEditar} />}
       {tab === "checklist" && <Catalogo recurso="checklist" titulo="Puntos del checklist" puedeEditar={puedeEditar} />}
       {tab === "fallas"    && <Catalogo recurso="catalogo-fallas" titulo="Catálogo de fallas" puedeEditar={puedeEditar} conSeveridad />}
       {tab === "ajustes"   && <Ajustes puedeEditar={puedeEditar} />}
@@ -62,14 +62,14 @@ export default function ConfigASAPage() {
 
 
 // ── Conductores ──────────────────────────────────────────────────────────────
-function Empleados({ puedeEditar }: any) {
+function Conductores({ puedeEditar }: any) {
   const vacio = { nombre: "", cedula: "", telefono: "", cargo: "Conductor", licencia_numero: "", licencia_categoria: "", licencia_vence: "", color: "#3b82f6", orden: 0 };
   const [lista, setLista] = useState<any[]>([]);
   const [form, setForm]   = useState<any>(vacio);
   const [editId, setEdit] = useState<number | null>(null);
 
   const cargar = async () => {
-    try { setLista((await asaGet<any>("/empleados")).empleados || []); } catch {}
+    try { setLista((await asaGet<any>("/conductores")).conductores || []); } catch {}
   };
   useEffect(() => { cargar(); }, []);
 
@@ -77,15 +77,15 @@ function Empleados({ puedeEditar }: any) {
     if (!form.nombre.trim()) return alert("El nombre es obligatorio.");
     try {
       const cuerpo = { ...form, orden: Number(form.orden || 0), licencia_vence: form.licencia_vence || null };
-      if (editId) await asaEnviar(`/empleados/${editId}`, "PATCH", cuerpo, auditHeaders());
-      else await asaEnviar("/empleados", "POST", cuerpo, auditHeaders());
+      if (editId) await asaEnviar(`/conductores/${editId}`, "PATCH", cuerpo, auditHeaders());
+      else await asaEnviar("/conductores", "POST", cuerpo, auditHeaders());
       setForm(vacio); setEdit(null); cargar();
     } catch (e: any) { alert(e.message); }
   };
 
   const quitar = async (id: number) => {
     if (!confirm("¿Dar de baja a este conductor? Sus partes anteriores quedan guardados.")) return;
-    try { await asaEnviar(`/empleados/${id}`, "DELETE", undefined, auditHeaders()); cargar(); }
+    try { await asaEnviar(`/conductores/${id}`, "DELETE", undefined, auditHeaders()); cargar(); }
     catch (e: any) { alert(e.message); }
   };
 

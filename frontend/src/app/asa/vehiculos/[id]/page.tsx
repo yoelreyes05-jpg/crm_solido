@@ -90,7 +90,7 @@ export default function FichaVehiculoASAPage() {
           </div>
         </div>
         <span style={S.chip(COLOR_ESTADO_VEH[v.estado] || "#64748b")}>{v.estado.replace("_", " ")}</span>
-        {r.empleado && <span style={S.chip("#1d4ed8")}>👤 {r.empleado}</span>}
+        {r.conductor && <span style={S.chip("#1d4ed8")}>👤 {r.conductor}</span>}
       </div>
 
       {/* Cifras clave */}
@@ -191,7 +191,7 @@ export default function FichaVehiculoASAPage() {
                 <tbody>
                   {d.asignaciones.map((a: any) => (
                     <tr key={a.id}>
-                      <td style={S.td}><b>{a.asa_empleados?.nombre || "—"}</b></td>
+                      <td style={S.td}><b>{a.asa_flota_conductores?.nombre || "—"}</b></td>
                       <td style={S.td}>{fechaCorta(a.desde)}</td>
                       <td style={S.td}>{a.hasta ? fechaCorta(a.hasta) : <span style={S.chip("#16a34a")}>Actual</span>}</td>
                       <td style={S.td}>{a.km_entrega != null ? fmtKm(a.km_entrega) : "—"}</td>
@@ -225,7 +225,7 @@ export default function FichaVehiculoASAPage() {
                     <tr key={c.id}>
                       <td style={S.td}>{fechaCorta(c.fecha)}</td>
                       <td style={S.td}>{c.turno === "SALIDA" ? "🌅" : "🌙"}</td>
-                      <td style={S.td}>{c.empleado_nombre}</td>
+                      <td style={S.td}>{c.conductor_nombre}</td>
                       <td style={S.td}>{fmtKm(c.km)}</td>
                       <td style={S.td}>{c.km_recorrido != null ? fmtKm(c.km_recorrido) : "—"}</td>
                       <td style={S.td}><span style={S.chip(n.color)}>{n.label}</span></td>

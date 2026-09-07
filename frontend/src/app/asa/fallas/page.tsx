@@ -104,9 +104,9 @@ export default function FallasASAPage() {
                     <tr key={f.id} style={f.detiene_vehiculo && f.estado === "ABIERTA" ? { background: "#fef2f2" } : undefined}>
                       <td style={S.td}>
                         <Link href={`/asa/vehiculos/${f.vehiculo_id}`} style={{ fontWeight: 800, color: "#1d4ed8", textDecoration: "none" }}>
-                          {f.asa_vehiculos?.codigo}
+                          {f.asa_flota_vehiculos?.codigo}
                         </Link>
-                        <div style={{ fontSize: 11, color: "#94a3b8" }}>{f.asa_vehiculos?.placa}</div>
+                        <div style={{ fontSize: 11, color: "#94a3b8" }}>{f.asa_flota_vehiculos?.placa}</div>
                       </td>
                       <td style={S.td}>{f.falla_etiqueta} {f.detiene_vehiculo && <span title="No debe salir">⛔</span>}</td>
                       <td style={S.td}>{f.categoria}</td>
@@ -114,7 +114,7 @@ export default function FallasASAPage() {
                       <td style={S.td}>
                         <span style={S.chip(f.veces_reportada >= 3 ? "#dc2626" : "#64748b")}>{f.veces_reportada}</span>
                       </td>
-                      <td style={S.td}>{f.empleado_nombre || "—"}</td>
+                      <td style={S.td}>{f.conductor_nombre || "—"}</td>
                       <td style={S.td}>
                         {fechaCorta(String(f.primera_vez).slice(0, 10))}
                         <div style={{ fontSize: 11, color: dias > 7 ? "#dc2626" : "#94a3b8" }}>hace {dias} d</div>
@@ -202,7 +202,7 @@ function ModalCerrar({ falla, onCerrar, onGuardar }: any) {
       <div onClick={e => e.stopPropagation()} style={{ background: "#fff", borderRadius: 16, padding: 24, width: "100%", maxWidth: 440 }}>
         <h2 style={{ marginTop: 0, fontSize: 18 }}>Cerrar falla</h2>
         <p style={{ fontSize: 13, color: "#64748b", marginTop: 0 }}>
-          <b>{falla.falla_etiqueta}</b> en {falla.asa_vehiculos?.codigo}.
+          <b>{falla.falla_etiqueta}</b> en {falla.asa_flota_vehiculos?.codigo}.
           El costo que anotes aquí alimenta el costo por kilómetro de la unidad.
         </p>
         <label style={S.label}>Costo de la reparación</label>

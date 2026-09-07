@@ -155,7 +155,7 @@ export default function ASADashboardPage() {
               }}>
                 <b>{v.codigo}</b> · {v.placa}
                 <span style={{ color: "#b91c1c", fontSize: 11 }}>
-                  {v.empleado ? `(${v.empleado})` : "(sin conductor asignado)"}
+                  {v.conductor ? `(${v.conductor})` : "(sin conductor asignado)"}
                 </span>
               </Link>
             ))}
@@ -218,8 +218,8 @@ export default function ASADashboardPage() {
                 {d.fallas_abiertas.slice(0, 12).map((f: any) => (
                   <tr key={f.id}>
                     <td style={S.td}>
-                      <b>{f.asa_vehiculos?.codigo}</b>
-                      <div style={{ fontSize: 11, color: "#94a3b8" }}>{f.asa_vehiculos?.placa}</div>
+                      <b>{f.asa_flota_vehiculos?.codigo}</b>
+                      <div style={{ fontSize: 11, color: "#94a3b8" }}>{f.asa_flota_vehiculos?.placa}</div>
                     </td>
                     <td style={S.td}>
                       {f.falla_etiqueta}
@@ -229,7 +229,7 @@ export default function ASADashboardPage() {
                       <span style={S.chip(COLOR_SEVERIDAD[f.severidad] || "#64748b")}>{f.severidad}</span>
                     </td>
                     <td style={S.td}>{f.veces_reportada}</td>
-                    <td style={S.td}>{f.empleado_nombre || "—"}</td>
+                    <td style={S.td}>{f.conductor_nombre || "—"}</td>
                     <td style={S.td}>{fechaCorta(String(f.ultima_vez).slice(0, 10))}</td>
                     <td style={S.td}>
                       {puedeEditar ? (
@@ -279,7 +279,7 @@ export default function ASADashboardPage() {
                       {c.turno === "SALIDA" ? "🌅" : "🌙"} {c.turno}
                     </span>
                   </div>
-                  <div style={{ fontSize: 13, color: "#475569", marginBottom: 8 }}>👤 {c.empleado_nombre}</div>
+                  <div style={{ fontSize: 13, color: "#475569", marginBottom: 8 }}>👤 {c.conductor_nombre}</div>
                   <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                     <span style={S.chip("#0f172a")}>{fmtKm(c.km)}</span>
                     <span style={S.chip(n.color)}>⛽ {n.label}</span>
@@ -354,7 +354,7 @@ export default function ASADashboardPage() {
                     {v.placa}
                     <div style={{ fontSize: 11, color: "#94a3b8" }}>{[v.marca, v.modelo, v.anio].filter(Boolean).join(" ")}</div>
                   </td>
-                  <td style={S.td}>{v.empleado || <span style={{ color: "#cbd5e1" }}>sin asignar</span>}</td>
+                  <td style={S.td}>{v.conductor || <span style={{ color: "#cbd5e1" }}>sin asignar</span>}</td>
                   <td style={S.td}><span style={S.chip(COLOR_ESTADO_VEH[v.estado] || "#64748b")}>{v.estado}</span></td>
                   <td style={S.td}>{fmtKm(v.km_actual)}</td>
                   <td style={S.td}>{fmtKm(v.km_recorridos)}</td>

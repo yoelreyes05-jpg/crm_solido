@@ -31,7 +31,7 @@ const router = express.Router();
 
 const supabase = createClient(process.env.SUPABASE_URL, process.env.SUPABASE_KEY);
 
-const BUCKET = "asa-fotos";
+const BUCKET = "asa-flota-fotos";
 
 /** Express 4 no captura rechazos de async: sin esto la petición queda colgada. */
 const ruta = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -70,7 +70,7 @@ function hoyRD() {
 
 async function leerConfig() {
   const { data } = await supabase
-    .from("config_sistema").select("valor").eq("clave", "asa_config").maybeSingle();
+    .from("config_sistema").select("valor").eq("clave", "asa_flota_config").maybeSingle();
   return data?.valor ?? {
     exigir_fotos: true,
     frecuencia_fotos: "DIARIA",
@@ -131,20 +131,20 @@ router.get("/publico/arranque", ruta(async (req, res) => {
   const fecha = req.query.fecha || hoyRD();
 
   const [emp, veh, items, fallas, chequeosHoy, config] = await Promise.all([
-    supabase.from("asa_empleados")
+    supabase.from("asa_flota_conductores")
       .select("id,nombre,cargo,color,foto_url")
       .eq("activo", true).order("orden").order("nombre"),
-    supabase.from("asa_vehiculos")
-      .select("id,codigo,placa,marca,modelo,anio,color,tipo,combustible,km_actual,empleado_id,estado,requiere_fotos,foto_url")
+    supabase.from("asa_flota_vehiculos")
+      .select("id,codigo,placa,marca,modelo,anio,color,tipo,combustible,km_actual,conductor_id,estado,requiere_fotos,foto_url")
       .eq("activo", true).in("estado", ["ACTIVO", "EN_TALLER"]).order("codigo"),
-    supabase.from("asa_checklist_items")
+    supabase.from("asa_flota_checklist_items")
       .select("codigo,categoria,etiqueta,icono,critico,orden")
       .eq("activo", true).order("orden"),
-    supabase.from("asa_fallas_catalogo")
+    supabase.from("asa_flota_fallas_catalogo")
       .select("codigo,categoria,etiqueta,icono,severidad,detiene_vehiculo,orden")
       .eq("activo", true).order("orden"),
-    supabase.from("asa_chequeos")
-      .select("id,vehiculo_id,turno,empleado_nombre,km,combustible_octavos,fotos_subidas")
+    supabase.from("asa_flota_chequeos")
+      .select("id,vehiculo_id,turno,conductor_nombre,km,combustible_octavos,fotos_subidas")
       .eq("fecha", fecha),
     leerConfig(),
   ]);
@@ -155,7 +155,7 @@ router.get("/publico/arranque", ruta(async (req, res) => {
   res.json({
     error: false,
     fecha,
-    empleados: emp.data || [],
+    conductores: emp.data || [],
     vehiculos: veh.data || [],
     checklist: items.data || [],
     fallas: fallas.data || [],
@@ -176,14 +176,14 @@ router.get("/publico/vehiculo/:id/estado", ruta(async (req, res) => {
   const id = Number(req.params.id);
 
   const [veh, ultimo, abiertas] = await Promise.all([
-    supabase.from("asa_vehiculos")
-      .select("id,codigo,placa,marca,modelo,km_actual,requiere_fotos,empleado_id")
+    supabase.from("asa_flota_vehiculos")
+      .select("id,codigo,placa,marca,modelo,km_actual,requiere_fotos,conductor_id")
       .eq("id", id).maybeSingle(),
-    supabase.from("asa_chequeos")
-      .select("id,fecha,turno,km,combustible_octavos,empleado_nombre")
+    supabase.from("asa_flota_chequeos")
+      .select("id,fecha,turno,km,combustible_octavos,conductor_nombre")
       .eq("vehiculo_id", id).order("fecha", { ascending: false })
       .order("id", { ascending: false }).limit(1).maybeSingle(),
-    supabase.from("asa_fallas_reportadas")
+    supabase.from("asa_flota_fallas_reportadas")
       .select("falla_codigo,falla_etiqueta,severidad,ultima_vez")
       .eq("vehiculo_id", id).in("estado", ["ABIERTA", "EN_REVISION", "EN_TALLER"]),
   ]);
@@ -207,7 +207,7 @@ router.get("/publico/vehiculo/:id/estado", ruta(async (req, res) => {
  *
  * El parte del día. Cuerpo esperado:
  *   {
- *     vehiculo_id, empleado_id, turno: "SALIDA"|"ENTRADA",
+ *     vehiculo_id, conductor_id, turno: "SALIDA"|"ENTRADA",
  *     km, combustible_octavos,
  *     items_mal:  [{ codigo, valor }]      // solo lo que NO está bien
  *     fallas:     ["goma_baja", ...]       // códigos del catálogo
@@ -222,21 +222,21 @@ router.get("/publico/vehiculo/:id/estado", ruta(async (req, res) => {
 router.post("/publico/chequeo", ruta(async (req, res) => {
   const b = req.body || {};
   const vehiculo_id = Number(b.vehiculo_id);
-  const empleado_id = b.empleado_id ? Number(b.empleado_id) : null;
+  const conductor_id = b.conductor_id ? Number(b.conductor_id) : null;
   const turno = (b.turno || "SALIDA").toUpperCase();
   const fecha = b.fecha || hoyRD();
 
   if (!vehiculo_id) return fallo(res, 400, "Falta el vehículo.");
-  if (!empleado_id) return fallo(res, 400, "Falta escoger quién hace el chequeo.");
+  if (!conductor_id) return fallo(res, 400, "Falta escoger quién hace el chequeo.");
   if (!["SALIDA", "ENTRADA"].includes(turno)) return fallo(res, 400, "Turno inválido.");
 
-  const [{ data: vehiculo }, { data: empleado }, config] = await Promise.all([
-    supabase.from("asa_vehiculos").select("*").eq("id", vehiculo_id).maybeSingle(),
-    supabase.from("asa_empleados").select("id,nombre").eq("id", empleado_id).maybeSingle(),
+  const [{ data: vehiculo }, { data: conductor }, config] = await Promise.all([
+    supabase.from("asa_flota_vehiculos").select("*").eq("id", vehiculo_id).maybeSingle(),
+    supabase.from("asa_flota_conductores").select("id,nombre").eq("id", conductor_id).maybeSingle(),
     leerConfig(),
   ]);
   if (!vehiculo) return fallo(res, 404, "Ese vehículo no existe.");
-  if (!empleado) return fallo(res, 404, "Ese empleado no existe.");
+  if (!conductor) return fallo(res, 404, "Ese conductor no existe.");
 
   // ── Kilometraje ───────────────────────────────────────────────────────────
   // El odómetro no retrocede. Si el número llega menor que el último, casi
@@ -256,7 +256,7 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
 
   let catalogoItems = [];
   if (codigosMal.length) {
-    const { data } = await supabase.from("asa_checklist_items")
+    const { data } = await supabase.from("asa_flota_checklist_items")
       .select("codigo,etiqueta,critico").in("codigo", codigosMal);
     catalogoItems = data || [];
   }
@@ -266,7 +266,7 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
   const codigosFalla = (Array.isArray(b.fallas) ? b.fallas : []).filter(Boolean);
   let catalogoFallas = [];
   if (codigosFalla.length) {
-    const { data } = await supabase.from("asa_fallas_catalogo")
+    const { data } = await supabase.from("asa_flota_fallas_catalogo")
       .select("codigo,categoria,etiqueta,severidad,detiene_vehiculo").in("codigo", codigosFalla);
     catalogoFallas = data || [];
   }
@@ -281,8 +281,8 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
 
   const fila = {
     vehiculo_id,
-    empleado_id,
-    empleado_nombre: empleado.nombre,
+    conductor_id,
+    conductor_nombre: conductor.nombre,
     fecha,
     turno,
     km,
@@ -301,17 +301,17 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
   // Reemplazo, no duplicado: el índice único (vehiculo, fecha, turno) es lo
   // que hace posible este upsert.
   const { data: chequeo, error: errChq } = await supabase
-    .from("asa_chequeos")
+    .from("asa_flota_chequeos")
     .upsert([fila], { onConflict: "vehiculo_id,fecha,turno" })
     .select().maybeSingle();
   if (errChq) return fallo(res, 500, errChq.message);
 
   // Detalle del checklist — se rehace completo para que reenviar el parte
   // corregido no deje pegados los items de la primera versión.
-  await supabase.from("asa_chequeo_items").delete().eq("chequeo_id", chequeo.id);
+  await supabase.from("asa_flota_chequeo_items").delete().eq("chequeo_id", chequeo.id);
   if (itemsMal.length) {
     const porCodigo = Object.fromEntries(catalogoItems.map(i => [i.codigo, i]));
-    await supabase.from("asa_chequeo_items").insert(
+    await supabase.from("asa_flota_chequeo_items").insert(
       itemsMal.map(i => ({
         chequeo_id: chequeo.id,
         vehiculo_id,
@@ -328,7 +328,7 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
   const fallasNuevas = [];
   for (const f of catalogoFallas) {
     const { data: existente } = await supabase
-      .from("asa_fallas_reportadas")
+      .from("asa_flota_fallas_reportadas")
       .select("id,veces_reportada")
       .eq("vehiculo_id", vehiculo_id)
       .eq("falla_codigo", f.codigo)
@@ -336,17 +336,17 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
       .maybeSingle();
 
     if (existente) {
-      await supabase.from("asa_fallas_reportadas").update({
+      await supabase.from("asa_flota_fallas_reportadas").update({
         veces_reportada: (existente.veces_reportada || 1) + 1,
         ultima_vez: new Date().toISOString(),
         km_reporte: km,
       }).eq("id", existente.id);
     } else {
-      const { data: creada } = await supabase.from("asa_fallas_reportadas").insert([{
+      const { data: creada } = await supabase.from("asa_flota_fallas_reportadas").insert([{
         vehiculo_id,
         chequeo_id: chequeo.id,
-        empleado_id,
-        empleado_nombre: empleado.nombre,
+        conductor_id,
+        conductor_nombre: conductor.nombre,
         falla_codigo: f.codigo,
         falla_etiqueta: f.etiqueta,
         categoria: f.categoria,
@@ -366,10 +366,10 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
   for (const f of fotos) {
     try {
       const subida = await subirFoto(f.dataUrl, { vehiculo_id, angulo: f.angulo, fecha });
-      const { data } = await supabase.from("asa_fotos").insert([{
+      const { data } = await supabase.from("asa_flota_fotos").insert([{
         vehiculo_id,
         chequeo_id: chequeo.id,
-        empleado_id,
+        conductor_id,
         fecha,
         angulo: (f.angulo || "OTRO").toUpperCase(),
         url: subida.url,
@@ -387,19 +387,19 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
 
   // ¿Quedaron completas las fotos del día?
   const { data: fotosDelDia } = await supabase
-    .from("asa_fotos").select("angulo").eq("vehiculo_id", vehiculo_id).eq("fecha", fecha);
+    .from("asa_flota_fotos").select("angulo").eq("vehiculo_id", vehiculo_id).eq("fecha", fecha);
   const angulosHoy = new Set((fotosDelDia || []).map(f => f.angulo));
   const requeridos = Array.isArray(config.angulos_requeridos) ? config.angulos_requeridos : [];
   const completas = !vehiculo.requiere_fotos || requeridos.every(a => angulosHoy.has(a));
 
-  await supabase.from("asa_chequeos").update({
+  await supabase.from("asa_flota_chequeos").update({
     fotos_subidas: (fotosDelDia || []).length,
     fotos_completas: completas,
   }).eq("id", chequeo.id);
 
   // ── Kilometraje del vehículo ──────────────────────────────────────────────
   if (km !== null && !kmSospechoso) {
-    await supabase.from("asa_vehiculos").update({
+    await supabase.from("asa_flota_vehiculos").update({
       km_actual: km,
       km_actualizado: new Date().toISOString(),
       updated_at: new Date().toISOString(),
@@ -425,15 +425,15 @@ router.post("/publico/chequeo", ruta(async (req, res) => {
 
 /** POST /asa/publico/foto — subir una foto suelta (llega tarde o se repite). */
 router.post("/publico/foto", ruta(async (req, res) => {
-  const { vehiculo_id, chequeo_id, empleado_id, angulo, dataUrl, nota } = req.body || {};
+  const { vehiculo_id, chequeo_id, conductor_id, angulo, dataUrl, nota } = req.body || {};
   if (!vehiculo_id) return fallo(res, 400, "Falta el vehículo.");
   try {
     const fecha = req.body.fecha || hoyRD();
     const subida = await subirFoto(dataUrl, { vehiculo_id: Number(vehiculo_id), angulo, fecha });
-    const { data, error } = await supabase.from("asa_fotos").insert([{
+    const { data, error } = await supabase.from("asa_flota_fotos").insert([{
       vehiculo_id: Number(vehiculo_id),
       chequeo_id: chequeo_id ? Number(chequeo_id) : null,
-      empleado_id: empleado_id ? Number(empleado_id) : null,
+      conductor_id: conductor_id ? Number(conductor_id) : null,
       fecha,
       angulo: (angulo || "OTRO").toUpperCase(),
       url: subida.url, ruta: subida.ruta, bytes: subida.bytes, nota: nota || null,
@@ -462,15 +462,15 @@ router.get("/dashboard", ruta(async (req, res) => {
   const mesDesde = fecha.slice(0, 8) + "01";
 
   const [resumen, chequeosHoy, fallas, docs, gastosMes, config] = await Promise.all([
-    supabase.from("asa_v_resumen_vehiculo").select("*").order("codigo"),
-    supabase.from("asa_chequeos")
-      .select("id,vehiculo_id,turno,empleado_nombre,km,combustible_octavos,items_mal,fallas_reportadas,fotos_completas,apto_circular,created_at")
+    supabase.from("asa_flota_v_resumen_vehiculo").select("*").order("codigo"),
+    supabase.from("asa_flota_chequeos")
+      .select("id,vehiculo_id,turno,conductor_nombre,km,combustible_octavos,items_mal,fallas_reportadas,fotos_completas,apto_circular,created_at")
       .eq("fecha", fecha),
-    supabase.from("asa_fallas_reportadas")
+    supabase.from("asa_flota_fallas_reportadas")
       .select("*").in("estado", ["ABIERTA", "EN_REVISION", "EN_TALLER"])
       .order("severidad").order("ultima_vez", { ascending: false }),
-    supabase.from("asa_v_documentos_alerta").select("*").neq("situacion", "VIGENTE").order("vence"),
-    supabase.from("asa_gastos").select("tipo,monto,galones").gte("fecha", mesDesde).lte("fecha", fecha),
+    supabase.from("asa_flota_v_documentos_alerta").select("*").neq("situacion", "VIGENTE").order("vence"),
+    supabase.from("asa_flota_gastos").select("tipo,monto,galones").gte("fecha", mesDesde).lte("fecha", fecha),
     leerConfig(),
   ]);
 
@@ -526,22 +526,22 @@ router.get("/vehiculos/:id/ficha", ruta(async (req, res) => {
   const id = Number(req.params.id);
   const desde = req.query.desde || null;
 
-  let qGastos = supabase.from("asa_gastos").select("*").eq("vehiculo_id", id);
+  let qGastos = supabase.from("asa_flota_gastos").select("*").eq("vehiculo_id", id);
   if (desde) qGastos = qGastos.gte("fecha", desde);
 
   const [veh, resumen, chequeos, fallas, gastos, fotos, docs, mant, asign] = await Promise.all([
-    supabase.from("asa_vehiculos").select("*").eq("id", id).maybeSingle(),
-    supabase.from("asa_v_resumen_vehiculo").select("*").eq("id", id).maybeSingle(),
-    supabase.from("asa_chequeos").select("*").eq("vehiculo_id", id)
+    supabase.from("asa_flota_vehiculos").select("*").eq("id", id).maybeSingle(),
+    supabase.from("asa_flota_v_resumen_vehiculo").select("*").eq("id", id).maybeSingle(),
+    supabase.from("asa_flota_chequeos").select("*").eq("vehiculo_id", id)
       .order("fecha", { ascending: false }).limit(90),
-    supabase.from("asa_fallas_reportadas").select("*").eq("vehiculo_id", id)
+    supabase.from("asa_flota_fallas_reportadas").select("*").eq("vehiculo_id", id)
       .order("ultima_vez", { ascending: false }),
     qGastos.order("fecha", { ascending: false }),
-    supabase.from("asa_fotos").select("*").eq("vehiculo_id", id)
+    supabase.from("asa_flota_fotos").select("*").eq("vehiculo_id", id)
       .order("fecha", { ascending: false }).limit(200),
-    supabase.from("asa_documentos").select("*").eq("vehiculo_id", id).eq("activo", true).order("vence"),
-    supabase.from("asa_mantenimientos").select("*").eq("vehiculo_id", id).eq("activo", true),
-    supabase.from("asa_asignaciones").select("*, asa_empleados(nombre)").eq("vehiculo_id", id)
+    supabase.from("asa_flota_documentos").select("*").eq("vehiculo_id", id).eq("activo", true).order("vence"),
+    supabase.from("asa_flota_mantenimientos").select("*").eq("vehiculo_id", id).eq("activo", true),
+    supabase.from("asa_flota_asignaciones").select("*, asa_flota_conductores(nombre)").eq("vehiculo_id", id)
       .order("desde", { ascending: false }),
   ]);
 
@@ -615,10 +615,10 @@ router.get("/reportes/costos", ruta(async (req, res) => {
   const desde = req.query.desde || hasta.slice(0, 4) + "-01-01";
 
   const [veh, gastos, chequeos] = await Promise.all([
-    supabase.from("asa_vehiculos").select("id,codigo,placa,marca,modelo,km_inicial,km_actual,estado")
+    supabase.from("asa_flota_vehiculos").select("id,codigo,placa,marca,modelo,km_inicial,km_actual,estado")
       .eq("activo", true).order("codigo"),
-    supabase.from("asa_gastos").select("*").gte("fecha", desde).lte("fecha", hasta),
-    supabase.from("asa_chequeos").select("vehiculo_id,fecha,km,km_recorrido")
+    supabase.from("asa_flota_gastos").select("*").gte("fecha", desde).lte("fecha", hasta),
+    supabase.from("asa_flota_chequeos").select("vehiculo_id,fecha,km,km_recorrido")
       .gte("fecha", desde).lte("fecha", hasta),
   ]);
 
@@ -675,15 +675,15 @@ router.get("/reportes/conductores", ruta(async (req, res) => {
   const desde = req.query.desde || hasta.slice(0, 8) + "01";
 
   const [emp, chq, fallas] = await Promise.all([
-    supabase.from("asa_empleados").select("id,nombre,cargo").eq("activo", true).order("nombre"),
-    supabase.from("asa_chequeos").select("empleado_id,fecha,km_recorrido,items_mal,fotos_completas,apto_circular")
+    supabase.from("asa_flota_conductores").select("id,nombre,cargo").eq("activo", true).order("nombre"),
+    supabase.from("asa_flota_chequeos").select("conductor_id,fecha,km_recorrido,items_mal,fotos_completas,apto_circular")
       .gte("fecha", desde).lte("fecha", hasta),
-    supabase.from("asa_fallas_reportadas").select("empleado_id,severidad")
+    supabase.from("asa_flota_fallas_reportadas").select("conductor_id,severidad")
       .gte("primera_vez", desde),
   ]);
 
   const filas = (emp.data || []).map(e => {
-    const suyos = (chq.data || []).filter(c => c.empleado_id === e.id);
+    const suyos = (chq.data || []).filter(c => c.conductor_id === e.id);
     const dias = new Set(suyos.map(c => c.fecha)).size;
     return {
       id: e.id, nombre: e.nombre, cargo: e.cargo,
@@ -693,7 +693,7 @@ router.get("/reportes/conductores", ruta(async (req, res) => {
       con_fotos: suyos.filter(c => c.fotos_completas).length,
       sin_fotos: suyos.filter(c => !c.fotos_completas).length,
       items_mal: suyos.reduce((s, c) => s + Number(c.items_mal || 0), 0),
-      fallas_reportadas: (fallas.data || []).filter(f => f.empleado_id === e.id).length,
+      fallas_reportadas: (fallas.data || []).filter(f => f.conductor_id === e.id).length,
       cumplimiento_fotos: suyos.length
         ? Math.round((suyos.filter(c => c.fotos_completas).length / suyos.length) * 100) : null,
     };
@@ -730,7 +730,7 @@ function montarCrud(base, tabla, { orden = "id", ascendente = true, softDelete =
   router.post(`/${base}`, ruta(async (req, res) => {
     const usuario = usuarioDe(req);
     const { usuario_id, usuario_nombre, ...campos } = req.body || {};
-    if ("registrado_por" in campos === false && tabla === "asa_gastos") {
+    if ("registrado_por" in campos === false && tabla === "asa_flota_gastos") {
       campos.registrado_por = usuario.nombre;
     }
     const { data, error } = await supabase.from(tabla).insert([campos]).select().maybeSingle();
@@ -759,21 +759,21 @@ function montarCrud(base, tabla, { orden = "id", ascendente = true, softDelete =
   }));
 }
 
-montarCrud("empleados", "asa_empleados", { orden: "orden" });
-montarCrud("gastos", "asa_gastos", { orden: "fecha", ascendente: false, softDelete: false, tocarUpdated: false });
-montarCrud("documentos", "asa_documentos", { orden: "vence" });
-montarCrud("mantenimientos", "asa_mantenimientos", { orden: "id" });
+montarCrud("conductores", "asa_flota_conductores", { orden: "orden" });
+montarCrud("gastos", "asa_flota_gastos", { orden: "fecha", ascendente: false, softDelete: false, tocarUpdated: false });
+montarCrud("documentos", "asa_flota_documentos", { orden: "vence" });
+montarCrud("mantenimientos", "asa_flota_mantenimientos", { orden: "id" });
 // Los catálogos no llevan updated_at ni fecha: solo orden y activo.
-montarCrud("checklist", "asa_checklist_items", { orden: "orden", tocarUpdated: false });
-montarCrud("catalogo-fallas", "asa_fallas_catalogo", { orden: "orden", tocarUpdated: false });
+montarCrud("checklist", "asa_flota_checklist_items", { orden: "orden", tocarUpdated: false });
+montarCrud("catalogo-fallas", "asa_flota_fallas_catalogo", { orden: "orden", tocarUpdated: false });
 
 
 /** GET /asa/vehiculos — con el resumen de costos ya calculado. */
 router.get("/vehiculos", ruta(async (req, res) => {
   const [veh, resumen] = await Promise.all([
-    supabase.from("asa_vehiculos").select("*, asa_empleados(id,nombre)")
+    supabase.from("asa_flota_vehiculos").select("*, asa_flota_conductores(id,nombre)")
       .eq("activo", true).order("codigo"),
-    supabase.from("asa_v_resumen_vehiculo").select("*"),
+    supabase.from("asa_flota_v_resumen_vehiculo").select("*"),
   ]);
   if (veh.error) return fallo(res, 500, veh.error.message);
   const porId = Object.fromEntries((resumen.data || []).map(r => [r.id, r]));
@@ -789,14 +789,14 @@ router.post("/vehiculos", ruta(async (req, res) => {
   // El odómetro con el que entra a la flota es la línea base de todo cálculo
   // de kilómetros recorridos. Si viene vacío, arranca igual al actual.
   if (campos.km_inicial == null) campos.km_inicial = campos.km_actual ?? 0;
-  const { data, error } = await supabase.from("asa_vehiculos").insert([campos]).select().maybeSingle();
+  const { data, error } = await supabase.from("asa_flota_vehiculos").insert([campos]).select().maybeSingle();
   if (error) return fallo(res, 500, error.message);
   res.json({ error: false, vehiculo: data });
 }));
 
 router.patch("/vehiculos/:id", ruta(async (req, res) => {
-  const { usuario_id, usuario_nombre, id, created_at, asa_empleados, resumen, ...campos } = req.body || {};
-  const { data, error } = await supabase.from("asa_vehiculos")
+  const { usuario_id, usuario_nombre, id, created_at, asa_flota_conductores, resumen, ...campos } = req.body || {};
+  const { data, error } = await supabase.from("asa_flota_vehiculos")
     .update({ ...campos, updated_at: new Date().toISOString() })
     .eq("id", Number(req.params.id)).select().maybeSingle();
   if (error) return fallo(res, 500, error.message);
@@ -804,7 +804,7 @@ router.patch("/vehiculos/:id", ruta(async (req, res) => {
 }));
 
 router.delete("/vehiculos/:id", ruta(async (req, res) => {
-  const { error } = await supabase.from("asa_vehiculos")
+  const { error } = await supabase.from("asa_flota_vehiculos")
     .update({ activo: false }).eq("id", Number(req.params.id));
   if (error) return fallo(res, 500, error.message);
   res.json({ error: false });
@@ -819,17 +819,17 @@ router.delete("/vehiculos/:id", ruta(async (req, res) => {
  */
 router.post("/asignaciones", ruta(async (req, res) => {
   const usuario = usuarioDe(req);
-  const { vehiculo_id, empleado_id, km_entrega, motivo } = req.body || {};
-  if (!vehiculo_id || !empleado_id) return fallo(res, 400, "Falta el vehículo o el empleado.");
+  const { vehiculo_id, conductor_id, km_entrega, motivo } = req.body || {};
+  if (!vehiculo_id || !conductor_id) return fallo(res, 400, "Falta el vehículo o el conductor.");
 
   const hoy = hoyRD();
-  await supabase.from("asa_asignaciones")
+  await supabase.from("asa_flota_asignaciones")
     .update({ hasta: hoy, km_devuelve: num(km_entrega) })
     .eq("vehiculo_id", Number(vehiculo_id)).is("hasta", null);
 
-  const { data, error } = await supabase.from("asa_asignaciones").insert([{
+  const { data, error } = await supabase.from("asa_flota_asignaciones").insert([{
     vehiculo_id: Number(vehiculo_id),
-    empleado_id: Number(empleado_id),
+    conductor_id: Number(conductor_id),
     desde: hoy,
     km_entrega: num(km_entrega),
     motivo: motivo || null,
@@ -837,8 +837,8 @@ router.post("/asignaciones", ruta(async (req, res) => {
   }]).select().maybeSingle();
   if (error) return fallo(res, 500, error.message);
 
-  await supabase.from("asa_vehiculos")
-    .update({ empleado_id: Number(empleado_id), updated_at: new Date().toISOString() })
+  await supabase.from("asa_flota_vehiculos")
+    .update({ conductor_id: Number(conductor_id), updated_at: new Date().toISOString() })
     .eq("id", Number(vehiculo_id));
 
   res.json({ error: false, asignacion: data });
@@ -850,9 +850,9 @@ router.post("/asignaciones", ruta(async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 router.get("/chequeos", ruta(async (req, res) => {
-  let q = supabase.from("asa_chequeos").select("*, asa_vehiculos(codigo,placa,marca,modelo)");
+  let q = supabase.from("asa_flota_chequeos").select("*, asa_flota_vehiculos(codigo,placa,marca,modelo)");
   if (req.query.vehiculo_id) q = q.eq("vehiculo_id", Number(req.query.vehiculo_id));
-  if (req.query.empleado_id) q = q.eq("empleado_id", Number(req.query.empleado_id));
+  if (req.query.conductor_id) q = q.eq("conductor_id", Number(req.query.conductor_id));
   if (req.query.desde) q = q.gte("fecha", req.query.desde);
   if (req.query.hasta) q = q.lte("fecha", req.query.hasta);
   if (req.query.fecha) q = q.eq("fecha", req.query.fecha);
@@ -865,23 +865,23 @@ router.get("/chequeos", ruta(async (req, res) => {
 router.get("/chequeos/:id", ruta(async (req, res) => {
   const id = Number(req.params.id);
   const [chq, items, fotos] = await Promise.all([
-    supabase.from("asa_chequeos").select("*, asa_vehiculos(codigo,placa,marca,modelo)").eq("id", id).maybeSingle(),
-    supabase.from("asa_chequeo_items").select("*").eq("chequeo_id", id).order("item_codigo"),
-    supabase.from("asa_fotos").select("*").eq("chequeo_id", id),
+    supabase.from("asa_flota_chequeos").select("*, asa_flota_vehiculos(codigo,placa,marca,modelo)").eq("id", id).maybeSingle(),
+    supabase.from("asa_flota_chequeo_items").select("*").eq("chequeo_id", id).order("item_codigo"),
+    supabase.from("asa_flota_fotos").select("*").eq("chequeo_id", id),
   ]);
   if (!chq.data) return fallo(res, 404, "Ese chequeo no existe.");
   res.json({ error: false, chequeo: chq.data, items: items.data || [], fotos: fotos.data || [] });
 }));
 
 router.get("/fallas", ruta(async (req, res) => {
-  let q = supabase.from("asa_fallas_reportadas").select("*, asa_vehiculos(codigo,placa,marca,modelo)");
+  let q = supabase.from("asa_flota_fallas_reportadas").select("*, asa_flota_vehiculos(codigo,placa,marca,modelo)");
   if (req.query.vehiculo_id) q = q.eq("vehiculo_id", Number(req.query.vehiculo_id));
   if (req.query.estado) q = q.eq("estado", req.query.estado);
   else q = q.in("estado", ["ABIERTA", "EN_REVISION", "EN_TALLER"]);
   const { data, error } = await q.order("ultima_vez", { ascending: false });
   if (error) return fallo(res, 500, error.message);
 
-  const { data: frecuentes } = await supabase.from("asa_v_fallas_frecuentes")
+  const { data: frecuentes } = await supabase.from("asa_flota_v_fallas_frecuentes")
     .select("*").order("veces_total", { ascending: false }).limit(15);
 
   res.json({ error: false, fallas: data || [], frecuentes: frecuentes || [] });
@@ -899,7 +899,7 @@ router.patch("/fallas/:id", ruta(async (req, res) => {
     campos.resuelta_en = new Date().toISOString();
     campos.resuelta_por = usuario.nombre;
   }
-  const { data, error } = await supabase.from("asa_fallas_reportadas")
+  const { data, error } = await supabase.from("asa_flota_fallas_reportadas")
     .update(campos).eq("id", Number(req.params.id)).select().maybeSingle();
   if (error) return fallo(res, 500, error.message);
   res.json({ error: false, falla: data });
@@ -911,7 +911,7 @@ router.patch("/fallas/:id", ruta(async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 
 router.get("/fotos", ruta(async (req, res) => {
-  let q = supabase.from("asa_fotos").select("*, asa_vehiculos(codigo,placa)");
+  let q = supabase.from("asa_flota_fotos").select("*, asa_flota_vehiculos(codigo,placa)");
   if (req.query.vehiculo_id) q = q.eq("vehiculo_id", Number(req.query.vehiculo_id));
   if (req.query.fecha) q = q.eq("fecha", req.query.fecha);
   if (req.query.desde) q = q.gte("fecha", req.query.desde);
@@ -923,12 +923,12 @@ router.get("/fotos", ruta(async (req, res) => {
 
 router.delete("/fotos/:id", ruta(async (req, res) => {
   const id = Number(req.params.id);
-  const { data: foto } = await supabase.from("asa_fotos").select("ruta").eq("id", id).maybeSingle();
+  const { data: foto } = await supabase.from("asa_flota_fotos").select("ruta").eq("id", id).maybeSingle();
   if (foto?.ruta) {
     // Si el archivo ya no está, no importa: lo que molesta es la fila huérfana.
     await supabase.storage.from(BUCKET).remove([foto.ruta]).catch(() => {});
   }
-  const { error } = await supabase.from("asa_fotos").delete().eq("id", id);
+  const { error } = await supabase.from("asa_flota_fotos").delete().eq("id", id);
   if (error) return fallo(res, 500, error.message);
   res.json({ error: false });
 }));
@@ -940,7 +940,7 @@ router.get("/config", ruta(async (req, res) => {
 router.put("/config", ruta(async (req, res) => {
   const { usuario_id, usuario_nombre, ...valor } = req.body || {};
   const { error } = await supabase.from("config_sistema")
-    .upsert([{ clave: "asa_config", valor }], { onConflict: "clave" });
+    .upsert([{ clave: "asa_flota_config", valor }], { onConflict: "clave" });
   if (error) return fallo(res, 500, error.message);
   res.json({ error: false, config: valor });
 }));
@@ -949,10 +949,10 @@ router.put("/config", ruta(async (req, res) => {
 /** GET /asa/salud — diagnóstico rápido cuando algo no aparece en pantalla. */
 router.get("/salud", ruta(async (req, res) => {
   const tablas = [
-    "asa_empleados", "asa_vehiculos", "asa_asignaciones", "asa_checklist_items",
-    "asa_fallas_catalogo", "asa_chequeos", "asa_chequeo_items",
-    "asa_fallas_reportadas", "asa_fotos", "asa_gastos", "asa_documentos",
-    "asa_mantenimientos",
+    "asa_flota_conductores", "asa_flota_vehiculos", "asa_flota_asignaciones", "asa_flota_checklist_items",
+    "asa_flota_fallas_catalogo", "asa_flota_chequeos", "asa_flota_chequeo_items",
+    "asa_flota_fallas_reportadas", "asa_flota_fotos", "asa_flota_gastos", "asa_flota_documentos",
+    "asa_flota_mantenimientos",
   ];
   const estado = {};
   for (const t of tablas) {
@@ -960,7 +960,7 @@ router.get("/salud", ruta(async (req, res) => {
     estado[t] = error ? `ERROR: ${error.message}` : count;
   }
   const vistas = {};
-  for (const v of ["asa_v_resumen_vehiculo", "asa_v_documentos_alerta", "asa_v_fallas_frecuentes"]) {
+  for (const v of ["asa_flota_v_resumen_vehiculo", "asa_flota_v_documentos_alerta", "asa_flota_v_fallas_frecuentes"]) {
     const { error } = await supabase.from(v).select("*").limit(1);
     vistas[v] = error ? `ERROR: ${error.message}` : "OK";
   }

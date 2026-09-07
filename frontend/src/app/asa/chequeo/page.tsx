@@ -26,11 +26,11 @@ import {
 // reporte una goma baja.
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Empleado = { id: number; nombre: string; cargo?: string; color?: string };
+type Conductor = { id: number; nombre: string; cargo?: string; color?: string };
 type Vehiculo = {
   id: number; codigo: string; placa: string; marca?: string; modelo?: string;
   anio?: number; color?: string; tipo?: string; km_actual?: number;
-  empleado_id?: number | null; estado?: string; requiere_fotos?: boolean;
+  conductor_id?: number | null; estado?: string; requiere_fotos?: boolean;
 };
 type Item = { codigo: string; categoria: string; etiqueta: string; icono?: string; critico?: boolean };
 type Falla = {
@@ -57,7 +57,7 @@ export default function ChequeoASAPage() {
   const [cargando, setCargando] = useState(true);
   const [error, setError]       = useState<string | null>(null);
 
-  const [empleados, setEmpleados] = useState<Empleado[]>([]);
+  const [conductores, setConductores] = useState<Conductor[]>([]);
   const [vehiculos, setVehiculos] = useState<Vehiculo[]>([]);
   const [checklist, setChecklist] = useState<Item[]>([]);
   const [catFallas, setCatFallas] = useState<Falla[]>([]);
@@ -66,7 +66,7 @@ export default function ChequeoASAPage() {
 
   // ── Lo que el conductor va llenando ────────────────────────────────────────
   const [paso, setPaso]         = useState(0);
-  const [empleado, setEmpleado] = useState<Empleado | null>(null);
+  const [conductor, setConductor] = useState<Conductor | null>(null);
   const [vehiculo, setVehiculo] = useState<Vehiculo | null>(null);
   const [turno, setTurno]       = useState<"SALIDA" | "ENTRADA">("SALIDA");
   const [kmTexto, setKmTexto]   = useState("");
@@ -90,7 +90,7 @@ export default function ChequeoASAPage() {
         const r = await fetch(`${API_ASA}/publico/arranque`);
         const d = await r.json();
         if (d.error) throw new Error(d.mensaje);
-        setEmpleados(d.empleados || []);
+        setConductores(d.conductores || []);
         setVehiculos(d.vehiculos || []);
         setChecklist(d.checklist || []);
         setCatFallas(d.fallas || []);
@@ -122,14 +122,14 @@ export default function ChequeoASAPage() {
   }, []);
 
   useEffect(() => {
-    if (!empleado && !vehiculo) return;
+    if (!conductor && !vehiculo) return;
     try {
       localStorage.setItem(BORRADOR, JSON.stringify({
         fecha: hoyRD(), marcas, fallas, kmTexto, octavos, turno,
-        empleado_id: empleado?.id, vehiculo_id: vehiculo?.id,
+        conductor_id: conductor?.id, vehiculo_id: vehiculo?.id,
       }));
     } catch { /* modo privado: seguimos sin borrador */ }
-  }, [marcas, fallas, kmTexto, octavos, turno, empleado, vehiculo]);
+  }, [marcas, fallas, kmTexto, octavos, turno, conductor, vehiculo]);
 
   // ── Al escoger vehículo, traer su último estado ────────────────────────────
   const escogerVehiculo = async (v: Vehiculo) => {
@@ -204,12 +204,12 @@ export default function ChequeoASAPage() {
 
   // ── Guardar ────────────────────────────────────────────────────────────────
   const guardar = async () => {
-    if (!empleado || !vehiculo) return;
+    if (!conductor || !vehiculo) return;
     setGuardando(true);
     try {
       const cuerpo = {
         vehiculo_id: vehiculo.id,
-        empleado_id: empleado.id,
+        conductor_id: conductor.id,
         turno,
         km: kmTexto === "" ? null : kmNum,
         combustible_octavos: octavos,
@@ -235,7 +235,7 @@ export default function ChequeoASAPage() {
   };
 
   const reiniciar = () => {
-    setPaso(0); setEmpleado(null); setVehiculo(null); setTurno("SALIDA");
+    setPaso(0); setConductor(null); setVehiculo(null); setTurno("SALIDA");
     setKmTexto(""); setKmSug(0); setOctavos(4); setMarcas({}); setFallas([]);
     setFotos({}); setResultado(null); setFallasAbiertas([]);
   };
@@ -323,7 +323,7 @@ export default function ChequeoASAPage() {
           <div style={{ fontWeight: 900, fontSize: 14, letterSpacing: 1 }}>ASA · CHEQUEO DIARIO</div>
           <div style={{ fontSize: 11, color: C.suave }}>{new Date().toLocaleDateString("es-DO", { weekday: "long", day: "numeric", month: "long" })}</div>
         </div>
-        {empleado && (
+        {conductor && (
           <button onClick={reiniciar} style={{
             background: "transparent", border: `1px solid ${C.borde}`, color: C.suave,
             borderRadius: 8, padding: "6px 10px", fontSize: 12, fontWeight: 700, cursor: "pointer",
@@ -338,13 +338,13 @@ export default function ChequeoASAPage() {
         <>
           <Cabecera titulo="¿Quién eres?" sub="Toca tu nombre" />
           <div style={{ padding: "0 18px", display: "grid", gap: 10 }}>
-            {empleados.length === 0 && (
+            {conductores.length === 0 && (
               <div style={{ color: C.suave, padding: 20, textAlign: "center" }}>
                 No hay conductores registrados todavía. Avisa al encargado.
               </div>
             )}
-            {empleados.map(e => (
-              <button key={e.id} onClick={() => { setEmpleado(e); setPaso(1); }} style={{
+            {conductores.map(e => (
+              <button key={e.id} onClick={() => { setConductor(e); setPaso(1); }} style={{
                 display: "flex", alignItems: "center", gap: 14, width: "100%",
                 padding: "16px 18px", borderRadius: 14, border: `1px solid ${C.borde}`,
                 background: C.panel, color: C.texto, cursor: "pointer", textAlign: "left",
@@ -370,10 +370,10 @@ export default function ChequeoASAPage() {
       {/* ── PASO 1 · ¿Cuál vehículo? ────────────────────────────────────────── */}
       {paso === 1 && (
         <>
-          <Cabecera titulo="¿Cuál vehículo?" sub={`Hola, ${empleado?.nombre.split(" ")[0]}. Toca la unidad que vas a usar.`} />
+          <Cabecera titulo="¿Cuál vehículo?" sub={`Hola, ${conductor?.nombre.split(" ")[0]}. Toca la unidad que vas a usar.`} />
           <div style={{ padding: "0 18px", display: "grid", gap: 10 }}>
             {vehiculos.map(v => {
-              const mio = v.empleado_id === empleado?.id;
+              const mio = v.conductor_id === conductor?.id;
               const hecho = chequeosHoy.some(c => c.vehiculo_id === v.id);
               return (
                 <button key={v.id} onClick={() => escogerVehiculo(v)} style={{
@@ -417,7 +417,7 @@ export default function ChequeoASAPage() {
               background: "#3b2a08", border: `1px solid ${C.ambar}55`, color: "#fde68a", fontSize: 13,
             }}>
               Este vehículo ya tiene el parte de <b>{turno === "SALIDA" ? "salida" : "entrada"}</b> de hoy
-              ({yaReportado.empleado_nombre}). Si sigues, lo reemplazas.
+              ({yaReportado.conductor_nombre}). Si sigues, lo reemplazas.
             </div>
           )}
 
