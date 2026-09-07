@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
+import ConfirmarBorradoASA from "@/components/ConfirmarBorradoASA";
 import {
   S, dinero, km as fmtKm, fechaCorta, COLOR_ESTADO_VEH, asaGet, asaEnviar,
 } from "@/lib/asa";
@@ -44,12 +45,16 @@ export default function VehiculosASAPage() {
   const [abierto, setAbierto]     = useState(false);
   const [guardando, setGuardando] = useState(false);
   const [asignando, setAsignando] = useState<any>(null);
+  const [borrando, setBorrando]   = useState<any>(null);
+  // Sin esto, una unidad dada de baja se vuelve invisible para siempre y no
+  // hay forma de reactivarla desde la interfaz.
+  const [verInactivos, setVerInactivos] = useState(false);
 
   const cargar = async () => {
     setCargando(true);
     try {
       const [v, e] = await Promise.all([
-        asaGet<any>("/vehiculos"),
+        asaGet<any>(`/vehiculos${verInactivos ? "?incluir_inactivos=1" : ""}`),
         asaGet<any>("/conductores"),
       ]);
       setVehiculos(v.vehiculos || []);
@@ -57,7 +62,7 @@ export default function VehiculosASAPage() {
     } catch { /* la tabla queda vacía y el aviso lo da el dashboard */ }
     finally { setCargando(false); }
   };
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => { cargar(); }, [verInactivos]);
 
   const visibles = useMemo(() => {
     const q = busqueda.trim().toLowerCase();
@@ -104,10 +109,21 @@ export default function VehiculosASAPage() {
     finally { setGuardando(false); }
   };
 
-  const eliminar = async (v: any) => {
-    if (!confirm(`¿Sacar ${v.codigo} (${v.placa}) de la flota?\n\nNo se borra nada: el historial de chequeos y gastos queda guardado, la unidad solo deja de aparecer.`)) return;
+  const darDeBaja = async (v: any) => {
+    if (!confirm(`¿Sacar ${v.codigo} (${v.placa}) de la flota?\n\nNo se borra nada: el historial de chequeos y gastos queda guardado, la unidad solo deja de aparecer. Se puede reactivar después.`)) return;
     try { await asaEnviar(`/vehiculos/${v.id}`, "DELETE", undefined, auditHeaders()); cargar(); }
     catch (e: any) { alert(e.message); }
+  };
+
+  const reactivar = async (v: any) => {
+    try { await asaEnviar(`/vehiculos/${v.id}`, "PATCH", { activo: true }, auditHeaders()); cargar(); }
+    catch (e: any) { alert(e.message); }
+  };
+
+  const borrarDefinitivo = async () => {
+    await asaEnviar(`/vehiculos/${borrando.id}?definitivo=1`, "DELETE", undefined, auditHeaders());
+    setBorrando(null);
+    cargar();
   };
 
   const asignar = async (conductor_id: number, km_entrega: string) => {
@@ -145,6 +161,10 @@ export default function VehiculosASAPage() {
         </div>
         <input placeholder="Buscar por código, placa, marca o conductor…" value={busqueda}
                onChange={e => setBusqueda(e.target.value)} style={{ ...S.input, width: 320 }} />
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: "#475569" }}>
+          <input type="checkbox" checked={verInactivos} onChange={e => setVerInactivos(e.target.checked)} />
+          Ver dados de baja
+        </label>
         <Link href="/asa" style={{ ...S.btnGhost, textDecoration: "none", padding: "10px 14px" }}>← Tablero</Link>
         {puedeCrear && <button onClick={abrirNuevo} style={S.btn}>+ Agregar vehículo</button>}
       </div>
@@ -154,7 +174,11 @@ export default function VehiculosASAPage() {
           {visibles.map(v => {
             const r = v.resumen || {};
             return (
-              <div key={v.id} style={{ ...S.card, marginBottom: 0, padding: 0, overflow: "hidden" }}>
+              <div key={v.id} style={{
+                ...S.card, marginBottom: 0, padding: 0, overflow: "hidden",
+                opacity: v.activo === false ? 0.6 : 1,
+                borderStyle: v.activo === false ? "dashed" : "solid",
+              }}>
                 <div style={{
                   padding: "14px 16px", borderBottom: "1px solid #f1f5f9",
                   display: "flex", alignItems: "center", gap: 10,
@@ -205,8 +229,16 @@ export default function VehiculosASAPage() {
                 <div style={{ padding: "10px 16px", borderTop: "1px solid #f1f5f9", display: "flex", gap: 8, flexWrap: "wrap" }}>
                   <Link href={`/asa/vehiculos/${v.id}`} style={{ ...S.btnGhost, textDecoration: "none" }}>Ver ficha</Link>
                   {puedeEditar && <button onClick={() => abrirEdicion(v)} style={S.btnGhost}>Editar</button>}
-                  {puedeEditar && <button onClick={() => setAsignando(v)} style={S.btnGhost}>Asignar</button>}
-                  {puedeEliminar && <button onClick={() => eliminar(v)} style={{ ...S.btnGhost, color: "#dc2626" }}>Sacar</button>}
+                  {puedeEditar && v.activo !== false && <button onClick={() => setAsignando(v)} style={S.btnGhost}>Asignar</button>}
+                  {puedeEliminar && v.activo !== false && (
+                    <button onClick={() => darDeBaja(v)} style={{ ...S.btnGhost, color: "#b45309" }}>Dar de baja</button>
+                  )}
+                  {puedeEditar && v.activo === false && (
+                    <button onClick={() => reactivar(v)} style={{ ...S.btnGhost, color: "#16a34a" }}>Reactivar</button>
+                  )}
+                  {puedeEliminar && (
+                    <button onClick={() => setBorrando(v)} style={{ ...S.btnGhost, color: "#dc2626" }}>Eliminar</button>
+                  )}
                 </div>
               </div>
             );
@@ -292,6 +324,18 @@ export default function VehiculosASAPage() {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Borrado definitivo */}
+      {borrando && (
+        <ConfirmarBorradoASA
+          titulo={`Eliminar ${borrando.codigo}`}
+          nombre={borrando.codigo}
+          ruta={`/vehiculos/${borrando.id}/dependencias`}
+          aviso={<>Se borra el vehículo <b>{borrando.codigo} · {borrando.placa}</b> y todo su historial en el módulo de flota. Las fotos también se eliminan del almacenamiento.</>}
+          onCerrar={() => setBorrando(null)}
+          onConfirmar={borrarDefinitivo}
+        />
       )}
 
       {/* Asignación */}

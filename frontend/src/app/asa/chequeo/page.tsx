@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useRef, useState } from "react";
 import {
   API_ASA, NIVELES, ANGULOS, nivelCombustible, comprimirImagen, hoyRD,
 } from "@/lib/asa";
+import InstalarApp from "./InstalarApp";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // 🚚 ASA — CHEQUEO DIARIO DEL CONDUCTOR
@@ -332,6 +333,9 @@ export default function ChequeoASAPage() {
       </div>
 
       {paso < 7 && <Barra />}
+
+      {/* Se ofrece solo al entrar. En medio del parte seria una interrupcion. */}
+      {paso === 0 && <InstalarApp />}
 
       {/* ── PASO 0 · ¿Quién eres? ───────────────────────────────────────────── */}
       {paso === 0 && (

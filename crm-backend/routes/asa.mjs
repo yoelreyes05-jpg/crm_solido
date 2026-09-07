@@ -749,13 +749,24 @@ function montarCrud(base, tabla, { orden = "id", ascendente = true, softDelete =
 
   router.delete(`/${base}/:id`, ruta(async (req, res) => {
     const id = Number(req.params.id);
-    // Baja lógica donde existe la columna: borrar un vehículo de verdad se
-    // llevaría por delante su historial de gastos y chequeos.
-    const { error } = softDelete
+
+    // Dos borrados distintos y a proposito:
+    //
+    //   Baja (por defecto)   pone activo = false. Desaparece de las pantallas
+    //                        pero el historial sigue entero y se puede
+    //                        reactivar. Es lo que se quiere el 95% de las
+    //                        veces: el conductor que se fue de la empresa no
+    //                        debe borrar los partes que firmo.
+    //
+    //   ?definitivo=1        borra la fila de verdad. Para lo que se creo por
+    //                        error o para pruebas. Irreversible.
+    const definitivo = req.query.definitivo === "1";
+
+    const { error } = (softDelete && !definitivo)
       ? await supabase.from(tabla).update({ activo: false }).eq("id", id)
       : await supabase.from(tabla).delete().eq("id", id);
     if (error) return fallo(res, 500, error.message);
-    res.json({ error: false });
+    res.json({ error: false, definitivo: definitivo || !softDelete });
   }));
 }
 
@@ -771,8 +782,10 @@ montarCrud("catalogo-fallas", "asa_flota_fallas_catalogo", { orden: "orden", toc
 /** GET /asa/vehiculos — con el resumen de costos ya calculado. */
 router.get("/vehiculos", ruta(async (req, res) => {
   const [veh, resumen] = await Promise.all([
-    supabase.from("asa_flota_vehiculos").select("*, asa_flota_conductores(id,nombre)")
-      .eq("activo", true).order("codigo"),
+    (req.query.incluir_inactivos === "1"
+      ? supabase.from("asa_flota_vehiculos").select("*, asa_flota_conductores(id,nombre)")
+      : supabase.from("asa_flota_vehiculos").select("*, asa_flota_conductores(id,nombre)").eq("activo", true)
+    ).order("codigo"),
     supabase.from("asa_flota_v_resumen_vehiculo").select("*"),
   ]);
   if (veh.error) return fallo(res, 500, veh.error.message);
@@ -803,11 +816,94 @@ router.patch("/vehiculos/:id", ruta(async (req, res) => {
   res.json({ error: false, vehiculo: data });
 }));
 
+/**
+ * Cuenta lo que se llevaria por delante borrar un vehiculo.
+ *
+ * Todas las tablas del modulo cuelgan de `vehiculo_id` con ON DELETE CASCADE,
+ * asi que borrar la unidad borra tambien sus partes, gastos, fotos y fallas.
+ * La pantalla enseña estos numeros antes de preguntar: "vas a borrar 340
+ * partes y 52 gastos" frena a cualquiera, "¿seguro?" no frena a nadie.
+ */
+async function dependenciasVehiculo(id) {
+  const tablas = [
+    ["chequeos",       "asa_flota_chequeos"],
+    ["gastos",         "asa_flota_gastos"],
+    ["fotos",          "asa_flota_fotos"],
+    ["fallas",         "asa_flota_fallas_reportadas"],
+    ["documentos",     "asa_flota_documentos"],
+    ["mantenimientos", "asa_flota_mantenimientos"],
+    ["asignaciones",   "asa_flota_asignaciones"],
+  ];
+  const out = {};
+  for (const [clave, tabla] of tablas) {
+    const { count } = await supabase.from(tabla)
+      .select("*", { count: "exact", head: true }).eq("vehiculo_id", id);
+    out[clave] = count || 0;
+  }
+  return out;
+}
+
+/** Lo mismo para un conductor. */
+async function dependenciasConductor(id) {
+  const tablas = [
+    ["chequeos",     "asa_flota_chequeos"],
+    ["gastos",       "asa_flota_gastos"],
+    ["fotos",        "asa_flota_fotos"],
+    ["fallas",       "asa_flota_fallas_reportadas"],
+    ["asignaciones", "asa_flota_asignaciones"],
+  ];
+  const out = {};
+  for (const [clave, tabla] of tablas) {
+    const { count } = await supabase.from(tabla)
+      .select("*", { count: "exact", head: true }).eq("conductor_id", id);
+    out[clave] = count || 0;
+  }
+  const { count: veh } = await supabase.from("asa_flota_vehiculos")
+    .select("*", { count: "exact", head: true }).eq("conductor_id", id);
+  out.vehiculos_asignados = veh || 0;
+  return out;
+}
+
+router.get("/vehiculos/:id/dependencias", ruta(async (req, res) => {
+  res.json({ error: false, dependencias: await dependenciasVehiculo(Number(req.params.id)) });
+}));
+
+router.get("/conductores/:id/dependencias", ruta(async (req, res) => {
+  res.json({ error: false, dependencias: await dependenciasConductor(Number(req.params.id)) });
+}));
+
+/**
+ * DELETE /asa/vehiculos/:id            baja logica (activo = false)
+ * DELETE /asa/vehiculos/:id?definitivo=1  borra de verdad, con todo su historial
+ */
 router.delete("/vehiculos/:id", ruta(async (req, res) => {
-  const { error } = await supabase.from("asa_flota_vehiculos")
-    .update({ activo: false }).eq("id", Number(req.params.id));
+  const id = Number(req.params.id);
+
+  if (req.query.definitivo !== "1") {
+    const { error } = await supabase.from("asa_flota_vehiculos")
+      .update({ activo: false, updated_at: new Date().toISOString() }).eq("id", id);
+    if (error) return fallo(res, 500, error.message);
+    return res.json({ error: false, definitivo: false });
+  }
+
+  const borrado = await dependenciasVehiculo(id);
+
+  // Los archivos del bucket no se van con el CASCADE: si no se quitan aqui,
+  // quedan ocupando espacio para siempre sin ninguna fila que los nombre.
+  const { data: fotos } = await supabase.from("asa_flota_fotos")
+    .select("ruta").eq("vehiculo_id", id);
+  const rutas = (fotos || []).map(f => f.ruta).filter(Boolean);
+  for (let i = 0; i < rutas.length; i += 100) {
+    // Que falle el borrado de una imagen no debe impedir borrar el vehiculo:
+    // el archivo huerfano molesta menos que una unidad que no se deja quitar.
+    try { await supabase.storage.from(BUCKET).remove(rutas.slice(i, i + 100)); }
+    catch (e) { console.error("[asa] no se pudieron borrar fotos:", e.message); }
+  }
+
+  const { error } = await supabase.from("asa_flota_vehiculos").delete().eq("id", id);
   if (error) return fallo(res, 500, error.message);
-  res.json({ error: false });
+
+  res.json({ error: false, definitivo: true, borrado, fotos_borradas: rutas.length });
 }));
 
 

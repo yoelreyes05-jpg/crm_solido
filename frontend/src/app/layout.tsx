@@ -156,6 +156,11 @@ function esZonaAloha(pathname: string) {
   return pathname === "/aloha" || pathname.startsWith("/aloha/");
 }
 
+/** ¿Es la pantalla de chequeo que el conductor instala en su celular? */
+function esZonaChequeoASA(pathname: string) {
+  return pathname === "/asa/chequeo" || pathname.startsWith("/asa/chequeo/");
+}
+
 /** A qué login mandar a alguien sin sesión, según dónde estaba parado. */
 function loginQueCorresponde(pathname: string) {
   return esZonaAloha(pathname) ? "/aloha/login" : "/login";
@@ -243,19 +248,34 @@ if (esPublica) {
   // navegador y en el color de la barra del teléfono. Si heredara el azul y el
   // logo del taller, la separación se rompería en el primer detalle que mira
   // el usuario.
+  // Tres marcas distintas viviendo en la misma app. El chequeo de flota tiene
+  // manifiesto propio (`manifest-asa.json`) y no el general: sin eso, el
+  // conductor que instala la app termina con un icono de Sólido Auto que abre
+  // en /cliente — que es el `start_url` del manifiesto del taller — en vez de
+  // en su parte diario.
   const marcaAloha = esZonaAloha(pathname);
-  const titulo     = marcaAloha ? "Aloha Perfume Store" : "Sólido Auto Servicio";
-  const colorTema  = marcaAloha ? "#fdf2f8" : "#080c14";
-  const icono      = marcaAloha ? "/logo-aloha.png" : "/logo.png";
+  const marcaASA   = esZonaChequeoASA(pathname);
+  const titulo     = marcaASA ? "Chequeo de Flota ASA"
+                   : marcaAloha ? "Aloha Perfume Store"
+                   : "Sólido Auto Servicio";
+  const colorTema  = marcaASA ? "#0b1220" : marcaAloha ? "#fdf2f8" : "#080c14";
+  const icono      = marcaASA ? "/icon-asa-180.png"
+                   : marcaAloha ? "/logo-aloha.png"
+                   : "/logo.png";
+  const manifiesto = marcaASA ? "/manifest-asa.json" : "/manifest.json";
+  const tituloApp  = marcaASA ? "Chequeo ASA" : marcaAloha ? "Aloha" : "Sólido Auto";
 
   return (
   <html lang="es">
   <head>
         <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
         <meta name="mobile-web-app-capable" content="yes" />
+        {/* La que iOS mira de verdad para abrir a pantalla completa.
+            Sin ella, el icono en el iPhone abre Safari con su barra. */}
+        <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-        <meta name="apple-mobile-web-app-title" content={marcaAloha ? "Aloha" : "Sólido Auto"} />
-        <link rel="manifest" href="/manifest.json" />
+        <meta name="apple-mobile-web-app-title" content={tituloApp} />
+        <link rel="manifest" href={manifiesto} />
 
         <meta name="theme-color" content={colorTema} />
 

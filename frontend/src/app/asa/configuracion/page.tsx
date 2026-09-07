@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
+import ConfirmarBorradoASA from "@/components/ConfirmarBorradoASA";
 import { S, ANGULOS, asaGet, asaEnviar } from "@/lib/asa";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -67,11 +68,16 @@ function Conductores({ puedeEditar }: any) {
   const [lista, setLista] = useState<any[]>([]);
   const [form, setForm]   = useState<any>(vacio);
   const [editId, setEdit] = useState<number | null>(null);
+  const [borrando, setBorrando] = useState<any>(null);
+  const [verInactivos, setVerInactivos] = useState(false);
 
   const cargar = async () => {
-    try { setLista((await asaGet<any>("/conductores")).conductores || []); } catch {}
+    try {
+      const d = await asaGet<any>(`/conductores${verInactivos ? "?incluir_inactivos=1" : ""}`);
+      setLista(d.conductores || []);
+    } catch {}
   };
-  useEffect(() => { cargar(); }, []);
+  useEffect(() => { cargar(); }, [verInactivos]);
 
   const guardar = async () => {
     if (!form.nombre.trim()) return alert("El nombre es obligatorio.");
@@ -83,10 +89,21 @@ function Conductores({ puedeEditar }: any) {
     } catch (e: any) { alert(e.message); }
   };
 
-  const quitar = async (id: number) => {
-    if (!confirm("¿Dar de baja a este conductor? Sus partes anteriores quedan guardados.")) return;
+  const darDeBaja = async (id: number) => {
+    if (!confirm("¿Dar de baja a este conductor?\n\nDeja de salir en la pantalla de chequeo, pero sus partes anteriores quedan guardados y se puede reactivar.")) return;
     try { await asaEnviar(`/conductores/${id}`, "DELETE", undefined, auditHeaders()); cargar(); }
     catch (e: any) { alert(e.message); }
+  };
+
+  const reactivar = async (id: number) => {
+    try { await asaEnviar(`/conductores/${id}`, "PATCH", { activo: true }, auditHeaders()); cargar(); }
+    catch (e: any) { alert(e.message); }
+  };
+
+  const borrarDefinitivo = async () => {
+    await asaEnviar(`/conductores/${borrando.id}?definitivo=1`, "DELETE", undefined, auditHeaders());
+    setBorrando(null);
+    cargar();
   };
 
   return (
@@ -126,6 +143,10 @@ function Conductores({ puedeEditar }: any) {
       )}
 
       <div style={S.card}>
+        <label style={{ display: "flex", alignItems: "center", gap: 7, fontSize: 13, fontWeight: 600, color: "#475569", marginBottom: 12 }}>
+          <input type="checkbox" checked={verInactivos} onChange={e => setVerInactivos(e.target.checked)} />
+          Ver dados de baja
+        </label>
         <table style={{ width: "100%", borderCollapse: "collapse" }}>
           <thead><tr>
             <th style={S.th}></th><th style={S.th}>Nombre</th><th style={S.th}>Cargo</th>
@@ -133,14 +154,17 @@ function Conductores({ puedeEditar }: any) {
           </tr></thead>
           <tbody>
             {lista.map(e => (
-              <tr key={e.id}>
+              <tr key={e.id} style={e.activo === false ? { opacity: 0.55 } : undefined}>
                 <td style={S.td}>
                   <div style={{
                     width: 32, height: 32, borderRadius: 9, background: e.color || "#3b82f6",
                     color: "#fff", display: "grid", placeItems: "center", fontWeight: 900, fontSize: 12,
                   }}>{e.nombre.split(" ").map((n: string) => n[0]).join("").slice(0, 2).toUpperCase()}</div>
                 </td>
-                <td style={S.td}><b>{e.nombre}</b></td>
+                <td style={S.td}>
+                  <b>{e.nombre}</b>
+                  {e.activo === false && <span style={{ ...S.chip("#64748b"), marginLeft: 7 }}>de baja</span>}
+                </td>
                 <td style={S.td}>{e.cargo || "—"}</td>
                 <td style={S.td}>{e.telefono || "—"}</td>
                 <td style={S.td}>{e.licencia_numero || "—"} {e.licencia_categoria ? `(${e.licencia_categoria})` : ""}</td>
@@ -148,7 +172,10 @@ function Conductores({ puedeEditar }: any) {
                 <td style={S.td}>
                   {puedeEditar && <>
                     <button onClick={() => { setForm({ ...vacio, ...e, licencia_vence: e.licencia_vence || "" }); setEdit(e.id); }} style={S.btnGhost}>Editar</button>{" "}
-                    <button onClick={() => quitar(e.id)} style={{ ...S.btnGhost, color: "#dc2626" }}>Baja</button>
+                    {e.activo === false
+                      ? <button onClick={() => reactivar(e.id)} style={{ ...S.btnGhost, color: "#16a34a" }}>Reactivar</button>
+                      : <button onClick={() => darDeBaja(e.id)} style={{ ...S.btnGhost, color: "#b45309" }}>Dar de baja</button>}{" "}
+                    <button onClick={() => setBorrando(e)} style={{ ...S.btnGhost, color: "#dc2626" }}>Eliminar</button>
                   </>}
                 </td>
               </tr>
@@ -161,6 +188,17 @@ function Conductores({ puedeEditar }: any) {
           </tbody>
         </table>
       </div>
+
+      {borrando && (
+        <ConfirmarBorradoASA
+          titulo={`Eliminar a ${borrando.nombre}`}
+          nombre={borrando.nombre}
+          ruta={`/conductores/${borrando.id}/dependencias`}
+          aviso={<>Los partes y gastos que registró <b>no</b> se borran: quedan con su nombre escrito. Lo que sí se pierde es el historial de qué vehículo tenía asignado y cuándo.</>}
+          onCerrar={() => setBorrando(null)}
+          onConfirmar={borrarDefinitivo}
+        />
+      )}
     </>
   );
 }

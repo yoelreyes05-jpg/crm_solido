@@ -62,6 +62,17 @@ Es ruta pública a propósito: darle cuenta del CRM a cada conductor sería
 abrirle facturación y clientes para que reporte una goma baja. Lo público solo
 puede leer catálogos y escribir su propio parte del día.
 
+**Instalar en el celular.** Al entrar al primer paso, el conductor ve una barra
+para instalar la pantalla como app. Queda con icono propio (un camión, distinto
+del logo del CRM a propósito) y abre a pantalla completa, directo en el parte —
+no hay que buscar el enlace de WhatsApp cada mañana.
+
+Tiene manifiesto aparte (`public/manifest-asa.json`) y no el general del CRM:
+el del taller tiene `start_url: /cliente`, así que instalando ese, el conductor
+acabaría con un icono que abre en la consulta de clientes. En Android sale un
+botón que dispara el instalador; iOS no permite eso, así que ahí se muestran los
+pasos de Compartir → Añadir a pantalla de inicio.
+
 ### El encargado — `/asa`
 
 | Pantalla | Para qué |
@@ -101,6 +112,15 @@ el gasto de combustible tiene la casilla "tanque lleno".
 **Un parte por vehículo, día y turno.** Guardar dos veces reemplaza, no
 duplica. El conductor que toca "Guardar" otra vez porque no vio la señal no
 termina con dos partes ni con un error rojo.
+
+**Dos borrados distintos.** *Dar de baja* pone `activo = false`: la unidad o el
+conductor desaparecen de las pantallas, el historial queda entero y se puede
+reactivar (marca "Ver dados de baja"). *Eliminar* borra de verdad — y antes de
+preguntar cuenta lo que se va a perder ("340 partes, 52 gastos, 180 fotos") y
+obliga a escribir el código de la unidad. Un "¿estás seguro?" no frena a nadie;
+un conteo sí. Borrar un vehículo se lleva su historial completo por CASCADE y
+sus fotos del bucket; borrar un conductor conserva sus partes y gastos (llevan
+el nombre congelado) pero pierde el historial de asignaciones.
 
 **Las fotos van a Supabase Storage**, no a la tabla como base64 (que es lo que
 hace hoy la cafetería). Cinco fotos por unidad por día en base64 revientan la

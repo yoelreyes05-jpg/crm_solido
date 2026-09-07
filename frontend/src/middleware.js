@@ -17,6 +17,12 @@ const RUTAS_PUBLICAS = [
   // anuncios y marca lo que ya sonó.
   "/altavoz/receptor",
   "/manifest.json",
+  // El celular pide el manifiesto ANTES de que exista sesion — y aqui nunca
+  // habra sesion, porque el chequeo es publico. Si el middleware lo manda a
+  // /login, el navegador recibe HTML donde esperaba JSON y la opcion de
+  // instalar simplemente no aparece, sin ningun error visible.
+  "/manifest-asa.json",
+  "/asa/chequeo",
   "/sw.js",
 ];
 
