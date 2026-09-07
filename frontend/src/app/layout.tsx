@@ -234,14 +234,17 @@ export default function RootLayout({ children }) {
     router.push(salida);
   };
 
-  if (!listo) return (
-    <html lang="es">
-      <body style={{ margin: 0, background: "#f5f7fb" }} />
-    </html>
-  );
-
-  // SIN SIDEBAR: login y cliente
-
+  // Las rutas publicas se resuelven ANTES del guard de `listo`.
+  //
+  // `listo` solo se pone en true dentro de un useEffect, que no corre en el
+  // servidor. Con el guard delante, el HTML que salia de Next para /asa/chequeo
+  // era un <html><body/> vacio: sin <title>, sin theme-color y sin el <link
+  // rel="manifest">. Chrome decide si la pagina es instalable con lo que llega
+  // en ese HTML, mucho antes de que React hidrate, asi que nunca disparaba
+  // `beforeinstallprompt` y la opcion de instalar no aparecia nunca.
+  //
+  // Aqui no hay nada que esperar: `esPublica` sale del pathname, que existe en
+  // el servidor, y estas rutas no miran la sesion.
 // Para rutas públicas (login y cliente) agrega los meta tags PWA:
 if (esPublica) {
   // La puerta de Aloha se identifica como Aloha hasta en la pestaña del
@@ -282,6 +285,24 @@ if (esPublica) {
         <link rel="apple-touch-icon" href={icono} />
         <link rel="icon" href={icono} />
         <title>{titulo}</title>
+        {/* El evento de instalacion se dispara una sola vez y muy temprano —
+            normalmente antes de que React monte nada. Si nadie lo escucha en ese
+            momento, se pierde y el boton de instalar no aparece jamas. Este
+            script corre en el <head>, lo guarda, y avisa a quien lo necesite. */}
+        <script dangerouslySetInnerHTML={{ __html: `
+          (function () {
+            window.__asaInstalador = window.__asaInstalador || null;
+            window.addEventListener('beforeinstallprompt', function (e) {
+              e.preventDefault();
+              window.__asaInstalador = e;
+              window.dispatchEvent(new Event('asa-instalable'));
+            });
+            window.addEventListener('appinstalled', function () {
+              window.__asaInstalador = null;
+              window.dispatchEvent(new Event('asa-instalada'));
+            });
+          })();
+        ` }} />
       </head>
       <body style={{ margin: 0, fontFamily: "Arial, sans-serif" }}>
         {children}
@@ -298,6 +319,14 @@ if (esPublica) {
     </html>
   );
 }
+
+  if (!listo) return (
+    <html lang="es">
+      <body style={{ margin: 0, background: "#f5f7fb" }} />
+    </html>
+  );
+
+  // SIN SIDEBAR: login y cliente
 
   if (!usuario) return (
     <html lang="es">
