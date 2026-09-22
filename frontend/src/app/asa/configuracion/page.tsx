@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
 import ConfirmarBorradoASA from "@/components/ConfirmarBorradoASA";
-import { S, ANGULOS, asaGet, asaEnviar } from "@/lib/asa";
+import { S, ANGULOS, asaGet, asaEnviar, API_ASA } from "@/lib/asa";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ⚙️ ASA — CONFIGURACIÓN
@@ -23,6 +23,7 @@ const PESTANAS = [
   { id: "checklist",  label: "Checklist",    icono: "✅" },
   { id: "fallas",     label: "Fallas",       icono: "🔧" },
   { id: "ajustes",    label: "Ajustes",      icono: "⚙️" },
+  { id: "traspaso",   label: "Exportar",     icono: "📤" },
 ];
 
 export default function ConfigASAPage() {
@@ -57,6 +58,7 @@ export default function ConfigASAPage() {
       {tab === "checklist" && <Catalogo recurso="checklist" titulo="Puntos del checklist" puedeEditar={puedeEditar} />}
       {tab === "fallas"    && <Catalogo recurso="catalogo-fallas" titulo="Catálogo de fallas" puedeEditar={puedeEditar} conSeveridad />}
       {tab === "ajustes"   && <Ajustes puedeEditar={puedeEditar} />}
+      {tab === "traspaso"  && <Traspaso />}
     </div>
   );
 }
@@ -416,6 +418,78 @@ function Ajustes({ puedeEditar }: any) {
           </button>
         </div>
       )}
+    </div>
+  );
+}
+
+
+// ── Exportar la flota ────────────────────────────────────────────────────────
+//
+// Sirve para llevarse el módulo completo al sistema de Ambiente y Salud sin
+// darle a nadie la clave de este Supabase: se baja el archivo aquí y se sube
+// allá. También vale como respaldo legible — un .xlsx se abre dentro de diez
+// años; un volcado de base de datos, con suerte.
+function Traspaso() {
+  const [bajando, setBajando] = useState(false);
+
+  const exportar = async () => {
+    setBajando(true);
+    try {
+      // El .xlsx es binario, así que no pasa por asaGet (que espera JSON).
+      const r = await fetch(`${API_ASA}/exportar-excel`);
+      if (!r.ok) {
+        let mensaje = `El servidor respondió ${r.status}`;
+        try { mensaje = (await r.json()).mensaje || mensaje; } catch {}
+        throw new Error(mensaje);
+      }
+      const blob = await r.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `flota-asa-${new Date().toISOString().slice(0, 10)}.xlsx`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e: any) {
+      alert(`No se pudo exportar: ${e.message}`);
+    } finally {
+      setBajando(false);
+    }
+  };
+
+  return (
+    <div style={S.card}>
+      <div style={{ fontWeight: 900, fontSize: 15, marginBottom: 6 }}>Exportar la flota a Excel</div>
+      <div style={{ color: "#475569", fontSize: 13.5, lineHeight: 1.6, marginBottom: 16 }}>
+        Baja toda la flota en un solo archivo: vehículos, conductores, partes
+        diarios, fallas, gastos, documentos y mantenimientos, cada tabla en su
+        hoja. Es lo que se sube en <strong>Ambiente y Salud → Flota →
+        Configuración → Importar desde Excel</strong>.
+      </div>
+
+      <button onClick={exportar} disabled={bajando} style={{ ...S.btn, opacity: bajando ? 0.6 : 1 }}>
+        {bajando ? "Preparando el archivo…" : "📤 Descargar la flota en Excel"}
+      </button>
+
+      <ul style={{ color: "#64748b", fontSize: 12.5, lineHeight: 1.7, marginTop: 18, paddingLeft: 18 }}>
+        <li>
+          <strong>Las fotos no viajan en el archivo</strong>, solo sus enlaces. Siguen
+          sirviéndose desde el almacenamiento de este CRM: si algún día se apaga
+          este proyecto, esas fotos se caen del otro sistema.
+        </li>
+        <li>
+          <strong>No cambies los nombres de las hojas ni la primera fila.</strong> El
+          importador busca por esos nombres; si se renombran, no encuentra nada.
+        </li>
+        <li>
+          <strong>Importar dos veces el mismo archivo actualiza, no duplica</strong>, porque
+          allá se reconcilia por código de vehículo, cédula del conductor y
+          vehículo+fecha+turno del parte.
+        </li>
+        <li>
+          Los <strong>id</strong> que salen son los de este sistema. Allá se generan nuevos;
+          van en el archivo solo para poder rearmar qué parte es de cuál vehículo.
+        </li>
+      </ul>
     </div>
   );
 }

@@ -26,6 +26,7 @@
 
 import express from "express";
 import { createClient } from "@supabase/supabase-js";
+import ExcelJS from "exceljs";
 
 const router = express.Router();
 
@@ -706,6 +707,149 @@ router.get("/reportes/conductores", ruta(async (req, res) => {
 // ═════════════════════════════════════════════════════════════════════════════
 // CRUD — VEHÍCULOS, EMPLEADOS, GASTOS, DOCUMENTOS, MANTENIMIENTOS
 // ═════════════════════════════════════════════════════════════════════════════
+
+// ═════════════════════════════════════════════════════════════════════════════
+// GET /asa/exportar-excel — la flota completa en un .xlsx
+//
+// Para llevarse el módulo a otro sistema (el de Ambiente y Salud) sin tener que
+// darle a nadie la clave de este Supabase. Se baja aquí, se sube allá.
+//
+// El formato ES el contrato entre los dos sistemas, así que conviene saber
+// cómo está pensado:
+//
+// · **Una hoja por tabla**, con los nombres de columna tal como están en la
+//   base. Nada de nombres "bonitos": el que importa no tiene que adivinar
+//   equivalencias, y si mañana se agrega una columna, se agrega en los dos
+//   lados sin traducir.
+//
+// · **Se exportan los `id` de origen.** No para reutilizarlos —allá las tablas
+//   también son BIGSERIAL y meterle ids ajenos dejaría la secuencia atrás— sino
+//   para poder rearmar las relaciones: el importador construye un mapa
+//   viejo→nuevo y reescribe `vehiculo_id`, `conductor_id` y `chequeo_id`.
+//
+// · **Las fechas van como texto ISO**, no como fechas de Excel. Excel guarda
+//   las fechas en la zona horaria de quien abre el archivo, así que un parte
+//   del 1ro a las 7am podía viajar al 31 del mes anterior.
+//
+// · **`respuestas` va como JSON en una celda.** Es el parte completo tal como
+//   quedó ese día; se vuelve a parsear al importar.
+//
+// · **Las fotos no viajan**, solo sus URLs. Siguen sirviéndose desde el bucket
+//   de ESTE proyecto. Si algún día se apaga, se caen — queda dicho aquí a
+//   propósito para que sea una decisión y no una sorpresa.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// El contrato de columnas. Está escrito a mano y no sacado de los datos porque
+// una tabla vacía no tiene columnas que mirar, y el archivo tiene que salir
+// igual — con sus encabezados — aunque todavía no haya un solo gasto cargado.
+export const HOJAS_FLOTA = [
+  ["Conductores", "asa_flota_conductores", "orden",
+    ["id","nombre","cedula","telefono","cargo","licencia_numero","licencia_categoria","licencia_vence","foto_url","color","orden","activo"]],
+  ["Vehiculos", "asa_flota_vehiculos", "codigo",
+    ["id","codigo","placa","marca","modelo","anio","color","chasis","tipo","combustible","capacidad_tanque","km_inicial","km_actual","km_actualizado","conductor_id","departamento","estado","requiere_chequeo","requiere_fotos","fecha_adquisicion","costo_adquisicion","foto_url","notas","activo"]],
+  ["Asignaciones", "asa_flota_asignaciones", "id",
+    ["id","vehiculo_id","conductor_id","desde","hasta","km_entrega","km_devuelve","motivo","asignado_por"]],
+  ["Checklist", "asa_flota_checklist_items", "orden",
+    ["id","codigo","categoria","etiqueta","icono","critico","orden","activo"]],
+  ["CatalogoFallas", "asa_flota_fallas_catalogo", "orden",
+    ["id","codigo","categoria","etiqueta","icono","severidad","detiene_vehiculo","orden","activo"]],
+  ["Chequeos", "asa_flota_chequeos", "id",
+    ["id","vehiculo_id","conductor_id","conductor_nombre","fecha","turno","km","km_recorrido","combustible_octavos","respuestas","items_mal","fallas_reportadas","fotos_subidas","fotos_completas","apto_circular","observacion","lat","lng"]],
+  ["ChequeoItems", "asa_flota_chequeo_items", "id",
+    ["id","chequeo_id","vehiculo_id","fecha","item_codigo","item_etiqueta","valor","critico"]],
+  ["FallasReportadas", "asa_flota_fallas_reportadas", "id",
+    ["id","vehiculo_id","chequeo_id","conductor_id","conductor_nombre","falla_codigo","falla_etiqueta","categoria","severidad","detiene_vehiculo","km_reporte","estado","veces_reportada","primera_vez","ultima_vez","resuelta_en","resuelta_por","costo_reparacion","nota"]],
+  ["Fotos", "asa_flota_fotos", "id",
+    ["id","vehiculo_id","chequeo_id","conductor_id","fecha","angulo","url","ruta","bytes","nota"]],
+  ["Gastos", "asa_flota_gastos", "id",
+    ["id","vehiculo_id","conductor_id","fecha","tipo","descripcion","monto","galones","precio_galon","km","tanque_lleno","suplidor","ncf","metodo_pago","foto_recibo","registrado_por","notas"]],
+  ["Documentos", "asa_flota_documentos", "vence",
+    ["id","vehiculo_id","tipo","numero","compania","emitido","vence","monto","alerta_dias","archivo_url","notas","activo"]],
+  ["Mantenimientos", "asa_flota_mantenimientos", "id",
+    ["id","vehiculo_id","tipo","etiqueta","intervalo_km","intervalo_dias","km_ultimo","fecha_ultimo","costo_ultimo","taller","activo","notas"]],
+];
+
+/** Trae una tabla completa, de 1,000 en 1,000.
+ *  PostgREST corta en 1,000 filas por defecto y no avisa: sin esto, el archivo
+ *  saldría con 1,000 chequeos de los 8,000 que hay y nadie se enteraría. */
+async function traerTodo(tabla, orden) {
+  const filas = [];
+  for (let desde = 0; ; desde += 1000) {
+    const { data, error } = await supabase.from(tabla).select("*")
+      .order(orden, { ascending: true }).range(desde, desde + 999);
+    if (error) throw new Error(`${tabla}: ${error.message}`);
+    filas.push(...(data || []));
+    if (!data || data.length < 1000) break;
+  }
+  return filas;
+}
+
+/** Valor listo para una celda: fechas en ISO, objetos en JSON, nada de nulls. */
+function celda(v) {
+  if (v === null || v === undefined) return "";
+  if (v instanceof Date) return v.toISOString();
+  if (typeof v === "object") return JSON.stringify(v);
+  return v;
+}
+
+router.get("/exportar-excel", ruta(async (req, res) => {
+  const wb = new ExcelJS.Workbook();
+  wb.creator = "CRM Sólido — módulo ASA";
+  wb.created = new Date();
+
+  const conteos = [];
+
+  // ── Hoja de instrucciones, primera a propósito ────────────────────────────
+  // Quien abra esto dentro de seis meses no se va a acordar de para qué era.
+  const guia = wb.addWorksheet("LEEME");
+  guia.columns = [{ width: 22 }, { width: 96 }];
+  const linea = (a, b = "") => guia.addRow([a, b]);
+  linea("Qué es esto", "La flota de ASA exportada del CRM del taller, para cargarla en el sistema de Ambiente y Salud.");
+  linea("Cómo se usa", "En Ambiente y Salud: Flota → Configuración → Importar desde Excel. Primero en modo prueba.");
+  linea("", "");
+  linea("NO CAMBIES", "Los nombres de las hojas ni la primera fila (los encabezados). El importador busca por esos nombres.");
+  linea("Los id", "Son los de ESTE sistema. Allá se generan nuevos; sirven solo para rearmar las relaciones entre hojas.");
+  linea("Las fechas", "Van como texto ISO a propósito. Si las conviertes a fecha de Excel, se pueden correr un día.");
+  linea("Las fotos", "No viajan en el archivo: solo sus enlaces, que siguen apuntando al almacenamiento de este CRM.");
+  linea("Se puede repetir", "Importar dos veces el mismo archivo actualiza, no duplica.");
+  linea("", "");
+  linea("Generado", new Date().toLocaleString("es-DO", { timeZone: "America/Santo_Domingo" }));
+  guia.getColumn(1).font = { bold: true };
+  guia.getRow(1).font = { bold: true, size: 12 };
+
+  // ── Una hoja por tabla ────────────────────────────────────────────────────
+  for (const [hoja, tabla, orden, columnas] of HOJAS_FLOTA) {
+    const filas = await traerTodo(tabla, orden);
+    const ws = wb.addWorksheet(hoja);
+    ws.columns = columnas.map(c => ({ header: c, key: c, width: Math.min(Math.max(c.length + 3, 12), 40) }));
+    ws.getRow(1).font = { bold: true, color: { argb: "FFFFFFFF" } };
+    ws.getRow(1).fill = { type: "pattern", pattern: "solid", fgColor: { argb: "FF1D4ED8" } };
+    ws.views = [{ state: "frozen", ySplit: 1 }];
+
+    for (const f of filas) {
+      ws.addRow(Object.fromEntries(columnas.map(c => [c, celda(f[c])])));
+    }
+    conteos.push(`${hoja}: ${filas.length}`);
+  }
+
+  // ── Ajustes del módulo ────────────────────────────────────────────────────
+  const { data: cfg } = await supabase.from("config_sistema")
+    .select("valor").eq("clave", "asa_flota_config").maybeSingle();
+  const wsCfg = wb.addWorksheet("Configuracion");
+  wsCfg.columns = [{ header: "clave", key: "clave", width: 24 }, { header: "valor", key: "valor", width: 90 }];
+  wsCfg.getRow(1).font = { bold: true };
+  if (cfg?.valor) wsCfg.addRow({ clave: "asa_flota_config", valor: JSON.stringify(cfg.valor) });
+
+  guia.addRow([]);
+  guia.addRow(["Contenido", conteos.join("  ·  ")]);
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const nombre = `flota-asa-${hoyRD()}.xlsx`;
+
+  res.setHeader("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet");
+  res.setHeader("Content-Disposition", `attachment; filename="${nombre}"`);
+  res.send(Buffer.from(buffer));
+}));
 
 /**
  * Fábrica de CRUD: todas estas tablas se comportan igual.
