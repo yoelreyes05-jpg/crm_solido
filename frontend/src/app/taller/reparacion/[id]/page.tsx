@@ -51,20 +51,21 @@ type MsgTipo = "ok" | "error" | "info";
 interface Msg { tipo: MsgTipo; texto: string }
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
+// Tema claro: el taller trabaja con luz de día y el tema oscuro no se leía bien.
 const C = {
-  bg:     "#0f172a",
-  card:   "#1e293b",
-  card2:  "#162032",
-  border: "#334155",
-  text:   "#e2e8f0",
-  muted:  "#94a3b8",
-  blue:   "#3b82f6",
-  green:  "#10b981",
-  red:    "#ef4444",
-  orange: "#f97316",
-  yellow: "#f59e0b",
-  purple: "#8b5cf6",
-  cyan:   "#06b6d4",
+  bg:     "#f1f5f9",
+  card:   "#ffffff",
+  card2:  "#f8fafc",
+  border: "#cbd5e1",
+  text:   "#0f172a",
+  muted:  "#475569",
+  blue:   "#2563eb",
+  green:  "#059669",
+  red:    "#dc2626",
+  orange: "#ea580c",
+  yellow: "#d97706",
+  purple: "#7c3aed",
+  cyan:   "#0891b2",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -473,7 +474,7 @@ export default function ReparacionPage() {
 
       {/* Header */}
       <div style={{
-        background: "#1e293b",
+        background: "#ffffff",
         borderBottom: `1px solid ${C.border}`,
         padding: "14px 24px",
         display: "flex",
@@ -776,7 +777,7 @@ export default function ReparacionPage() {
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                         {fichaTecnica.recalls.slice(0, 5).map((r: any, i: number) => (
-                          <div key={i} style={{ background: "#0f172a", borderRadius: 8, padding: "10px 12px", borderLeft: `3px solid ${C.red}` }}>
+                          <div key={i} style={{ background: "#f8fafc", borderRadius: 8, padding: "10px 12px", borderLeft: `3px solid ${C.red}` }}>
                             {r.NHTSACampaignNumber && (
                               <span style={{ fontSize: 10, color: C.muted, display: "block", marginBottom: 3 }}>
                                 Campaña: {r.NHTSACampaignNumber}
@@ -1282,27 +1283,27 @@ export default function ReparacionPage() {
 
       {/* Modal IA */}
       {iaModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(620px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(620px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(15,23,42,0.2)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#a78bfa" }}>✨ Avance mejorado por IA</h3>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#6d28d9" }}>✨ Avance mejorado por IA</h3>
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>Revisa y edita antes de aceptar</p>
               </div>
               <button onClick={() => setIaModal(null)} style={{ background: "transparent", border: "none", color: C.muted, fontSize: 22, cursor: "pointer" }}>✕</button>
             </div>
             <div style={{ marginBottom: 10 }}>
               <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>Texto original</div>
-              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#94a3b8", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto" }}>
+              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 12px", fontSize: 12, color: "#475569", whiteSpace: "pre-wrap", maxHeight: 80, overflowY: "auto" }}>
                 {descAvance}
               </div>
             </div>
             <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>✨ Versión profesional (editable)</div>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 5 }}>✨ Versión profesional (editable)</div>
               <textarea
                 value={iaModal}
                 onChange={e => setIaModal(e.target.value)}
-                style={{ flex: 1, minHeight: 200, width: "100%", padding: "12px 14px", background: "#0f172a", border: "2px solid #7c3aed55", borderRadius: 8, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7, resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }}
+                style={{ flex: 1, minHeight: 200, width: "100%", padding: "12px 14px", background: "#f8fafc", border: "2px solid #7c3aed55", borderRadius: 8, color: "#0f172a", fontSize: 13, lineHeight: 1.7, resize: "vertical", boxSizing: "border-box", fontFamily: "inherit" }}
               />
             </div>
             <div style={{ display: "flex", gap: 12, marginTop: 16 }}>
@@ -1323,7 +1324,7 @@ export default function ReparacionPage() {
 const labelStyle: React.CSSProperties = {
   display: "block",
   fontSize: 12,
-  color: "#94a3b8",
+  color: "#475569",
   textTransform: "uppercase",
   letterSpacing: 0.5,
   fontWeight: 600,
@@ -1332,9 +1333,9 @@ const labelStyle: React.CSSProperties = {
 
 const inputStyle: React.CSSProperties = {
   width: "100%",
-  background: "#0f172a",
-  color: "#e2e8f0",
-  border: "1px solid #334155",
+  background: "#f8fafc",
+  color: "#0f172a",
+  border: "1px solid #cbd5e1",
   borderRadius: 8,
   padding: "10px 12px",
   fontSize: 14,

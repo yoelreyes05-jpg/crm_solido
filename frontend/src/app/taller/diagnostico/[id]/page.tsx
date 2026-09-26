@@ -77,19 +77,20 @@ type MsgTipo = "ok" | "error" | "info";
 interface Msg { tipo: MsgTipo; texto: string }
 
 // ── Paleta ────────────────────────────────────────────────────────────────────
+// Tema claro: el taller trabaja con luz de día y el tema oscuro no se leía bien.
 const C = {
-  bg:     "#0f172a",
-  card:   "#1e293b",
-  card2:  "#162032",
-  border: "#334155",
-  text:   "#e2e8f0",
-  muted:  "#94a3b8",
-  blue:   "#3b82f6",
-  green:  "#10b981",
-  red:    "#ef4444",
-  orange: "#f97316",
-  yellow: "#f59e0b",
-  purple: "#8b5cf6",
+  bg:     "#f1f5f9",
+  card:   "#ffffff",
+  card2:  "#f8fafc",
+  border: "#cbd5e1",
+  text:   "#0f172a",
+  muted:  "#475569",
+  blue:   "#2563eb",
+  green:  "#059669",
+  red:    "#dc2626",
+  orange: "#ea580c",
+  yellow: "#d97706",
+  purple: "#7c3aed",
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -130,15 +131,15 @@ function CampoReadonly({
 }) {
   return (
     <div>
-      <div style={{ fontSize: 10, fontWeight: 700, color: "#94a3b8", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
+      <div style={{ fontSize: 10, fontWeight: 700, color: "#475569", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 3 }}>
         {label}
       </div>
       {multiline ? (
-        <div style={{ fontSize: 12, color: "#e2e8f0", background: "#0f172a", borderRadius: 6, padding: "6px 10px", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
+        <div style={{ fontSize: 12, color: "#0f172a", background: "#f8fafc", borderRadius: 6, padding: "6px 10px", whiteSpace: "pre-wrap", lineHeight: 1.5 }}>
           {value || "—"}
         </div>
       ) : (
-        <div style={{ fontSize: 13, color: "#e2e8f0", fontWeight: 600 }}>
+        <div style={{ fontSize: 13, color: "#0f172a", fontWeight: 600 }}>
           {value ?? "—"}
         </div>
       )}
@@ -559,7 +560,7 @@ export default function DiagnosticoPage() {
     <div style={{ minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "system-ui, sans-serif" }}>
 
       {/* Header */}
-      <div style={{ background: "#1e293b", borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
+      <div style={{ background: "#ffffff", borderBottom: `1px solid ${C.border}`, padding: "14px 24px", display: "flex", alignItems: "center", gap: 12 }}>
         <button
           onClick={() => router.push("/taller")}
           style={{ background: "transparent", color: C.muted, border: "none", cursor: "pointer", fontSize: 20, padding: 0 }}
@@ -881,18 +882,18 @@ export default function DiagnosticoPage() {
                 En vez de inventar el precio, el técnico escoge la operación
                 del tarifario: suma el monto y deja el renglón escrito. */}
             {!diagnostico?.terminado && tarifario.length > 0 && (
-              <div style={{ background: "#0d1f1e", border: "1px solid #0f766e88",
+              <div style={{ background: "#f0fdfa", border: "1px solid #0f766e88",
                 borderRadius: 10, padding: 14, marginBottom: 18 }}>
                 <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                  <div style={{ fontWeight: 700, fontSize: 14, color: "#5eead4", flex: 1 }}>
+                  <div style={{ fontWeight: 700, fontSize: 14, color: "#0f766e", flex: 1 }}>
                     🔧 Tarifario de mano de obra
-                    <span style={{ fontSize: 11, fontWeight: 400, color: "#99f6e4", marginLeft: 8 }}>
+                    <span style={{ fontSize: 11, fontWeight: 400, color: "#115e59", marginLeft: 8 }}>
                       {tarifario.length} operaciones con precio de mercado
                     </span>
                   </div>
                   <button type="button" onClick={() => setTarifOpen(!tarifOpen)}
-                    style={{ background: tarifOpen ? "#0f766e" : "#162032",
-                      border: "1px solid #0f766e", color: "#5eead4", borderRadius: 8,
+                    style={{ background: tarifOpen ? "#0f766e" : "#f8fafc",
+                      border: "1px solid #0f766e", color: "#0f766e", borderRadius: 8,
                       padding: "6px 14px", cursor: "pointer", fontWeight: 700, fontSize: 12 }}>
                     {tarifOpen ? "Cerrar" : "Buscar operación"}
                   </button>
@@ -906,7 +907,7 @@ export default function DiagnosticoPage() {
                           style={{
                             padding: "6px 10px", borderRadius: 7, cursor: "pointer",
                             fontWeight: 700, fontSize: 11,
-                            background: tarifSeg === s.clave ? "#0f766e" : "#162032",
+                            background: tarifSeg === s.clave ? "#0f766e" : "#f8fafc",
                             color: tarifSeg === s.clave ? "#fff" : C.muted,
                             border: `1px solid ${tarifSeg === s.clave ? "#0f766e" : C.border}`,
                           }}>
@@ -915,7 +916,7 @@ export default function DiagnosticoPage() {
                       ))}
                     </div>
                     {tarifSugerido && (
-                      <div style={{ fontSize: 11, color: "#5eead4", marginTop: 7 }}>
+                      <div style={{ fontSize: 11, color: "#0f766e", marginTop: 7 }}>
                         {tarifSeg === tarifSugerido.segmento
                           ? `✓ Segmento sugerido por el vehículo (${tarifSugerido.motivo})`
                           : `⚠️ El vehículo sugiere ${tarifSugerido.segmento} (${tarifSugerido.motivo})`}
@@ -939,7 +940,7 @@ export default function DiagnosticoPage() {
                                 {o.horas_estandar != null ? ` · ${Number(o.horas_estandar)} h` : ""}
                               </div>
                             </div>
-                            <span style={{ fontWeight: 700, fontSize: 13, color: "#5eead4", whiteSpace: "nowrap" }}>
+                            <span style={{ fontWeight: 700, fontSize: 13, color: "#0f766e", whiteSpace: "nowrap" }}>
                               {fmtDinero(precio)}
                             </span>
                             <button type="button" onClick={() => agregarOperacion(o)}
@@ -987,17 +988,17 @@ export default function DiagnosticoPage() {
                   type="text"
                   readOnly
                   value={fmtDinero(total)}
-                  style={{ ...inputStyle, background: "#0f172a", color: C.green, fontWeight: 700, cursor: "default" }}
+                  style={{ ...inputStyle, background: "#f8fafc", color: C.green, fontWeight: 700, cursor: "default" }}
                 />
               </div>
             </div>
 
             {/* Repuestos sugeridos por compatibilidad */}
             {(loadingSuger || sugeridos.length > 0) && (
-              <div style={{ background: "#0f1f0f", border: "1px solid #16a34a44", borderRadius: 10, padding: 16, marginBottom: 18 }}>
-                <div style={{ fontWeight: 700, fontSize: 14, color: "#4ade80", marginBottom: 10 }}>
+              <div style={{ background: "#f0fdf4", border: "1px solid #16a34a44", borderRadius: 10, padding: 16, marginBottom: 18 }}>
+                <div style={{ fontWeight: 700, fontSize: 14, color: "#15803d", marginBottom: 10 }}>
                   ✨ Repuestos sugeridos para este vehículo
-                  <span style={{ fontSize: 11, fontWeight: 400, color: "#86efac", marginLeft: 8 }}>
+                  <span style={{ fontSize: 11, fontWeight: 400, color: "#166534", marginLeft: 8 }}>
                     basado en reparaciones anteriores
                   </span>
                 </div>
@@ -1011,7 +1012,7 @@ export default function DiagnosticoPage() {
                         <div
                           key={s.inventario_id}
                           style={{
-                            background: yaAgregado ? "#16a34a22" : "#162032",
+                            background: yaAgregado ? "#16a34a22" : "#f8fafc",
                             border: `1px solid ${yaAgregado ? "#16a34a" : C.border}`,
                             borderRadius: 8, padding: "8px 12px",
                             display: "flex", alignItems: "center", gap: 10,
@@ -1046,7 +1047,7 @@ export default function DiagnosticoPage() {
                             </button>
                           )}
                           {yaAgregado && (
-                            <span style={{ fontSize: 11, color: "#4ade80", fontWeight: 700 }}>✓ En lista</span>
+                            <span style={{ fontSize: 11, color: "#15803d", fontWeight: 700 }}>✓ En lista</span>
                           )}
                         </div>
                       );
@@ -1057,7 +1058,7 @@ export default function DiagnosticoPage() {
             )}
 
             {/* Repuestos del inventario */}
-            <div style={{ background: "#162032", border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 18 }}>
+            <div style={{ background: "#f8fafc", border: `1px solid ${C.border}`, borderRadius: 10, padding: 16, marginBottom: 18 }}>
               <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: 14, color: C.text }}>Repuestos del Inventario</div>
@@ -1254,7 +1255,7 @@ export default function DiagnosticoPage() {
                     }
                   }}
                   style={{
-                    background: "#0f172a", color: C.blue,
+                    background: "#f8fafc", color: C.blue,
                     border: `1px solid ${C.blue}`, borderRadius: 8,
                     padding: "8px 18px", fontWeight: 700, fontSize: 13, cursor: "pointer",
                   }}
@@ -1269,8 +1270,8 @@ export default function DiagnosticoPage() {
 
       {/* Modal: buscar en inventario */}
       {showInvPanel && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-          <div style={{ background: C.card, borderRadius: 14, padding: 24, width: "min(600px, 95vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ background: C.card, borderRadius: 14, padding: 24, width: "min(600px, 95vw)", maxHeight: "80vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(15,23,42,0.18)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 800, color: C.text }}>Buscar en Inventario</h3>
               <button
@@ -1350,11 +1351,11 @@ export default function DiagnosticoPage() {
 
       {/* Modal: resultado IA */}
       {iaModal && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
-          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(660px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(0,0,0,0.6)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.5)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 1000 }}>
+          <div style={{ background: C.card, borderRadius: 16, padding: 28, width: "min(660px, 96vw)", maxHeight: "88vh", display: "flex", flexDirection: "column", boxShadow: "0 24px 60px rgba(15,23,42,0.2)" }}>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
               <div>
-                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#a78bfa" }}>
+                <h3 style={{ margin: 0, fontSize: 17, fontWeight: 800, color: "#6d28d9" }}>
                   ✨ Texto mejorado por IA
                 </h3>
                 <p style={{ margin: "4px 0 0", fontSize: 12, color: C.muted }}>
@@ -1369,14 +1370,14 @@ export default function DiagnosticoPage() {
               <div style={{ fontSize: 10, fontWeight: 700, color: C.muted, textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
                 Texto original del técnico
               </div>
-              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#94a3b8", whiteSpace: "pre-wrap", maxHeight: 100, overflowY: "auto" }}>
+              <div style={{ background: C.card2, border: `1px solid ${C.border}`, borderRadius: 8, padding: "10px 14px", fontSize: 12, color: "#475569", whiteSpace: "pre-wrap", maxHeight: 100, overflowY: "auto" }}>
                 {iaModal.campo === "desc" ? desc : moDetalle}
               </div>
             </div>
 
             {/* Texto mejorado — editable */}
             <div style={{ flex: 1, display: "flex", flexDirection: "column", minHeight: 0 }}>
-              <div style={{ fontSize: 10, fontWeight: 700, color: "#a78bfa", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 700, color: "#6d28d9", textTransform: "uppercase", letterSpacing: 0.5, marginBottom: 6 }}>
                 ✨ Versión profesional (puedes editar antes de aceptar)
               </div>
               <textarea
@@ -1384,8 +1385,8 @@ export default function DiagnosticoPage() {
                 onChange={e => setIaModal(prev => prev ? { ...prev, mejorado: e.target.value } : null)}
                 style={{
                   flex: 1, minHeight: 220, width: "100%", padding: "12px 14px",
-                  background: "#0f172a", border: "2px solid #7c3aed55",
-                  borderRadius: 8, color: "#e2e8f0", fontSize: 13, lineHeight: 1.7,
+                  background: "#f8fafc", border: "2px solid #7c3aed55",
+                  borderRadius: 8, color: "#0f172a", fontSize: 13, lineHeight: 1.7,
                   resize: "vertical", boxSizing: "border-box", fontFamily: "inherit",
                 }}
               />
@@ -1417,8 +1418,8 @@ export default function DiagnosticoPage() {
 
       {/* Modal: confirmar cerrar diagnostico */}
       {confirmCerrar && (
-        <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.7)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
-          <div style={{ background: C.card, borderRadius: 14, padding: 28, width: "min(420px, 95vw)", boxShadow: "0 24px 60px rgba(0,0,0,0.5)" }}>
+        <div style={{ position: "fixed", inset: 0, background: "rgba(15,23,42,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 999 }}>
+          <div style={{ background: C.card, borderRadius: 14, padding: 28, width: "min(420px, 95vw)", boxShadow: "0 24px 60px rgba(15,23,42,0.18)" }}>
             <h3 style={{ margin: "0 0 10px", fontSize: 18, color: C.text }}>Cerrar diagnostico</h3>
             <p style={{ color: C.muted, fontSize: 13, marginBottom: 20 }}>
               Al cerrar el diagnostico se enviara para aprobacion del cliente y no podras editarlo mas.

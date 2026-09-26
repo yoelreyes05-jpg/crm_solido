@@ -193,6 +193,51 @@ function imprimirOrdenCompleta(
 ) {
   const numeroOrden = orden.numero_orden || `OT-${String(orden.id).padStart(4,"0")}`;
   const fmtDate = (d: string) => d ? new Date(d).toLocaleString("es-DO",{ year:"numeric", month:"long", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  const fmtDia  = (d: string) => d ? new Date(d).toLocaleDateString("es-DO",{ day:"2-digit", month:"short", year:"numeric" }) : "—";
+
+  // ── Texto del informe: sin repeticiones y bien presentado ──────────────
+  // El mismo trabajo se guardaba como trabajo realizado, como avance y salía
+  // otra vez en la bitácora de QC: el cliente leía el mismo párrafo tres veces.
+  // Ahora cada texto se muestra UNA sola vez; _yaVisto() lleva la cuenta.
+  const _normTxt = (t: any) => String(t || "")
+    .replace(/\*\*|__/g, "")
+    .toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, " ").trim();
+  const _vistos = new Set<string>();
+  const _yaVisto = (t: any) => {
+    const k = _normTxt(t);
+    if (!k) return true;
+    if (_vistos.has(k)) return true;
+    _vistos.add(k);
+    return false;
+  };
+  // Relleno automático que no le dice nada al cliente si ya hay trabajos descritos.
+  const _esGenerico = (t: any) => /^(reparacion completada( por (el )?tecnico)?|trabajo completado|completado)$/.test(_normTxt(t));
+  const _esc = (t: string) => t.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  const _negritas = (t: string) => t.replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>").replace(/\*\*/g, "");
+  // Convierte el texto libre (o el que devuelve la IA) en párrafos y listas
+  // numeradas justificadas: separa "1. ... 2. ..." aunque vengan en una sola
+  // línea, pasa **negritas** a <strong> y quita el título "HALLAZGOS TÉCNICOS:".
+  const fmtTxt = (t: any) => {
+    let x = String(t || "").replace(/\r/g, "").trim();
+    if (!x) return "";
+    x = x.replace(/([.;:!?)])\s+(\*\*)?(\d{1,2})[.)]\s+/g, "$1\n$2$3. ");
+    const lineas = x.split("\n").map(l => l.trim()).filter(Boolean);
+    if (lineas.length && /^(\*\*)?(hallazgos|diagnostico|diagnóstico)( tecnicos| técnicos| tecnico| técnico)?:?(\*\*)?:?$/i.test(lineas[0])) lineas.shift();
+    const bloques: { num?: string; txt: string[] }[] = [];
+    for (const l of lineas) {
+      const m = l.match(/^(\*\*)?(\d{1,2})[.)]\s*(.*)$/);
+      if (m) bloques.push({ num: m[2], txt: [(m[1] || "") + m[3]] });
+      else if (bloques.length && bloques[bloques.length - 1].num) bloques[bloques.length - 1].txt.push(l);
+      else bloques.push({ txt: [l] });
+    }
+    return `<div class="txt">${bloques.map(b => {
+      const cuerpo = _negritas(_esc(b.txt.join(" ")));
+      return b.num
+        ? `<div class="txt-item"><span class="txt-num">${b.num}.</span><div>${cuerpo}</div></div>`
+        : /^[A-ZÁÉÍÓÚÑ0-9 ,()\/-]{4,}:$/.test(b.txt[0]) ? `<div class="txt-sub">${cuerpo}</div>` : `<p>${cuerpo}</p>`;
+    }).join("")}</div>`;
+  };
   const fmtMoney = (n: number) => n.toLocaleString("es-DO",{ minimumFractionDigits:2 });
   const manoObra  = Number(diag?.mano_obra  || 0);
   const repuestos = Number(diag?.repuestos  || 0);
@@ -224,11 +269,41 @@ function imprimirOrdenCompleta(
 
   // Usar avancesRep (estado independiente) — si vacío, caer en diag.avances
   const avancesEfectivos = avancesRep.length > 0 ? avancesRep : (diag?.avances || []);
-  const avancesRows = avancesEfectivos.map((av: any) => `
-    <tr><td style="padding:8px 12px;border-bottom:1px solid #f1f5f9;font-size:13px;vertical-align:top">
-      <div style="font-weight:600">${av.descripcion || av.detalle || "—"}</div>
-      <div style="font-size:11px;color:#9ca3af;margin-top:2px">👤 ${av.tecnico_nombre || av.usuario_nombre || "Técnico"} · ${fmtDate(av.created_at)}</div>
-    </td></tr>`).join("");
+
+  // Lo que se va a mostrar, en el orden del informe, para marcar como "visto"
+  // cada texto la primera vez que aparece.
+  const _verDiag = mostrar ? !!mostrar.diagnostico : !!diag;
+  const _verRep  = mostrar ? !!mostrar.reparacion  : true;
+  const _verQC   = mostrar ? !!mostrar.calidad     : true;
+  const _hallazgos = _verDiag ? (diag?.descripcion || diag?.fallas_identificadas || "") : "";
+  if (_hallazgos) _yaVisto(_hallazgos);
+  if (_verDiag && diag?.mano_de_obra_detalle) _yaVisto(diag.mano_de_obra_detalle);
+
+  // Trabajos realizados + avances en UNA tabla: cada trabajo lleva el técnico
+  // y la fecha del avance que dice lo mismo; los avances distintos se agregan.
+  const _descAv = (av: any) => av.descripcion || av.detalle || "";
+  const _filasTrab: { tipo: string; desc: string; tecnico: string; fecha: string; estado: string }[] = [];
+  const _avUsados = new Set<any>();
+  if (_verRep) {
+    const utiles = trabajosItems.filter(t => !_esGenerico(t.descripcion));
+    const lista = utiles.length ? utiles : trabajosItems;
+    for (const t of lista) {
+      if (_yaVisto(t.descripcion)) continue;
+      const av = avancesEfectivos.find((x: any) => !_avUsados.has(x) && _normTxt(_descAv(x)) === _normTxt(t.descripcion));
+      if (av) _avUsados.add(av);
+      _filasTrab.push({ tipo: t.tipo || "—", desc: t.descripcion || "—", tecnico: av ? (av.tecnico_nombre || av.usuario_nombre || "") : "",
+        fecha: av?.created_at || "", estado: t.estado || "" });
+    }
+    const hayUtiles = _filasTrab.length > 0 || avancesEfectivos.some((x: any) => !_esGenerico(_descAv(x)));
+    for (const av of avancesEfectivos) {
+      if (_avUsados.has(av)) continue;
+      if (hayUtiles && _esGenerico(_descAv(av))) continue;
+      if (_yaVisto(_descAv(av))) continue;
+      _filasTrab.push({ tipo: "Avance", desc: _descAv(av) || "—", tecnico: av.tecnico_nombre || av.usuario_nombre || "Técnico",
+        fecha: av.created_at || "", estado: "" });
+    }
+  }
+  const avancesRows = "";   // ya incluidos en la tabla de trabajos
 
   const repuestosItems: any[] = diag?.repuestos_items || [];
   const repuestosTabla = repuestosItems.length > 0 ? `
@@ -252,33 +327,31 @@ function imprimirOrdenCompleta(
       </table>
     </div>` : "";
 
-  // Trabajos realizados tabla
-  const trabajosTabla = trabajosItems.length > 0 ? `
-    <div style="margin-bottom:16px">
-      <div style="font-size:12px;font-weight:700;text-transform:uppercase;color:#475569;background:#f5f3ff;padding:6px 10px;border-radius:6px;margin-bottom:8px;border-left:3px solid #8b5cf6">
-        🔧 Trabajos Realizados
-      </div>
-      <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead><tr style="background:#f1f5f9">
-          <th style="padding:6px 10px;text-align:left;font-weight:700">Tipo</th>
-          <th style="padding:6px 10px;text-align:left;font-weight:700">Descripción</th>
-          <th style="padding:6px 10px;text-align:center;font-weight:700">Estado</th>
-        </tr></thead>
-        <tbody>${trabajosItems.map((t: TrabajoItem) => {
-          const estadoColor = t.estado === "REALIZADO" ? "#065f46" : t.estado === "PENDIENTE" ? "#92400e" : "#6b7280";
-          return `<tr style="border-bottom:1px solid #f1f5f9">
-            <td style="padding:5px 10px;font-weight:600">${t.tipo}</td>
-            <td style="padding:5px 10px">${t.descripcion || "—"}</td>
-            <td style="padding:5px 10px;text-align:center;font-weight:700;color:${estadoColor}">${t.estado.replace("_"," ")}</td>
-          </tr>`;
-        }).join("")}
-        </tbody>
-      </table>
-    </div>` : "";
+  // Trabajos realizados tabla (con avances unificados)
+  const trabajosTabla = _filasTrab.length > 0 ? `
+    <div class="section-title" style="border-left-color:#8b5cf6;color:#5b21b6;background:#f5f3ff">🔧 Trabajos Realizados</div>
+    <table class="tabla-trab">
+      <thead><tr>
+        <th style="width:92px">Tipo</th>
+        <th>Descripción</th>
+        <th style="width:110px">Técnico / Fecha</th>
+        <th style="width:84px;text-align:center">Estado</th>
+      </tr></thead>
+      <tbody>${_filasTrab.map(t => {
+        const estadoColor = t.estado === "REALIZADO" ? "#065f46" : t.estado === "PENDIENTE" ? "#92400e" : "#6b7280";
+        return `<tr>
+          <td style="font-weight:600">${_esc(t.tipo)}</td>
+          <td>${fmtTxt(t.desc)}</td>
+          <td style="font-size:10px;color:#6b7280">${t.tecnico ? `<div style="font-weight:700;color:#5b21b6">${_esc(t.tecnico)}</div>` : ""}${t.fecha ? fmtDia(t.fecha) : ""}</td>
+          <td style="text-align:center;font-weight:700;color:${estadoColor}">${t.estado ? t.estado.replace(/_/g," ") : "—"}</td>
+        </tr>`;
+      }).join("")}
+      </tbody>
+    </table>` : "";
 
   // QC section
   const moDetalle = diag?.mano_de_obra_detalle || "";
-  const moLineas  = moDetalle.split("\n").filter((l: string) => l.trim());
+  const moLineas  = (_verQC && moDetalle && !_yaVisto(moDetalle)) ? moDetalle.split("\n").filter((l: string) => l.trim()) : [];
   const trabajosHtmlQC = moLineas.length > 0 ? `
     <div style="margin-bottom:10px">
       <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#5b21b6;margin-bottom:6px">🔧 Trabajos a Realizar / Realizados</div>
@@ -287,25 +360,8 @@ function imprimirOrdenCompleta(
       </div>
     </div>` : "";
 
-  const bitacoraHtmlQC = avancesRep.length > 0 ? `
-    <div style="margin-bottom:10px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#374151;margin-bottom:6px">📋 Bitácora de Reparación</div>
-      <table style="width:100%;border-collapse:collapse;font-size:11px">
-        <thead><tr style="background:#111827;color:#fff">
-          <th style="padding:5px 8px;text-align:left;font-weight:700">Técnico</th>
-          <th style="padding:5px 8px;text-align:left;font-weight:700">Descripción del Trabajo</th>
-          <th style="padding:5px 8px;text-align:right;font-weight:700;white-space:nowrap">Fecha</th>
-        </tr></thead>
-        <tbody>
-          ${avancesRep.map((av: any, i: number) => `
-            <tr style="background:${i%2===0?"#fff":"#f9fafb"};border-bottom:1px solid #f1f5f9">
-              <td style="padding:6px 8px;font-weight:700;color:#5b21b6;white-space:nowrap;vertical-align:top">${av.tecnico_nombre || av.usuario_nombre || "Técnico"}</td>
-              <td style="padding:6px 8px;vertical-align:top">${(av.descripcion || av.detalle || "—").replace(/\n/g,"<br/>")}</td>
-              <td style="padding:6px 8px;color:#9ca3af;text-align:right;white-space:nowrap;vertical-align:top">${av.created_at ? new Date(av.created_at).toLocaleDateString("es-DO",{day:"2-digit",month:"short",year:"numeric"}) : "—"}</td>
-            </tr>`).join("")}
-        </tbody>
-      </table>
-    </div>` : "";
+  // La bitácora de QC repetía los mismos avances: ahora están en "Trabajos Realizados".
+  const bitacoraHtmlQC = "";
 
   const qcHtml = `
     <div style="margin-bottom:16px">
@@ -315,7 +371,7 @@ function imprimirOrdenCompleta(
       ${trabajosHtmlQC}
       ${bitacoraHtmlQC}
       ${orden.tecnico_qc ? `<div style="font-size:12px;margin-bottom:4px"><strong>Técnico QC:</strong> ${orden.tecnico_qc}</div>` : ""}
-      ${orden.observaciones_qc ? `<div style="font-size:12px;margin-bottom:8px"><strong>Observaciones QC:</strong> ${orden.observaciones_qc}</div>` : ""}
+      ${orden.observaciones_qc && !_yaVisto(orden.observaciones_qc) ? `<div style="font-size:12px;margin-bottom:8px"><strong>Observaciones QC:</strong> ${fmtTxt(orden.observaciones_qc)}</div>` : ""}
     </div>`;
 
   // Entrega section
@@ -500,7 +556,20 @@ function imprimirOrdenCompleta(
   .info-box{border:1px solid #e2e8f0;padding:8px 10px;border-radius:6px;background:#f8fafc}
   .info-box-title{font-size:9px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:5px;padding-bottom:4px;border-bottom:1px solid #e2e8f0;letter-spacing:.8px}
   .info-row{font-size:11px;margin-bottom:2px}
-  .hallazgos{font-size:11px;padding:6px 10px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap;line-height:1.5}
+  .hallazgos{font-size:11.5px;padding:8px 12px;background:#fff;border:1px solid #e2e8f0;border-radius:6px;white-space:pre-wrap;line-height:1.55;text-align:justify}
+  .txt-box{font-size:11.5px;padding:10px 14px;background:#fff;border:1px solid #e2e8f0;border-radius:6px}
+  .txt{text-align:justify;hyphens:auto;line-height:1.55;font-size:11.5px;color:#1f2937}
+  .txt p{margin:0 0 5px}
+  .txt p:last-child{margin-bottom:0}
+  .txt-item{display:flex;gap:8px;margin-bottom:6px;align-items:baseline}
+  .txt-item:last-child{margin-bottom:0}
+  .txt-item>div{flex:1}
+  .txt-num{font-weight:800;color:#1e40af;min-width:16px}
+  .txt-sub{font-weight:700;font-size:10px;text-transform:uppercase;color:#475569;letter-spacing:.5px;margin:6px 0 3px}
+  table.tabla-trab{width:100%;border-collapse:collapse;font-size:11.5px;margin-bottom:12px;border:1px solid #e2e8f0}
+  table.tabla-trab th{background:#f1f5f9;padding:6px 10px;text-align:left;font-weight:700;font-size:10px;text-transform:uppercase;color:#475569;letter-spacing:.4px}
+  table.tabla-trab td{padding:8px 10px;border-top:1px solid #f1f5f9;vertical-align:top}
+  table.tabla-trab tr{page-break-inside:avoid}
   table.timeline{width:100%;border-collapse:collapse;background:#fff;border:1px solid #f1f5f9}
   .firmas{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:30px}
   .firma-line{border-top:1px solid #111;padding-top:5px;text-align:center;font-size:10px;color:#64748b}
@@ -558,18 +627,17 @@ ${(mostrar ? mostrar.diagnostico : !!diag) ? `
   <div class="info-box"><div class="info-box-title">Técnico</div><div class="info-row"><strong>${diag.tecnico_nombre||diag.usuario_nombre||"—"}</strong></div><div class="info-row">Tipo: ${diag.tipo_servicio||"—"}</div>${diag.tiempo_estimado?`<div class="info-row">Tiempo: ${diag.tiempo_estimado}</div>`:""}</div>
   <div class="info-box"><div class="info-box-title">Estado</div><div class="info-row"><strong>${diag.estado||"—"}</strong></div><div class="info-row">Registrado: ${fmtDate(diag.created_at)}</div></div>
 </div>
-${diag.descripcion||diag.fallas_identificadas?`<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Hallazgos</div><div class="hallazgos">${diag.descripcion||diag.fallas_identificadas}</div></div>`:""}
+${_hallazgos?`<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Hallazgos</div><div class="txt-box">${fmtTxt(_hallazgos)}</div></div>`:""}
 ${diag.mano_de_obra_detalle?`<div style="margin-bottom:10px"><div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#6b7280;margin-bottom:4px">Trabajos</div><div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px">${(diag.mano_de_obra_detalle||"").split("\n").filter((l:string)=>l.trim()).map((l:string)=>`<div style="font-size:11px;margin-bottom:2px">✓ ${l.trim()}</div>`).join("")}</div></div>`:""}
 ${repuestosTabla}
 ${(mostrar ? mostrar.cotizacion : totalCot > 0) && totalCot > 0 ? `<div style="background:#f0fdf4;border:1px solid #bbf7d0;border-radius:6px;padding:8px 12px;margin-bottom:10px"><div style="font-size:11px;font-weight:700;color:#065f46;margin-bottom:6px">💰 Costos</div><table style="width:100%;border-collapse:collapse"><tr style="border-bottom:1px solid #d1fae5"><td style="padding:4px 0;font-size:11px">Mano de obra</td><td style="padding:4px 0;font-size:11px;text-align:right;font-weight:700">RD$ ${fmtMoney(manoObra)}</td></tr>${repuestos>0?`<tr style="border-bottom:1px solid #d1fae5"><td style="padding:4px 0;font-size:11px">Repuestos</td><td style="padding:4px 0;font-size:11px;text-align:right;font-weight:700">RD$ ${fmtMoney(repuestos)}</td></tr>`:""}<tr><td style="padding:8px 0 0;font-size:14px;font-weight:900;color:#065f46">TOTAL</td><td style="padding:8px 0 0;font-size:14px;font-weight:900;color:#065f46;text-align:right">RD$ ${fmtMoney(totalCot)}</td></tr></table></div>` : ""}
 ` : ""}
-${(mostrar ? mostrar.reparacion : true) && trabajosItems.length > 0 ? trabajosTabla : ""}
-${(mostrar ? mostrar.reparacion : avancesEfectivos.length > 0) && avancesEfectivos.length > 0 ? `<div class="section-title">🔧 Avances de Reparación</div><table class="timeline">${avancesRows}</table>` : ""}
+${trabajosTabla}${avancesRows}
 ${(mostrar ? mostrar.calidad : true) ? qcHtml : ""}
 ${(mostrar ? mostrar.entrega : true) ? entregaHtml : ""}
 ${(mostrar ? mostrar.cancelacion : true) ? cancelacionHtml : ""}
 <div class="section-title">📜 Historial del Proceso</div>
-${log?.length > 0 ? `<table class="timeline"><thead><tr style="background:#111827;color:#fff"><th style="padding:10px 14px;font-size:12px;font-weight:700;width:36px"></th><th style="padding:10px 14px;font-size:12px;font-weight:700;text-align:left">Estado</th><th style="padding:10px 14px;font-size:12px;font-weight:700;text-align:left">Fecha y Usuario</th></tr></thead><tbody>${timelineRows}</tbody></table>` : `<div style="font-size:11px;color:#9ca3af;padding:8px">Sin historial.</div>`}
+${log?.length > 0 ? `<table class="timeline"><thead><tr style="background:#f1f5f9;color:#475569"><th style="padding:6px 10px;font-size:10px;font-weight:700;width:36px"></th><th style="padding:6px 10px;font-size:10px;font-weight:700;text-align:left;text-transform:uppercase;letter-spacing:.4px">Estado</th><th style="padding:6px 10px;font-size:10px;font-weight:700;text-align:left;text-transform:uppercase;letter-spacing:.4px">Fecha y Usuario</th></tr></thead><tbody>${timelineRows}</tbody></table>` : `<div style="font-size:11px;color:#9ca3af;padding:8px">Sin historial.</div>`}
 ${historial.length > 0 ? `<div class="section-title" style="border-left-color:#6366f1;color:#4338ca">Historial del Vehículo</div><table style="width:100%;border-collapse:collapse;background:#fff;border:1px solid #f1f5f9"><thead><tr style="background:#1e1b4b;color:#fff"><th style="padding:5px 8px;font-size:9px;text-align:left">Fecha</th><th style="padding:5px 8px;font-size:9px;text-align:left">Tipo</th><th style="padding:5px 8px;font-size:9px;text-align:left">Diagnóstico</th><th style="padding:5px 8px;font-size:9px;text-align:right">Total</th></tr></thead><tbody>${historial.slice(0,8).map((h:any)=>`<tr style="border-bottom:1px solid #f1f5f9"><td style="padding:4px 8px;font-size:10px;color:#6b7280;white-space:nowrap">${h.fecha_servicio?new Date(h.fecha_servicio).toLocaleDateString("es-DO"):"—"}</td><td style="padding:4px 8px;font-size:10px;font-weight:600">${h.tipo_servicio||"—"}</td><td style="padding:4px 8px;font-size:10px">${((h.diagnostico_general||h.descripcion||"—")).substring(0,80)}${(h.diagnostico_general||h.descripcion||"").length>80?"…":""}</td><td style="padding:4px 8px;font-size:10px;text-align:right;font-weight:700;color:#065f46">RD$ ${Number(h.total_cobrado||h.mano_obra||0).toLocaleString("es-DO",{minimumFractionDigits:2})}</td></tr>`).join("")}</tbody></table>` : ""}
 <div class="firmas">
   <div style="margin-top:10px"><div style="height:32px"></div><div class="firma-line">Técnico / Responsable del Servicio</div></div>

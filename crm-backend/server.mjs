@@ -585,35 +585,29 @@ Un técnico escribió este diagnóstico de forma rápida${ctx ? ` (${ctx})` : ""
 """
 ${texto.trim()}
 """
-Transfórmalo en un DIAGNÓSTICO TÉCNICO PROFESIONAL en español usando exactamente este formato:
+Redáctalo como un DIAGNÓSTICO TÉCNICO claro y profesional en español.
 
-HALLAZGOS TÉCNICOS:
-[descripción clara y técnica de cada problema detectado]
-
-CAUSA PROBABLE:
-[análisis técnico de la causa raíz]
-
-TRABAJOS RECOMENDADOS:
-[lista numerada de los trabajos a realizar]
-
-OBSERVACIONES:
-[notas relevantes para el cliente o el taller]
-
-Reglas: mantén TODA la información original sin inventar nada nuevo. Usa terminología técnica automotriz. Máximo 320 palabras. Responde SOLO con el diagnóstico.`,
+Reglas estrictas:
+- Describe SOLO lo que el técnico encontró. No agregues nada que él no haya escrito.
+- NO incluyas conclusiones, causas probables, consecuencias ("lo que puede provocar...", "esto puede afectar..."), recomendaciones, trabajos a realizar, observaciones ni cierre.
+- Una lista numerada, un hallazgo por número, cada uno en una o dos oraciones como máximo.
+- Sin títulos ni encabezados (no escribas "HALLAZGOS TÉCNICOS:" ni similares), sin saludos y sin markdown (no uses asteriscos ni almohadillas).
+- Usa terminología técnica automotriz correcta. Máximo 150 palabras.
+Responde SOLO con la lista.`,
 
     trabajos: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
 Un técnico escribió esta lista de trabajos a realizar (es un DIAGNÓSTICO, NO un reporte de trabajos ya ejecutados)${ctx ? ` (${ctx})` : ""}:
 """
 ${texto.trim()}
 """
-Transfórmala en una lista numerada de TRABAJOS RECOMENDADOS, redactados en modo prescriptivo/recomendación (lo que SE DEBE HACER), NO en pasado ni como reporte de trabajos ya ejecutados. Usa verbos en infinitivo o futuro ("Sustituir...", "Verificar...", "Realizar..."). Descripción técnica breve por ítem, menciona estándares cuando aplique. Máximo 220 palabras. Responde SOLO con la lista.`,
+Transfórmala en una lista numerada de TRABAJOS RECOMENDADOS, redactados en modo prescriptivo/recomendación (lo que SE DEBE HACER), NO en pasado ni como reporte de trabajos ya ejecutados. Usa verbos en infinitivo o futuro ("Sustituir...", "Verificar...", "Realizar..."). Descripción técnica breve por ítem, menciona estándares cuando aplique. Máximo 220 palabras. Sin markdown (no uses asteriscos ni almohadillas) y sin introducción ni conclusión. Responde SOLO con la lista.`,
 
     avance: `Eres el asistente técnico de "Sólido Auto Servicio", taller en República Dominicana.
 Un técnico describió el trabajo que YA REALIZÓ (avance de reparación)${ctx ? ` (${ctx})` : ""}:
 """
 ${texto.trim()}
 """
-Transfórmalo en un REPORTE TÉCNICO PROFESIONAL de trabajo ejecutado, redactado en pasado ("Se sustituyó...", "Se verificó...", "Se procedió a..."). Lista numerada, descripción técnica precisa por ítem, menciona materiales o estándares cuando aplique. Máximo 220 palabras. Responde SOLO con el reporte.`,
+Transfórmalo en un REPORTE TÉCNICO PROFESIONAL de trabajo ejecutado, redactado en pasado ("Se sustituyó...", "Se verificó...", "Se procedió a..."). Lista numerada, descripción técnica precisa por ítem, menciona materiales o estándares cuando aplique. Máximo 220 palabras. Sin markdown (no uses asteriscos ni almohadillas), un ítem por línea, sin introducción ni conclusión. Responde SOLO con el reporte.`,
   };
 
   const prompt = prompts[tipo] || prompts.diagnostico;
@@ -635,7 +629,13 @@ Transfórmalo en un REPORTE TÉCNICO PROFESIONAL de trabajo ejecutado, redactado
       return res.status(502).json({ error: "Error al conectar con IA." });
     }
     const data = await oRes.json();
-    const mejorado = data.choices?.[0]?.message?.content?.trim();
+    // Se limpia cualquier markdown que se cuele (**negritas**, ## títulos):
+    // en el informe impreso salía literal con los asteriscos.
+    const mejorado = (data.choices?.[0]?.message?.content || "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .replace(/__(.+?)__/g, "$1")
+      .replace(/^\s*#{1,6}\s*/gm, "")
+      .trim();
     if (!mejorado) return res.status(502).json({ error: "IA no devolvió respuesta." });
     res.json({ mejorado });
   } catch (e) {
