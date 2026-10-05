@@ -218,8 +218,20 @@ ${ordenes.slice(0, 10).map((o: any) => `
 // ── Función de impresión: expediente de UN servicio ──────────────────────────
 function imprimirExpediente(h: any, detalleCompleto: any) {
   const fmtMoney = (n: any) => Number(n || 0).toLocaleString("es-DO", { minimumFractionDigits: 2 });
-  const fmtDate  = (d: any) => d ? new Date(d).toLocaleDateString("es-DO", { year:"numeric", month:"long", day:"numeric" }) : "—";
-  const fmtDT    = (d: any) => d ? new Date(d).toLocaleString("es-DO", { year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
+  // Todo en hora de RD. Una fecha sola ("2026-10-04") se lee a mediodía: si
+  // no, JavaScript la toma como medianoche UTC y en RD sale el día anterior.
+  const TZ = "America/Santo_Domingo";
+  // Y una fecha-hora sin zona ("2026-10-05T01:08:00", columnas timestamp sin
+  // tz) está en UTC: sin la Z el navegador la leía como hora local y el
+  // diagnóstico salía a la 01:08 a. m. en vez de las 9:08 p. m.
+  const aFecha   = (d: any) => {
+    if (typeof d !== "string") return new Date(d);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(d)) return new Date(`${d}T12:00:00`);
+    if (/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(d)) return new Date(`${d.replace(" ", "T")}Z`);
+    return new Date(d);
+  };
+  const fmtDate  = (d: any) => d ? aFecha(d).toLocaleDateString("es-DO", { timeZone: TZ, year:"numeric", month:"long", day:"numeric" }) : "—";
+  const fmtDT    = (d: any) => d ? aFecha(d).toLocaleString("es-DO", { timeZone: TZ, year:"numeric", month:"short", day:"numeric", hour:"2-digit", minute:"2-digit" }) : "—";
   const parseArr = (v: any): any[] => {
     if (Array.isArray(v)) return v;
     if (typeof v === "string" && v.trim().startsWith("[")) { try { return JSON.parse(v); } catch { return []; } }
@@ -368,40 +380,40 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
 <title>Expediente — ${h.placa || "Vehículo"} — ${h.numero_orden || ""}</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
-  body { font-family:'Segoe UI',Arial,sans-serif; padding:28px; color:#1a1a1a; max-width:780px; margin:auto; }
-  h3 { font-size:11px; font-weight:700; text-transform:uppercase; letter-spacing:1.2px; color:#475569;
-       background:#f1f5f9; padding:5px 10px; border-radius:5px; border-left:4px solid #1e40af; margin:18px 0 10px; }
-  .card { background:#fff; border:1px solid #e2e8f0; border-radius:8px; padding:14px; margin-bottom:10px; }
-  table { width:100%; border-collapse:collapse; font-size:12px; }
-  th { background:#f8fafc; padding:6px 8px; text-align:left; font-weight:700; color:#475569; }
-  td { padding:5px 8px; border-bottom:1px solid #f1f5f9; color:#374151; }
-  .row { display:flex; justify-content:space-between; font-size:13px; margin-bottom:5px; }
+  /* Compacto: el expediente de una orden normal cabe en una hoja. */
+  @page { size:A4; margin:10mm; }
+  body { font-family:'Segoe UI',Arial,sans-serif; padding:14px; color:#1a1a1a; max-width:780px; margin:auto; font-size:11.5px; line-height:1.35; }
+  h3 { font-size:9.5px; font-weight:700; text-transform:uppercase; letter-spacing:1px; color:#475569;
+       background:#f1f5f9; padding:3px 8px; border-radius:4px; border-left:3px solid #1e40af; margin:9px 0 5px; }
+  .card { background:#fff; border:1px solid #e2e8f0; border-radius:6px; padding:7px 10px; margin-bottom:5px; }
+  table { width:100%; border-collapse:collapse; font-size:11px; }
+  th { background:#f8fafc; padding:3px 6px; text-align:left; font-weight:700; color:#475569; font-size:9.5px; text-transform:uppercase; }
+  td { padding:3px 6px; border-bottom:1px solid #f1f5f9; color:#374151; vertical-align:top; }
+  .row { display:flex; justify-content:space-between; gap:8px; font-size:11.5px; margin-bottom:2px; }
   .label { color:#64748b; }
-  .chip { display:inline-block; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700;
-          margin:2px 3px; background:#fee2e2; color:#991b1b; }
-  .total { font-size:18px; font-weight:900; color:#059669; text-align:right; margin-top:8px;
-           padding-top:8px; border-top:2px solid #d1fae5; }
-  @media print { body { padding:16px; } h3 { page-break-after:avoid; } .card { page-break-inside:avoid; } }
+  .grid3 { display:grid; grid-template-columns:repeat(3,1fr); gap:1px 18px; }
+  .kv { display:flex; justify-content:space-between; gap:6px; font-size:11px; padding:1.5px 0; border-bottom:1px dotted #eef2f7; }
+  .kv span:last-child { font-weight:600; text-align:right; }
+  .mini { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.6px; color:#64748b; margin-bottom:3px; }
+  .chip { display:inline-block; padding:1px 7px; border-radius:10px; font-size:10px; font-weight:700;
+          margin:1px 2px; background:#fee2e2; color:#991b1b; }
+  .total { font-size:15px; font-weight:900; color:#059669; text-align:right; margin-top:5px;
+           padding-top:5px; border-top:2px solid #d1fae5; }
+  @media print { body { padding:0; } h3 { page-break-after:avoid; } .card { page-break-inside:avoid; } }
 </style>
 </head>
 <body>
 
 <!-- ══ Encabezado empresa ══ -->
-<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:14px;margin-bottom:18px">
+<div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px">
   <div>
-    <div style="font-size:20px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div style="font-size:11px;color:#6b7280;margin-top:2px">Tel: 849-569-2027 · Santo Domingo, RD</div>
+    <div style="font-size:16px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
+    <div style="font-size:10px;color:#6b7280">Tel: 849-569-2027 · Santo Domingo, RD</div>
   </div>
-  <div style="text-align:right">
-    <div style="font-size:16px;font-weight:900;color:#1e40af">${h.marca || h.vehiculo_marca || ""} ${h.modelo || h.vehiculo_modelo || ""} ${h.ano || h.vehiculo_ano || ""}</div>
-    <div style="font-size:13px;font-weight:800;font-family:monospace">${h.placa || ""}</div>
-    ${h.numero_orden ? `<div style="font-size:11px;color:#6b7280">Orden #${h.numero_orden}</div>` : ""}
-    <div style="font-size:11px;color:#6b7280;margin-top:2px">Estado: <strong>${(h.estado||"ENTREGADO").replace(/_/g," ")}</strong></div>
+  <div style="text-align:right;font-size:10.5px;color:#6b7280">
+    <div style="font-size:12px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px">${h._sin_servicios ? "Ficha del Vehículo" : "Expediente de Servicio"}</div>
+    ${h.numero_orden ? `Orden <strong style="color:#111">#${h.numero_orden}</strong> · ` : ""}Estado: <strong style="color:#111">${(h.estado||"ENTREGADO").replace(/_/g," ")}</strong>
   </div>
-</div>
-
-<div style="text-align:center;font-size:15px;font-weight:800;color:#1e40af;border:2px solid #1e40af;padding:7px;border-radius:8px;margin-bottom:18px;text-transform:uppercase;letter-spacing:1px">
-  ${h._sin_servicios ? "Ficha del Vehículo" : `Expediente de Servicio — ${h.tipo_servicio || "Servicio"}`}
 </div>
 
 <!-- Vehículo dado de alta sin órdenes: se imprime la ficha, no un expediente
@@ -416,39 +428,41 @@ ${h._sin_servicios ? `
      Destacado y en mayúsculas: es el dato que más se consulta de un vistazo,
      y antes se perdía entre las demás filas del bloque de datos. -->
 ${h.motivo_entrada ? `
-<div style="background:#eff6ff;border:2px solid #1e40af;border-radius:10px;padding:14px 16px;margin-bottom:14px">
-  <div style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:1.5px;color:#1e40af;margin-bottom:5px">Motivo de entrada</div>
-  <div style="font-size:20px;font-weight:900;color:#1e3a8a;text-transform:uppercase;line-height:1.3;letter-spacing:.5px">${h.motivo_entrada}</div>
+<div style="background:#eff6ff;border:1.5px solid #1e40af;border-radius:6px;padding:6px 10px;margin-bottom:6px">
+  <div class="mini" style="color:#1e40af;margin-bottom:1px">Motivo de entrada${h.tipo_servicio && h.tipo_servicio !== h.motivo_entrada ? ` · ${h.tipo_servicio}` : ""}</div>
+  <div style="font-size:14px;font-weight:900;color:#1e3a8a;text-transform:uppercase;line-height:1.25">${h.motivo_entrada}</div>
 </div>` : ""}
 
-<!-- ══ Datos generales ══ -->
-<div class="card">
-  <div class="row"><span class="label">Fecha de servicio</span><span>${fmtDate(h.fecha_servicio)}</span></div>
-  ${(h.tecnico_nombre || detalleCompleto?.tecnico_nombre) ? `<div class="row"><span class="label">Técnico asignado</span><span>${h.tecnico_nombre || detalleCompleto?.tecnico_nombre}</span></div>` : ""}
-  ${h.cliente_nombre ? `<div class="row"><span class="label">Cliente</span><span style="text-transform:uppercase;font-weight:700">${h.cliente_nombre}</span></div>` : ""}
-  ${h.cliente_telefono ? `<div class="row"><span class="label">Teléfono</span><span>${h.cliente_telefono}</span></div>` : ""}
-</div>
-
-<!-- ══ Ficha técnica del vehículo ══ -->
-${fichaFilas.length > 0 ? `
-<h3>🚗 Ficha del Vehículo</h3>
-<div class="card">
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:0 24px">
-    ${fichaFilas.map(([label, valor]) =>
-      `<div class="row"><span class="label">${label}</span><span style="font-weight:600${label === "VIN / Chasis" ? ";font-family:monospace;font-size:12px" : ""}">${valor}</span></div>`
-    ).join("")}
-  </div>
-</div>` : ""}
+<!-- ══ Cliente y vehículo, en una sola tarjeta de 3 columnas ══ -->
+${(() => {
+  // La fecha del servicio sale del momento real de recepción (con hora de
+  // RD). fecha_servicio se guarda en UTC y de noche salía con un día de más.
+  const fechaServ = timeline[0]?.created_at || inspec?.fecha_recepcion || h.fecha_servicio;
+  const tecnico = h.tecnico_nombre || detalleCompleto?.tecnico_nombre;
+  const filas: [string, any][] = [
+    ["Cliente", h.cliente_nombre ? `<span style="text-transform:uppercase">${h.cliente_nombre}</span>` : null],
+    ["Teléfono", h.cliente_telefono],
+    ["Fecha", fechaServ ? fmtDate(fechaServ) : null],
+    ["Técnico", tecnico],
+    ...fichaFilas.filter(([l]) => l !== "Kilometraje" || !(inspec?.km_entrada || inspec?.kilometraje)),
+  ];
+  const vis = filas.filter(([, v]) => v !== null && v !== undefined && v !== "");
+  return vis.length ? `
+<h3>🚗 Cliente y vehículo</h3>
+<div class="card"><div class="grid3">
+  ${vis.map(([l, v]) => `<div class="kv"><span class="label">${l}</span><span${l === "VIN / Chasis" ? ' style="font-family:monospace;font-size:10px"' : ""}>${v}</span></div>`).join("")}
+</div></div>` : "";
+})()}
 
 <!-- ══ Fotos de la recepción ══ -->
 ${fotosExp.length > 0 ? `
 <h3>📸 Fotos del Vehículo al Recibirlo</h3>
 <div class="card">
-  <div style="display:flex;gap:10px;flex-wrap:wrap">
+  <div style="display:flex;gap:6px;flex-wrap:wrap">
     ${fotosExp.map((f: any) => `
       <div style="text-align:center">
-        <img src="${f.src}" style="width:140px;height:105px;object-fit:cover;border-radius:6px;border:1px solid #e2e8f0" />
-        <div style="font-size:10px;color:#6b7280;margin-top:3px">${f.label}</div>
+        <img src="${f.src}" style="width:96px;height:72px;object-fit:cover;border-radius:4px;border:1px solid #e2e8f0" />
+        <div style="font-size:9px;color:#6b7280;margin-top:1px">${f.label}</div>
       </div>`).join("")}
   </div>
 </div>` : ""}
@@ -461,65 +475,74 @@ ${descripcionTrabajo && descripcionTrabajo !== h.motivo_entrada ? `
 </div>` : ""}
 
 <!-- ══ Inspección de recepción ══ -->
-${inspec ? `
-<h3>🔍 Inspección de Recepción</h3>
+${inspec ? (() => {
+  const _tl: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe/Abolladura", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
+  const zonas: any[] = Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : [];
+  const lab = (z: any) => z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
+  // Rayones / Golpes / Pintura se llenan solos desde el mapa de daños
+  // ("Rayón leve: Lateral izq. frente"). Esa parte ya sale en las zonas, así
+  // que aquí solo se imprime lo que el técnico escribió aparte.
+  const auto = (tipos: string[]) => tipos.map(t => {
+    const d = zonas.filter(z => (z.tipo_danio||z.tipo) === t).map(lab);
+    return d.length ? `${_tl[t]}: ${d.join(", ")}` : "";
+  }).filter(Boolean).join(". ");
+  const sinAuto = (txt: any, generado: string) => {
+    let t = String(txt || "").trim();
+    if (generado && t.startsWith(generado)) t = t.slice(generado.length);
+    return t.replace(/^[\s.;]+/, "");
+  };
+  const rayones = sinAuto(inspec.rayones, auto(["rayon_leve","rayon_profundo"]));
+  const golpes  = sinAuto(inspec.golpes, auto(["golpe","falta_pieza"]));
+  const pintRP  = zonas.filter(z => (z.tipo_danio||z.tipo) === "rayon_profundo").map(lab);
+  const pintura = sinAuto(inspec.estado_pintura, pintRP.length ? `Pintura afectada: ${pintRP.join(", ")}` : "");
+  const km = inspec.km_entrada || inspec.kilometraje;
+  const comb = inspec.nivel_combustible ?? inspec.combustible;
+  const datos: [string, any][] = [
+    ["Km de entrada", km ? `${Number(km).toLocaleString("es-DO")} km` : null],
+    ["Combustible", comb != null ? `${comb}%` : null],
+    ["Condición", inspec.condicion_general],
+    ["Rayones", rayones], ["Golpes", golpes], ["Pintura", pintura],
+    ["Vidrios", inspec.estado_vidrios], ["Llantas", inspec.estado_llantas],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== "") as [string, any][];
+  const tieneAcc = ACCESORIOS.some(([k]) => inspec[k] != null);
+  return `
+<h3>🔍 Inspección de recepción</h3>
 <div class="card">
-  ${inspec.zonas_danio && inspec.zonas_danio.length > 0 ? `
-    <div style="margin-bottom:10px">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:5px">Zonas con daño</div>
-      <div>${(Array.isArray(inspec.zonas_danio) ? inspec.zonas_danio : []).map((z: any) => {
-        const _tl: Record<string,string> = { rayon_leve:"Rayón leve", rayon_profundo:"Rayón profundo", golpe:"Golpe", falta_pieza:"Falta pieza", sin_danio:"Sin daño" };
-        const lab  = z.label || (z.zona||z.zona_id||"").replace(/_/g," ");
-        const tipo = z.tipo_danio||z.tipo||"";
-        return `<span class="chip">${lab}: ${_tl[tipo]||tipo.replace(/_/g," ")||"—"}</span>`;
-      }).join("")}</div>
-    </div>` : ""}
-  <!-- Los nombres reales de las columnas son km_entrada y nivel_combustible.
-       Se dejan los alias como respaldo por si el snapshot JSONB los trae. -->
-  ${(inspec.km_entrada || inspec.kilometraje) ? `<div class="row"><span class="label">Kilometraje de entrada</span><span>${Number(inspec.km_entrada || inspec.kilometraje).toLocaleString("es-DO")} km</span></div>` : ""}
-  ${(inspec.nivel_combustible != null || inspec.combustible != null) ? `<div class="row"><span class="label">Nivel de combustible</span><span>${inspec.nivel_combustible ?? inspec.combustible}%</span></div>` : ""}
-  ${inspec.condicion_general ? `<div class="row"><span class="label">Condición general</span><span>${inspec.condicion_general}</span></div>` : ""}
-  ${inspec.estado_pintura ? `<div class="row"><span class="label">Pintura</span><span>${inspec.estado_pintura}</span></div>` : ""}
-  ${inspec.estado_vidrios ? `<div class="row"><span class="label">Vidrios</span><span>${inspec.estado_vidrios}</span></div>` : ""}
-  ${inspec.estado_llantas ? `<div class="row"><span class="label">Llantas</span><span>${inspec.estado_llantas}</span></div>` : ""}
-  ${inspec.rayones ? `<div class="row"><span class="label">Rayones</span><span>${inspec.rayones}</span></div>` : ""}
-  ${inspec.golpes ? `<div class="row"><span class="label">Golpes</span><span>${inspec.golpes}</span></div>` : ""}
-
-  ${ACCESORIOS.some(([k]) => inspec[k] != null) ? `
-    <div style="margin-top:10px;padding-top:10px;border-top:1px solid #f1f5f9">
-      <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#64748b;margin-bottom:6px">Accesorios e interior</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:3px">
-        ${ACCESORIOS.map(([k, label]) =>
-          `<div style="font-size:12px">${inspec[k] ? "✅" : "❌"} ${label}</div>`).join("")}
+  ${zonas.length ? `<div style="margin-bottom:4px"><span class="mini" style="display:inline">Zonas con daño:</span> ${zonas.map((z: any) => {
+      const tipo = z.tipo_danio||z.tipo||"";
+      return `<span class="chip">${lab(z)}: ${_tl[tipo]||tipo.replace(/_/g," ")||"—"}</span>`;
+    }).join("")}</div>` : ""}
+  ${datos.length ? `<div class="grid3">${datos.map(([l, v]) => `<div class="kv"><span class="label">${l}</span><span>${v}</span></div>`).join("")}</div>` : ""}
+  ${tieneAcc ? `
+    <div style="margin-top:5px">
+      <div class="mini">Accesorios e interior</div>
+      <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:1px 6px">
+        ${ACCESORIOS.map(([k, label]) => `<div style="font-size:10.5px;white-space:nowrap">${inspec[k] ? "✅" : "❌"} ${label}</div>`).join("")}
       </div>
-      ${inspec.otros_accesorios ? `<div style="font-size:12px;color:#374151;margin-top:6px">Otros: ${inspec.otros_accesorios}</div>` : ""}
+      ${inspec.otros_accesorios ? `<div style="font-size:10.5px;color:#374151;margin-top:2px">Otros: ${inspec.otros_accesorios}</div>` : ""}
     </div>` : ""}
-
   ${(inspec.observaciones || inspec.observaciones_generales) ? `
-    <div style="margin-top:8px;font-size:13px;color:#374151;background:#f9fafb;border-radius:6px;padding:8px 10px;white-space:pre-wrap">${inspec.observaciones || inspec.observaciones_generales}</div>` : ""}
-
+    <div style="margin-top:4px;font-size:11px;color:#374151;background:#f9fafb;border-radius:4px;padding:4px 8px;white-space:pre-wrap">${inspec.observaciones || inspec.observaciones_generales}</div>` : ""}
   ${(inspec.creado_por_nombre || inspec.fecha_recepcion) ? `
-    <div style="font-size:11px;color:#64748b;margin-top:8px;padding-top:6px;border-top:1px solid #f1f5f9">
-      Recibido por: <strong>${inspec.creado_por_nombre || "—"}</strong>${inspec.fecha_recepcion ? ` · ${fmtDT(inspec.fecha_recepcion)}` : ""}
-    </div>` : ""}
-</div>` : ""}
+    <div style="font-size:10px;color:#64748b;margin-top:4px">Recibido por: <strong>${inspec.creado_por_nombre || "—"}</strong>${inspec.fecha_recepcion ? ` · ${fmtDT(inspec.fecha_recepcion)}` : ""}</div>` : ""}
+</div>`;
+})() : ""}
 
 <!-- ══ Diagnóstico / Hallazgos ══ -->
 ${(hallazgos || codigosFalla || observacionesDiag) ? `
 <h3>🔬 Diagnóstico Técnico</h3>
 <div class="card" style="background:#fffbeb;border-color:#fde68a">
   ${(tecnicoDiag || fechaDiag) ? `
-    <div style="display:flex;gap:24px;font-size:11px;color:#64748b;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #fde68a">
-      ${tecnicoDiag ? `<div>TÉCNICO<br><strong style="font-size:12px;color:#374151">${tecnicoDiag}</strong></div>` : ""}
-      ${fechaDiag ? `<div>REGISTRADO<br><strong style="font-size:12px;color:#374151">${fmtDT(fechaDiag)}</strong></div>` : ""}
+    <div style="font-size:10px;color:#64748b;margin-bottom:4px">
+      ${tecnicoDiag ? `Técnico: <strong style="color:#374151">${tecnicoDiag}</strong>` : ""}${tecnicoDiag && fechaDiag ? " · " : ""}${fechaDiag ? `Registrado: <strong style="color:#374151">${fmtDT(fechaDiag)}</strong>` : ""}
     </div>` : ""}
   ${codigosFalla ? `<div style="font-size:12px;margin-bottom:6px"><strong>Códigos de falla:</strong> ${codigosFalla}</div>` : ""}
   ${hallazgos ? `
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#92400e;margin-bottom:4px">⚠️ Fallas identificadas</div>
-    <div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${hallazgos}</div>` : ""}
+    <div class="mini" style="color:#92400e">⚠️ Fallas identificadas</div>
+    <div style="font-size:11.5px;white-space:pre-wrap;line-height:1.4">${hallazgos}</div>` : ""}
   ${observacionesDiag ? `
-    <div style="font-size:10px;font-weight:700;text-transform:uppercase;color:#92400e;margin:10px 0 4px">Observaciones</div>
-    <div style="font-size:13px;white-space:pre-wrap;line-height:1.6">${observacionesDiag}</div>` : ""}
+    <div class="mini" style="color:#92400e;margin-top:5px">Observaciones</div>
+    <div style="font-size:11.5px;white-space:pre-wrap;line-height:1.4">${observacionesDiag}</div>` : ""}
 </div>` : ""}
 
 <!-- ══ Mano de obra (trabajos a realizar) ══ -->
@@ -628,7 +651,7 @@ ${fac.id ? `
 </div>` : "")}
 
 <!-- ══ Entrega al cliente ══ -->
-${(usuarioEntrego || fechaEntrega || firmaEntrega) ? `
+${(fechaEntrega || firmaEntrega || h.estado === "ENTREGADO") ? `
 <h3>🏁 Entrega al Cliente</h3>
 <div class="card">
   ${usuarioEntrego ? `<div class="row"><span class="label">Entregado por</span><span>${usuarioEntrego}</span></div>` : ""}
@@ -641,33 +664,32 @@ ${(usuarioEntrego || fechaEntrega || firmaEntrega) ? `
     </div>` : ""}
 </div>` : ""}
 
-<!-- ══ Línea de tiempo ══ -->
+<!-- ══ Línea de tiempo ══ (una fila por etapa) -->
 ${timeline.length > 0 ? `
-<h3>📅 Por Dónde Pasó su Vehículo</h3>
-<div class="card">
-  ${timeline.map((t: any, i: number) => {
-    const dur = duracion(t.created_at, timeline[i+1]?.created_at);
-    return `
-    <div style="display:flex;gap:10px;${i < timeline.length-1 ? "margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid #f1f5f9" : ""}">
-      <div style="display:flex;flex-direction:column;align-items:center;flex-shrink:0">
-        <div style="width:22px;height:22px;border-radius:50%;background:#1e40af;color:#fff;font-size:11px;font-weight:800;display:flex;align-items:center;justify-content:center">${i+1}</div>
-        ${i < timeline.length-1 ? `<div style="width:2px;flex:1;background:#dbeafe;margin-top:2px"></div>` : ""}
-      </div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:700;color:#1e293b">${(t.estado_nuevo||"").replace(/_/g," ").replace(/\b\w/g,(c: string)=>c.toUpperCase())}</div>
-        <div style="font-size:11px;color:#64748b">${fmtDT(t.created_at)}${t.usuario_nombre ? ` · ${t.usuario_nombre}` : ""}</div>
-        ${dur ? `<div style="font-size:11px;color:#1e40af;margin-top:2px">⏱ Permaneció en esta etapa ${dur}</div>` : ""}
-        ${t.motivo ? `<div style="font-size:11px;color:#92400e;background:#fffbeb;border-radius:4px;padding:2px 6px;margin-top:2px">${t.motivo}</div>` : ""}
-      </div>
-    </div>`; }).join("")}
+<h3>📅 Por dónde pasó su vehículo</h3>
+<div class="card" style="padding:4px 6px">
+  <table>
+    <thead><tr><th style="width:18px">#</th><th>Etapa</th><th>Fecha y hora</th><th>Por</th><th style="text-align:right">Tiempo</th></tr></thead>
+    <tbody>
+    ${timeline.map((t: any, i: number) => {
+      const dur = duracion(t.created_at, timeline[i+1]?.created_at);
+      return `<tr>
+        <td style="color:#94a3b8">${i+1}</td>
+        <td><strong>${(t.estado_nuevo||"").replace(/_/g," ")}</strong>${t.motivo ? `<div style="font-size:9.5px;color:#92400e">${t.motivo}</div>` : ""}</td>
+        <td style="white-space:nowrap">${fmtDT(t.created_at)}</td>
+        <td>${t.usuario_nombre || "—"}</td>
+        <td style="text-align:right;color:#1e40af;white-space:nowrap">${dur || (i === timeline.length-1 ? "actual" : "—")}</td>
+      </tr>`; }).join("")}
+    </tbody>
+  </table>
   ${(() => {
     const total = duracion(timeline[0]?.created_at, timeline[timeline.length-1]?.created_at);
-    return total ? `<div style="margin-top:10px;padding-top:8px;border-top:2px solid #dbeafe;font-size:12px;text-align:right;color:#1e40af"><strong>Tiempo total en el taller: ${total}</strong></div>` : "";
+    return total ? `<div style="font-size:10.5px;text-align:right;color:#1e40af;margin-top:3px"><strong>Tiempo total en el taller: ${total}</strong></div>` : "";
   })()}
 </div>` : ""}
 
 <!-- ══ Fechas del proceso ══ -->
-${Object.values(fechas).some(Boolean) ? `
+${timeline.length === 0 && Object.values(fechas).some(Boolean) ? `
 <h3>📅 Fechas del Proceso</h3>
 <div class="card">
   ${([["recibido","Recibido"],["diagnostico","Diagnóstico"],["esperando_aprobacion","Espera Aprobación"],
@@ -683,9 +705,8 @@ ${h.observaciones ? `
 <div class="card"><div style="font-size:13px">${h.observaciones}</div></div>` : ""}
 
 <!-- ══ Pie de página ══ -->
-<div style="text-align:center;margin-top:28px;padding-top:12px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:11px;line-height:2">
-  <p>Documento generado el ${new Date().toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric"})}</p>
-  <p><strong>SÓLIDO AUTO SERVICIO</strong> — Tel: 849-569-2027 — Santo Domingo, República Dominicana</p>
+<div style="text-align:center;margin-top:10px;padding-top:5px;border-top:1px dashed #cbd5e1;color:#9ca3af;font-size:9.5px">
+  <strong>SÓLIDO AUTO SERVICIO</strong> · Tel: 849-569-2027 · Santo Domingo, RD · Generado el ${new Date().toLocaleDateString("es-DO",{timeZone:"America/Santo_Domingo",year:"numeric",month:"long",day:"numeric"})}
 </div>
 
 </body>
