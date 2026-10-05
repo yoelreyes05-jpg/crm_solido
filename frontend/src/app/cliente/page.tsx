@@ -148,9 +148,10 @@ function imprimirHistorialCompleto(resultado: any, historialPerm: any[]) {
 <body>
 
 <div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #111827;padding-bottom:16px;margin-bottom:20px">
-  <div>
-    <div style="font-size:22px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div style="font-size:12px;color:#6b7280;margin-top:3px">Tel: 849-569-2027 · Santo Domingo, RD</div>
+  <div style="display:flex;align-items:flex-end;gap:12px">
+    <img src="${typeof window !== "undefined" ? window.location.origin : ""}/logo-impresion.jpg" alt="Sólido Auto Servicio"
+         style="height:72px;width:auto;display:block" />
+    <div style="font-size:11px;color:#6b7280;padding-bottom:4px">Tel: 849-569-2027<br>Santo Domingo, RD</div>
   </div>
   <div style="text-align:right">
     <div style="font-size:18px;font-weight:900;color:#1e40af">${v.marca || ""} ${v.modelo || ""} ${v.ano || ""}</div>
@@ -212,7 +213,15 @@ ${ordenes.slice(0, 10).map((o: any) => `
 </html>`;
 
   const w = window.open("", "_blank", "width=860,height=1100");
-  if (w) { w.document.write(html); w.document.close(); setTimeout(() => w.print(), 600); }
+  if (w) {
+    w.document.write(html); w.document.close();
+    // Se imprime cuando cargó el logo (máximo 5 s), no a ciegas a los 600 ms.
+    const imgs = Array.from(w.document.images);
+    Promise.race([
+      Promise.all(imgs.map(i => i.complete ? Promise.resolve() : new Promise<void>(ok => { i.onload = () => ok(); i.onerror = () => ok(); }))),
+      new Promise(ok => setTimeout(ok, 5000)),
+    ]).then(() => setTimeout(() => w.print(), 200));
+  }
 }
 
 // ── Función de impresión: expediente de UN servicio ──────────────────────────
@@ -406,9 +415,11 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
 
 <!-- ══ Encabezado empresa ══ -->
 <div style="display:flex;justify-content:space-between;align-items:flex-end;border-bottom:2px solid #111827;padding-bottom:6px;margin-bottom:8px">
-  <div>
-    <div style="font-size:16px;font-weight:900">🔧 SÓLIDO AUTO SERVICIO</div>
-    <div style="font-size:10px;color:#6b7280">Tel: 849-569-2027 · Santo Domingo, RD</div>
+  <!-- El logo ya trae el nombre: al lado solo van los datos de contacto. -->
+  <div style="display:flex;align-items:flex-end;gap:10px">
+    <img src="${typeof window !== "undefined" ? window.location.origin : ""}/logo-impresion.jpg" alt="Sólido Auto Servicio"
+         style="height:74px;width:auto;display:block" />
+    <div style="font-size:10px;color:#6b7280;padding-bottom:4px">Tel: 849-569-2027<br>Santo Domingo, RD</div>
   </div>
   <div style="text-align:right;font-size:10.5px;color:#6b7280">
     <div style="font-size:12px;font-weight:800;color:#1e40af;text-transform:uppercase;letter-spacing:.5px">${h._sin_servicios ? "Ficha del Vehículo" : "Expediente de Servicio"}</div>
@@ -718,11 +729,18 @@ ${h.observaciones ? `
   document.body.appendChild(iframe);
   const doc = iframe.contentDocument || iframe.contentWindow?.document;
   if (doc) { doc.open(); doc.write(html); doc.close(); }
-  setTimeout(() => {
-    iframe.contentWindow?.focus();
-    iframe.contentWindow?.print();
-    setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 2000);
-  }, 800);
+  // Se imprime cuando ya cargaron el logo y las fotos (máximo 5 s). Con un
+  // tiempo fijo, en una conexión lenta el logo salía en blanco.
+  const imagenes = Array.from(doc?.images || []);
+  const cargadas = Promise.all(imagenes.map(img => img.complete ? Promise.resolve() :
+    new Promise<void>(ok => { img.onload = () => ok(); img.onerror = () => ok(); })));
+  Promise.race([cargadas, new Promise(ok => setTimeout(ok, 5000))]).then(() => {
+    setTimeout(() => {
+      iframe.contentWindow?.focus();
+      iframe.contentWindow?.print();
+      setTimeout(() => { try { document.body.removeChild(iframe); } catch {} }, 2000);
+    }, 200);
+  });
 }
 
 export default function ClienteApp() {

@@ -141,7 +141,7 @@ export default function ClientLayout({ children }: { children: React.ReactNode }
 
         {/* Logo + toggle */}
         <div style={{ padding: "16px 20px", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          {sidebarOpen && <Image src="/logo.png" alt="Logo" width={120} height={40} />}
+          {sidebarOpen && <Image src="/logo.png" alt="Logo" width={120} height={40} style={{ objectFit: "contain" }} />}
           <button
             onClick={() => setSidebarOpen(o => !o)}
             style={{

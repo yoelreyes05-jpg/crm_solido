@@ -264,7 +264,7 @@ if (esPublica) {
   const colorTema  = marcaASA ? "#0b1220" : marcaAloha ? "#fdf2f8" : "#080c14";
   const icono      = marcaASA ? "/icon-asa-180.png"
                    : marcaAloha ? "/logo-aloha.png"
-                   : "/logo.png";
+                   : "/logo-512-512.png";
   const manifiesto = marcaASA ? "/manifest-asa.json" : "/manifest.json";
   const tituloApp  = marcaASA ? "Chequeo ASA" : marcaAloha ? "Aloha" : "Sólido Auto";
 
