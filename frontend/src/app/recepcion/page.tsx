@@ -20,6 +20,7 @@ interface Vehiculo {
   ano: number;
   placa: string;
   color?: string;
+  km_actual?: number | null;
 }
 
 interface ChecklistState {
@@ -99,6 +100,30 @@ const TIPO_DANIO_LABEL: Record<string, string> = {
   rayon_leve: "Rayón leve", rayon_profundo: "Rayón profundo",
   golpe: "Golpe/Abolladura", falta_pieza: "Falta pieza", sin_danio: "Sin daño",
 };
+
+// Texto del "Estado del vehículo" que sale solo del mapa de daños.
+// Agrupa por tipo: "Rayón leve: Frontal izquierdo, Techo".
+function textoDesdeMapa(zonas: ZonaDanio[], tipos: string[]): string {
+  return tipos
+    .map(t => {
+      const donde = zonas.filter(z => z.tipo_danio === t).map(z => z.label);
+      return donde.length ? `${TIPO_DANIO_LABEL[t]}: ${donde.join(", ")}` : "";
+    })
+    .filter(Boolean)
+    .join(". ");
+}
+
+// Pone el texto automático al inicio del campo y respeta lo que el usuario
+// haya escrito después. `previo` es el texto automático anterior: si el campo
+// todavía empieza con él, se cambia por el nuevo; si el usuario lo borró o lo
+// reescribió, el texto nuevo se pone delante sin pisar lo suyo.
+function mezclarAuto(actual: string, previo: string, nuevo: string): string {
+  let resto = actual;
+  if (previo && actual.startsWith(previo)) resto = actual.slice(previo.length);
+  resto = resto.replace(/^[\s.;]+/, "");
+  if (!nuevo) return resto;
+  return resto ? `${nuevo}. ${resto}` : nuevo;
+}
 
 // ── Colores tema (claro) ──────────────────────────────────────────────────────
 const BG       = "#f1f5f9";
@@ -333,6 +358,32 @@ export default function RecepcionPage() {
       .then(d => setClientes(Array.isArray(d) ? d : []))
       .catch(() => setClientes([]));
   }, []);
+
+  // ── Kilometraje: se trae el último registrado del vehículo ────────────────
+  // El vehículo ya guarda su km_actual (lo que se ve en la lista de
+  // Vehículos). Al escogerlo, la inspección arranca con ese número para que
+  // el técnico solo lo corrija si el odómetro marca más.
+  useEffect(() => {
+    const km = vehiculoSeleccionado?.km_actual;
+    setKmEntrada(km != null && Number(km) > 0 ? String(km) : "");
+  }, [vehiculoSeleccionado]);
+
+  // ── Estado del vehículo: se llena solo desde el mapa de daños ─────────────
+  const autoPrevio = useRef({ rayones: "", golpes: "", pintura: "" });
+  useEffect(() => {
+    const nuevo = {
+      rayones: textoDesdeMapa(zonesDanio, ["rayon_leve", "rayon_profundo"]),
+      golpes:  textoDesdeMapa(zonesDanio, ["golpe", "falta_pieza"]),
+      pintura: zonesDanio.some(z => z.tipo_danio === "rayon_profundo")
+        ? `Pintura afectada: ${zonesDanio.filter(z => z.tipo_danio === "rayon_profundo").map(z => z.label).join(", ")}`
+        : "",
+    };
+    const prev = autoPrevio.current;
+    setRayones(v => mezclarAuto(v, prev.rayones, nuevo.rayones));
+    setGolpes(v => mezclarAuto(v, prev.golpes, nuevo.golpes));
+    setEstadoPintura(v => mezclarAuto(v, prev.pintura, nuevo.pintura));
+    autoPrevio.current = nuevo;
+  }, [zonesDanio]);
 
   // ── Cargar vehículos al seleccionar cliente ───────────────────────────────
   useEffect(() => {
@@ -1024,6 +1075,14 @@ export default function RecepcionPage() {
                   <label style={sLabel}>Kilómetros al recibir</label>
                   <input style={sInput} type="number" placeholder="Ej: 85000" value={kmEntrada}
                     onChange={e => setKmEntrada(e.target.value)} min={0} />
+                  {vehiculoSeleccionado?.km_actual != null && Number(vehiculoSeleccionado.km_actual) > 0 && (
+                    <p style={{ fontSize: 12, marginTop: -8, marginBottom: 12,
+                      color: kmEntrada !== "" && Number(kmEntrada) < Number(vehiculoSeleccionado.km_actual) ? "#dc2626" : MUTED }}>
+                      Último registrado: {Number(vehiculoSeleccionado.km_actual).toLocaleString("es-DO")} km
+                      {kmEntrada !== "" && Number(kmEntrada) < Number(vehiculoSeleccionado.km_actual)
+                        ? " — el kilometraje nuevo es MENOR, revisa el odómetro" : ""}
+                    </p>
+                  )}
                 </div>
                 <div>
                   <label style={sLabel}>Condición general</label>
