@@ -216,7 +216,7 @@ export default function CapacitacionesFacturacionPage() {
     </style></head><body>
     <div class="header">
       <div>
-        <div class="logo">SÓLIDO AUTO SERVICIO</div>
+        <img src="${window.location.origin}/logo-impresion.jpg" alt="Sólido Auto Servicio" style="height:80px;width:auto;display:block;margin-bottom:4px" />
         <div class="sub">Servicio Automotriz &amp; Café · Santo Domingo, RD</div>
       </div>
       <div style="text-align:right">
@@ -301,7 +301,7 @@ export default function CapacitacionesFacturacionPage() {
       .firma hr{margin-bottom:6px;}
       @media print{body{padding:20px;} button{display:none;}}
     </style></head><body>
-    <div class="logo">SÓLIDO AUTO SERVICIO</div>
+    <img src="${window.location.origin}/logo-impresion.jpg" alt="Sólido Auto Servicio" style="height:80px;width:auto;display:block;margin-bottom:4px" />
     <div class="sub">Servicio Automotriz &amp; Café · Santo Domingo, RD</div>
     <div class="titulo">Recibo de Pago — Capacitaciones</div>
     <table>

@@ -1002,8 +1002,8 @@ export default function ClienteApp() {
           top:-80px; left:50%; transform:translateX(-50%); pointer-events:none;
         }
         .sas-logo {
-          width:80px; height:80px; object-fit:contain; border-radius:20px;
-          box-shadow: 0 0 30px rgba(59,130,246,0.3); margin-bottom:14px;
+          width:200px; max-width:70%; height:auto; object-fit:contain;
+          filter: drop-shadow(0 6px 18px rgba(0,0,0,0.45)); margin-bottom:10px;
         }
         .sas-title {
           font-family:'Syne',sans-serif; font-size:20px; font-weight:800; letter-spacing:2px;
@@ -1408,8 +1408,8 @@ export default function ClienteApp() {
           {/* ── HEADER ── */}
           <div className="sas-header">
             <img
-              src="/logo-192x192.png"
-              alt="Logo Sólido"
+              src="/logo-completo.png"
+              alt="Sólido Auto Servicio"
               className="sas-logo"
               onError={(e) => { (e.target as HTMLImageElement).src = "/logo.png"; }}
             />
