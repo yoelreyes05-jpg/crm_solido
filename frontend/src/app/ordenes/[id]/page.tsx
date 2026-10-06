@@ -662,7 +662,7 @@ export default function OrdenDetallePage() {
   const [msg,       setMsg]      = useState<{ tipo:"ok"|"err"; texto:string } | null>(null);
   const [historial, setHistorial]= useState<any[]>([]);
 
-  const [modalAccion,  setModalAccion]  = useState<"aprobar"|"rechazar"|"calidad"|"calidad-rechazada"|"entregar"|null>(null);
+  const [modalAccion,  setModalAccion]  = useState<"aprobar"|"rechazar"|"solo-diagnostico"|"calidad"|"calidad-rechazada"|"entregar"|null>(null);
   const [motivoModal,  setMotivoModal]  = useState("");
   const [procesando,   setProcesando]   = useState(false);
   const [mostrarInspFotos, setMostrarInspFotos] = useState(false);
@@ -925,6 +925,7 @@ export default function OrdenDetallePage() {
     try {
       const endpointMap: Record<string,string> = {
         aprobar: "aprobar", rechazar: "rechazar",
+        "solo-diagnostico": "solo-diagnostico",
         calidad: "calidad-aprobada",
         "calidad-rechazada": "calidad-rechazada",
         entregar: "entregar",
@@ -1006,8 +1007,12 @@ export default function OrdenDetallePage() {
   if (estado === "ESPERANDO_APROBACION" && puedeAprobar) {
     accionesFlujo.push(
       { key:"aprobar",  label:"✅ Cliente Aprobó",  color:"#16a34a" },
+      { key:"solo-diagnostico", label:"🔍 Solo diagnóstico (cobrar y entregar)", color:"#0891b2" },
       { key:"rechazar", label:"❌ Cliente Rechazó",  color:"#dc2626" },
     );
+  } else if (estado === "DIAGNOSTICO" && puedeAprobar) {
+    // El cliente avisa antes de que se cierre el diagnóstico que no va a reparar.
+    accionesFlujo.push({ key:"solo-diagnostico", label:"🔍 Solo diagnóstico (cobrar y entregar)", color:"#0891b2" });
   }
   // Los botones de QC viven dentro de la sección Control de Calidad (con checklist completo)
   // No se duplican aquí para evitar doble envío al servidor
@@ -1098,7 +1103,8 @@ export default function OrdenDetallePage() {
           <div>
             <p style={{ margin:0, fontWeight:800, fontSize:15, color:"#111" }}>⚡ Acción requerida</p>
             <p style={{ margin:"2px 0 0", fontSize:13, color:"#6b7280" }}>
-              {estado === "ESPERANDO_APROBACION" && "El cliente necesita ser contactado para aprobar o rechazar la cotización."}
+              {estado === "ESPERANDO_APROBACION" && "El cliente necesita ser contactado para aprobar o rechazar la cotización. Si solo quería el diagnóstico, márcalo para cobrarlo y entregar."}
+              {estado === "DIAGNOSTICO"          && "Si el cliente solo quiere el diagnóstico y no va a reparar, márcalo para cobrarlo y entregar."}
               {estado === "CONTROL_CALIDAD"      && "Realiza el control de calidad antes de notificar al cliente que el vehículo está listo."}
               {estado === "LISTO"                && "El vehículo está listo. Procesa la entrega cuando el cliente llegue."}
             </p>
@@ -1808,6 +1814,7 @@ export default function OrdenDetallePage() {
             <h3 style={{ margin:"0 0 8px", fontSize:18 }}>
               {modalAccion === "aprobar"           && "✅ Confirmar aprobación del cliente"}
               {modalAccion === "rechazar"          && "❌ Confirmar rechazo del cliente"}
+              {modalAccion === "solo-diagnostico"  && "🔍 Solo diagnóstico — cobrar y entregar"}
               {modalAccion === "calidad"           && "✅ Confirmar: Control de Calidad Aprobado"}
               {modalAccion === "calidad-rechazada" && "❌ Rechazar QC — Regresar a Reparación"}
               {modalAccion === "entregar"          && "🏁 Confirmar entrega del vehículo"}
@@ -1817,6 +1824,7 @@ export default function OrdenDetallePage() {
               {modalAccion === "calidad-rechazada" && "El vehículo regresará al estado REPARACIÓN para corrección."}
               {modalAccion === "entregar"          && `Entregado por: ${entregaData.usuario_entrego || usuario?.nombre || "—"}`}
               {(modalAccion === "aprobar" || modalAccion === "rechazar") && "Esta acción cambiará el estado de la orden de forma permanente."}
+              {modalAccion === "solo-diagnostico"  && "El vehículo no se repara. La orden pasa a LISTO: factura el diagnóstico en Facturación y luego procesa la entrega aquí."}
             </p>
             <label style={{ fontSize:12, color:"#6b7280", fontWeight:600, display:"block", marginBottom:4 }}>
               Motivo / Notas {(modalAccion === "rechazar" || modalAccion === "calidad-rechazada") ? "(requerido)" : "(opcional)"}
@@ -1828,6 +1836,7 @@ export default function OrdenDetallePage() {
               placeholder={
                 modalAccion === "calidad-rechazada" ? "Describir qué debe corregirse..."
                 : modalAccion === "rechazar" ? "Motivo del rechazo del cliente..."
+                : modalAccion === "solo-diagnostico" ? "Ej.: el cliente lo va a reparar en otro lugar..."
                 : "Observaciones adicionales..."
               }
             />

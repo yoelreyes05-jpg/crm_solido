@@ -589,14 +589,24 @@ export default function FacturaPage() {
       setVehiculoId(String(diag.vehiculo_id));
       setDiagCargado(diag.id);
 
-      let precioMO = Number(diag.costo_estimado || 0);
-      let descripcionMO = diag.mano_de_obra_detalle?.trim()
+      // Cliente que no reparó (solo diagnóstico): se cobra el diagnóstico, no
+      // la cotización. El precio sale del tarifario si hay una operación de
+      // diagnóstico; si no, queda en 0 para ponerlo a mano en el carrito.
+      const soloDiagnostico = diag.estado === "RECHAZADO";
+      const opDiag = soloDiagnostico ? tarifario.find((o: any) => /diagn/i.test(o.nombre || "")) : null;
+
+      let precioMO = soloDiagnostico
+        ? Number(opDiag?.[campoSegmento(segmento)] || 0)
+        : Number(diag.costo_estimado || 0);
+      let descripcionMO = soloDiagnostico
+        ? (opDiag?.nombre || "Diagnóstico técnico") + (diag.tipo_servicio ? ` — ${diag.tipo_servicio}` : "")
+        : diag.mano_de_obra_detalle?.trim()
         ? diag.mano_de_obra_detalle
         : diag.tipo_servicio
           ? `Mano de Obra — ${diag.tipo_servicio}`
           : "Mano de Obra Técnica";
 
-      if (!precioMO) {
+      if (!precioMO && !soloDiagnostico) {
         try {
           const res = await fetch(`${API}/diagnosticos/${diag.id}`);
           const detalle = await res.json();
@@ -1063,8 +1073,8 @@ export default function FacturaPage() {
                   </option>
                   {diagnosticos.map((d: any) => (
                     <option key={d.id} value={d.id}>
-                      #{d.id} · {d.tipo_servicio} · {d.cliente_nombre} · {d.vehiculo_info}
-                      {d.costo_estimado ? ` · RD$${Number(d.costo_estimado).toLocaleString()}` : ""}
+                      {d.estado === "RECHAZADO" ? "🔍 Solo diagnóstico · " : ""}#{d.id} · {d.tipo_servicio} · {d.cliente_nombre} · {d.vehiculo_info}
+                      {d.costo_estimado && d.estado !== "RECHAZADO" ? ` · RD$${Number(d.costo_estimado).toLocaleString()}` : ""}
                     </option>
                   ))}
                 </select>

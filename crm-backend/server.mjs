@@ -7682,6 +7682,15 @@ const TRANSICIONES_EXPRESS = {
   DIAGNOSTICO: ["LISTO"],
 };
 
+// Solo diagnóstico: el cliente vino a saber qué tiene el vehículo y no quiere
+// repararlo. No se cancela (el diagnóstico se cobra): la orden pasa a LISTO
+// para que caja facture el diagnóstico, y de ahí se entrega como cualquier
+// otra. Solo se usa desde POST /ordenes/:id/solo-diagnostico.
+const TRANSICIONES_SOLO_DIAGNOSTICO = {
+  DIAGNOSTICO:          ["LISTO"],
+  ESPERANDO_APROBACION: ["LISTO"],
+};
+
 /** ¿Esta orden está marcada como servicio express? */
 async function esOrdenExpress(ordenId) {
   if (!ordenId) return false;
@@ -7707,7 +7716,7 @@ async function estadoTrasDiagnostico(ordenId) {
  * y deja registro en orden_trabajo_log.
  * @returns {Promise<{ok: boolean, error?: string}>}
  */
-async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usuarioNombre = "Sistema", motivo = null, extra = {} } = {}) {
+async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usuarioNombre = "Sistema", motivo = null, extra = {}, soloDiagnostico = false } = {}) {
   const idNum = parseInt(ordenId, 10);
   if (isNaN(idNum)) return { ok: false, error: "ID de orden inválido" };
 
@@ -7730,6 +7739,7 @@ async function transicionarEstado(ordenId, nuevoEstado, { usuarioId = null, usua
   const permitidos = [
     ...(TRANSICIONES_VALIDAS[estadoActual] || []),
     ...(orden.es_express ? (TRANSICIONES_EXPRESS[estadoActual] || []) : []),
+    ...(soloDiagnostico ? (TRANSICIONES_SOLO_DIAGNOSTICO[estadoActual] || []) : []),
   ];
 
   if (!permitidos.includes(nuevoEstado)) {
@@ -7991,6 +8001,46 @@ app.post("/ordenes/:id/rechazar", async (req, res) => {
     if (!result.ok) return res.status(400).json({ error: result.error });
     await supabase.from("diagnosticos").update({ estado: "RECHAZADO" }).eq("orden_id", id);
     res.json({ ok: true, mensaje: "Orden CANCELADA" });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// ── POST /ordenes/:id/solo-diagnostico — el cliente solo quería el diagnóstico ─
+// Desde DIAGNOSTICO o ESPERANDO_APROBACION → LISTO. No se repara nada, pero el
+// diagnóstico sí se cobra: con la orden en LISTO, caja la factura y después se
+// entrega por el flujo normal (la entrega pide la factura).
+app.post("/ordenes/:id/solo-diagnostico", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { usuario_id, usuario_nombre, motivo } = req.body || {};
+
+    const { data: orden } = await supabase.from("ordenes_trabajo").select("estado").eq("id", id).maybeSingle();
+    if (!orden) return res.status(404).json({ error: "Orden no encontrada" });
+    if (!["DIAGNOSTICO", "ESPERANDO_APROBACION"].includes(orden.estado)) {
+      return res.status(400).json({ error: `Solo diagnóstico se marca desde DIAGNOSTICO o ESPERANDO_APROBACION, no desde ${orden.estado}.` });
+    }
+
+    // La factura se engancha a la orden por el diagnóstico: sin él, caja no
+    // tendría de dónde facturar y la orden no podría entregarse.
+    const { data: diag } = await supabase.from("diagnosticos").select("id")
+      .eq("orden_id", id).order("created_at", { ascending: false }).limit(1).maybeSingle();
+    if (!diag) {
+      return res.status(400).json({ error: "Esta orden todavía no tiene diagnóstico guardado. El técnico debe registrarlo primero para poder facturarlo." });
+    }
+
+    const nota = motivo?.trim() ? `Solo diagnóstico: ${motivo.trim()}` : "Solo diagnóstico: el cliente no desea reparar";
+    const result = await transicionarEstado(Number(id), "LISTO", {
+      usuarioId: usuario_id, usuarioNombre: usuario_nombre || "Recepción",
+      motivo: nota,
+      extra: { aprobado_por_cliente: false },
+      soloDiagnostico: true,
+    });
+    if (!result.ok) return res.status(400).json({ error: result.error });
+    // RECHAZADO = no se repara. Facturación lo carga como cobro del diagnóstico,
+    // no por el monto de la cotización.
+    await supabase.from("diagnosticos").update({ estado: "RECHAZADO" }).eq("id", diag.id);
+    res.json({ ok: true, mensaje: "Solo diagnóstico — la orden pasó a LISTO. Factura el diagnóstico en Facturación y luego entrega el vehículo." });
   } catch (err) {
     res.status(500).json({ error: err.message });
   }

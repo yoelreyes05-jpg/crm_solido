@@ -262,12 +262,14 @@ function TarjetaOrden({
   diagnostico,
   onAprobar,
   onRechazar,
+  onSoloDiagnostico,
   procesando,
 }: {
   orden: Orden;
   diagnostico?: Diagnostico;
   onAprobar: (id: number) => void;
   onRechazar: (orden: Orden) => void;
+  onSoloDiagnostico: (orden: Orden) => void;
   procesando: boolean;
 }) {
   const urgente = esUrgente(orden.aprobacion_at || orden.created_at);
@@ -603,6 +605,25 @@ function TarjetaOrden({
         >
           ❌ Cliente Rechaza
         </button>
+        <button
+          disabled={procesando}
+          onClick={() => onSoloDiagnostico(orden)}
+          title="El cliente no repara: se cobra el diagnóstico en Facturación y se entrega el vehículo"
+          style={{
+            flex: "1 1 100%",
+            padding: "12px",
+            background: procesando ? "#1e293b" : "#0891b2",
+            color: "#fff",
+            border: "none",
+            borderRadius: 10,
+            cursor: procesando ? "not-allowed" : "pointer",
+            fontSize: 14,
+            fontWeight: 800,
+            opacity: procesando ? 0.6 : 1,
+          }}
+        >
+          🔍 Solo diagnóstico — cobrar y entregar
+        </button>
       </div>
     </div>
   );
@@ -730,6 +751,34 @@ export default function AprobacionPage() {
       }
     } catch {
       addToast("error", "Error de red al aprobar la orden.");
+    } finally {
+      setProcesando(false);
+    }
+  };
+
+  // ── Solo diagnóstico: no repara, se cobra el diagnóstico y se entrega ──
+  const handleSoloDiagnostico = async (orden: Orden) => {
+    if (!confirm(`${orden.cliente_nombre}: ¿solo quiere el diagnóstico, sin reparar?\n\nLa orden pasa a LISTO para cobrar el diagnóstico en Facturación y luego entregar el vehículo.`)) return;
+    setProcesando(true);
+    try {
+      const usr = JSON.parse(localStorage.getItem("usuario") || "{}");
+      const res = await fetch(`${API}/ordenes/${orden.id}/solo-diagnostico`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          usuario_nombre: usr.nombre || "Secretaria",
+          usuario_id: usr.id || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        addToast("error", data.error || "Error al marcar solo diagnóstico.");
+      } else {
+        addToast("ok", "🔍 Solo diagnóstico: cóbralo en Facturación y entrega el vehículo.");
+        await fetchData();
+      }
+    } catch {
+      addToast("error", "Error de red al marcar solo diagnóstico.");
     } finally {
       setProcesando(false);
     }
@@ -891,6 +940,7 @@ export default function AprobacionPage() {
                   diagnostico={diag}
                   onAprobar={handleAprobar}
                   onRechazar={setModalRechazo}
+                  onSoloDiagnostico={handleSoloDiagnostico}
                   procesando={procesando}
                 />
               );
