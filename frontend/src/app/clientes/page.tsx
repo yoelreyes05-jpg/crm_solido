@@ -6,6 +6,7 @@ import { API_URL as API } from "@/config";
 import { usePermisos } from "@/lib/usePermisos";
 import { auditHeaders } from "@/lib/audit";
 import GenerarCodigoPortal from "@/components/GenerarCodigoPortal";
+import BotonQRCliente, { ClienteQRModal } from "@/components/ClienteQR";
 
 // Consulta exacta al padrón DGII por RNC/cédula. Devuelve null si no existe.
 async function dgiiPorRNC(rnc: string) {
@@ -91,6 +92,8 @@ export default function Clientes() {
     tipo_cliente: "INDIVIDUAL", rnc: "", razon_social: "", contacto_nombre: "", contacto_telefono: "",
   });
   const [guardando, setGuardando] = useState(false);
+  // Al crear un cliente se abre su QR para imprimirlo o enviárselo de una vez.
+  const [qrNuevo, setQrNuevo] = useState<number | null>(null);
 
   const obtenerClientes = async () => {
     try {
@@ -151,6 +154,7 @@ export default function Clientes() {
 
       resetForm();
       obtenerClientes();
+      if (data.id) setQrNuevo(data.id);
     } catch { alert("Error al guardar"); }
     finally { setGuardando(false); }
   };
@@ -375,6 +379,12 @@ export default function Clientes() {
                         {/* Código para que el cliente entre al portal desde su
                             celular. Es la vía para quien no tiene teléfono ni
                             correo en ficha y no puede usar los otros métodos. */}
+                        <BotonQRCliente
+                          clienteId={c.id}
+                          clienteNombre={c.nombre}
+                          estiloBoton={btnAccion("#7c3aed")}
+                          etiqueta="QR"
+                        />
                         <GenerarCodigoPortal
                           clienteId={c.id}
                           clienteNombre={c.nombre}
@@ -397,6 +407,15 @@ export default function Clientes() {
           </div>
         </div>
       </div>
+
+      {/* QR del cliente recién creado */}
+      <ClienteQRModal
+        clienteId={qrNuevo ?? 0}
+        abierto={qrNuevo !== null}
+        onCerrar={() => setQrNuevo(null)}
+        titulo="📱 QR del nuevo cliente"
+        aviso="✅ Cliente creado. Imprímele o envíale su QR: con él ve su vehículo y su plan de mantenimiento en la app."
+      />
 
       {/* MODAL EDITAR CLIENTE — solo si puede editar */}
       {editando && puedeEditar && (

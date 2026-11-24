@@ -248,6 +248,39 @@ export async function entrarConCodigoMostrador(codigo: string, placa?: string) {
   return s;
 }
 
+/**
+ * Saca el token de lo que trae un QR del taller. Acepta el enlace completo
+ * (https://…/cliente?qr=<token>) o el token suelto. Devuelve null si el QR no
+ * es de este sistema.
+ */
+export function extraerTokenQR(texto: string | null | undefined): string | null {
+  const t = String(texto || "").trim();
+  if (!t) return null;
+  let candidato = t;
+  try {
+    const u = new URL(t);
+    candidato = u.searchParams.get("qr") || "";
+  } catch {
+    /* no es URL: se toma tal cual */
+  }
+  candidato = candidato.trim().toLowerCase();
+  return /^[a-f0-9]{32}$/.test(candidato) ? candidato : null;
+}
+
+/**
+ * Código QR personal del cliente. Si tiene varios vehículos el backend responde
+ * 300 con la lista: se lanza ErrorPortal con status 300 y `datos.vehiculos`.
+ */
+export async function entrarConQR(qr: string, placa?: string) {
+  const s = await pedir<Sesion>(
+    "/acceso/qr",
+    { method: "POST", body: JSON.stringify({ qr, placa }) },
+    false
+  );
+  guardarSesion(s);
+  return s;
+}
+
 // ─── Datos ───────────────────────────────────────────────────────────────────
 
 /** Una sola llamada: vehículo, orden abierta, línea de tiempo, cotizaciones. */

@@ -540,6 +540,92 @@ router.post("/acceso/mostrador", ruta(async (req, res) => {
   });
 }));
 
+// ═════════════════════════════════════════════════════════════════════════════
+// ACCESO — Código QR del cliente
+// ═════════════════════════════════════════════════════════════════════════════
+
+/**
+ * POST /portal/acceso/qr   { qr, placa? }
+ *
+ * El QR que el taller le entrega al cliente (impreso o por WhatsApp) es un
+ * enlace  URL_APP?qr=<token>. El token son 32 caracteres hex aleatorios
+ * (122 bits), guardado en clientes.qr_token — imposible de adivinar, así que
+ * tenerlo equivale a tener la tarjeta. El taller lo puede regenerar desde el
+ * CRM si el cliente la pierde, y eso cierra las sesiones abiertas con él.
+ *
+ * Igual que el código de mostrador: si el cliente tiene varios vehículos y no
+ * indica placa, responde 300 con la lista para que elija.
+ */
+router.post("/acceso/qr", ruta(async (req, res) => {
+  const ip = ipDe(req);
+  const qr = String(req.body?.qr || "").trim().toLowerCase();
+  const placa = normalizarPlaca(req.body?.placa);
+
+  if (!/^[a-f0-9]{32}$/.test(qr)) {
+    return fallo(res, 400, "Ese código QR no es de Sólido Auto Servicio o está incompleto.");
+  }
+
+  const limite = await excedeLimite(`qr:${ip}`, ip);
+  if (limite) return fallo(res, 429, "Demasiados intentos. Espera una hora o pide ayuda en el taller.");
+
+  const { data: cliente, error } = await supabase
+    .from("clientes")
+    .select("id, nombre, activo")
+    .eq("qr_token", qr)
+    .maybeSingle();
+
+  if (error) {
+    const e = new Error(`No se pudo validar el QR: ${error.message}`);
+    e.code = error.code;
+    throw e;
+  }
+
+  if (!cliente || cliente.activo === false) {
+    await registrarIntento(`qr:${ip}`, ip, "qr", false);
+    return fallo(res, 401, "Este código QR ya no es válido. Pide uno nuevo en el taller.");
+  }
+
+  const { data: vehiculos } = await supabase
+    .from("vehiculos")
+    .select("id, placa, marca, modelo, ano, color, activo")
+    .eq("cliente_id", cliente.id)
+    .order("id", { ascending: false });
+
+  const activos = (vehiculos || []).filter((v) => v.activo !== false);
+  let vehiculo = null;
+  if (placa) vehiculo = activos.find((v) => normalizarPlaca(v.placa) === placa) || null;
+  if (!vehiculo && activos.length === 1) vehiculo = activos[0];
+
+  if (!vehiculo && activos.length > 1) {
+    return res.status(300).json({
+      error: false,
+      requiere_seleccion: true,
+      cliente: { nombre: cliente.nombre },
+      vehiculos: activos.map((v) => ({ placa: v.placa, marca: v.marca, modelo: v.modelo, ano: v.ano, color: v.color })),
+      mensaje: "Tienes varios vehículos. Elige cuál quieres ver.",
+    });
+  }
+
+  if (!vehiculo) {
+    // QR válido pero todavía sin vehículo registrado: no es un intento fallido.
+    return fallo(res, 404, `Hola ${cliente.nombre?.split(" ")[0] || ""}, tu QR es válido pero aún no tienes un vehículo registrado en el taller. Lo verás aquí después de tu primera visita.`, {
+      requiere: "vehiculo",
+    });
+  }
+
+  const token = await crearSesion({
+    cliente_id: cliente.id, vehiculo_id: vehiculo.id, nivel: "qr", req,
+  });
+  await registrarIntento(`qr:${ip}`, ip, "qr", true);
+
+  res.json({
+    error: false,
+    token,
+    cliente: { nombre: cliente.nombre },
+    vehiculo: { id: vehiculo.id, placa: vehiculo.placa, marca: vehiculo.marca, modelo: vehiculo.modelo, ano: vehiculo.ano, color: vehiculo.color },
+  });
+}));
+
 /**
  * POST /portal/admin/codigo-mostrador   { cliente_id, generado_por? }
  * Lo llama la secretaria desde la ficha del cliente en el CRM.
@@ -1696,6 +1782,16 @@ router.use((err, req, res, next) => {
       mensaje: "El portal todavía no está listo. Avísale al taller.",
       detalle_tecnico: texto,
       accion_requerida: "Define PORTAL_JWT_SECRET en Railway y redespliega.",
+    });
+  }
+
+  // ── Falta la migración del QR del cliente ────────────────────────────────
+  if (/qr_token|nivel_acceso_check/i.test(texto)) {
+    return res.status(503).json({
+      error: true,
+      mensaje: "El acceso con código QR aún no está activado. Avísale al taller.",
+      detalle_tecnico: texto,
+      accion_requerida: "Corre crm-backend/sql/migracion_v33_qr_cliente.sql en el SQL Editor de Supabase.",
     });
   }
 

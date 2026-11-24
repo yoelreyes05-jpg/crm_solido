@@ -19,6 +19,7 @@ import {
 // puntos del bot apuntando a `railway.app/cita`, una ruta que no existe: todo
 // cliente que pedía cita por Telegram recibía un enlace roto.
 import { URL_WEB, URL_APP, URL_CITA, TEL_TALLER } from "./services/enlaces.mjs";
+import { randomUUID } from "node:crypto";
 
 const app = express();
 
@@ -308,6 +309,84 @@ app.delete("/clientes/:id", async (req, res) => {
   logAccion(req, { accion: "ELIMINAR", modulo: "clientes", registroId: id,
     descripcion: `Archivó al cliente ${cli?.nombre || `#${id}`}` });
   res.json({ ok: true, archived: true });
+});
+
+// =====================================================
+// 📱 QR DEL CLIENTE — acceso a la app del cliente
+// =====================================================
+// Cada cliente tiene un `qr_token` (ver sql/migracion_v33_qr_cliente.sql).
+// El QR es un enlace a la app: URL_APP?qr=<token>. Al escanearlo, el portal
+// (POST /portal/acceso/qr) abre la sesión y el cliente ve sus vehículos y sus
+// planes de mantenimiento. Si la columna tiene DEFAULT, todo cliente nuevo
+// nace con su token; aun así aquí se genera si falta (clientes viejos o si la
+// migración se corrió sin default).
+const nuevoQrToken = () => randomUUID().replace(/-/g, "");
+const urlQrCliente = (token) => `${URL_APP}${URL_APP.includes("?") ? "&" : "?"}qr=${token}`;
+
+// GET /clientes/:id/qr — devuelve el token y el enlace que va dentro del QR
+app.get("/clientes/:id/qr", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { data: cli, error } = await supabase
+      .from("clientes").select("id, nombre, telefono, qr_token, qr_generado_en")
+      .eq("id", id).maybeSingle();
+    if (error) {
+      const faltaColumna = /qr_token/.test(error.message || "");
+      return res.status(faltaColumna ? 503 : 500).json({
+        error: faltaColumna
+          ? "Falta correr sql/migracion_v33_qr_cliente.sql en Supabase."
+          : error.message,
+      });
+    }
+    if (!cli) return res.status(404).json({ error: "Cliente no encontrado" });
+
+    let token = cli.qr_token;
+    let generado = cli.qr_generado_en;
+    if (!token) {
+      token = nuevoQrToken();
+      generado = new Date().toISOString();
+      const { error: e2 } = await supabase.from("clientes")
+        .update({ qr_token: token, qr_generado_en: generado }).eq("id", id);
+      if (e2) return res.status(500).json({ error: e2.message });
+    }
+
+    const { count: vehiculos } = await supabase.from("vehiculos")
+      .select("id", { count: "exact", head: true })
+      .eq("cliente_id", id).or("activo.eq.true,activo.is.null");
+
+    res.json({
+      cliente_id: cli.id, nombre: cli.nombre, telefono: cli.telefono || "",
+      token, url: urlQrCliente(token), generado_en: generado,
+      vehiculos: vehiculos || 0,
+    });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// POST /clientes/:id/qr/regenerar — invalida el QR anterior (perdió la tarjeta,
+// le tomaron foto, cambió de dueño) y cierra las sesiones abiertas con ese QR.
+app.post("/clientes/:id/qr/regenerar", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const token = nuevoQrToken();
+    const ahora = new Date().toISOString();
+    const { data, error } = await supabase.from("clientes")
+      .update({ qr_token: token, qr_generado_en: ahora })
+      .eq("id", id).select("id, nombre").maybeSingle();
+    if (error) return res.status(500).json({ error: error.message });
+    if (!data) return res.status(404).json({ error: "Cliente no encontrado" });
+
+    await supabase.from("portal_sesiones")
+      .update({ revocado_en: ahora })
+      .eq("cliente_id", id).eq("nivel_acceso", "qr").is("revocado_en", null);
+
+    logAccion(req, { accion: "EDITAR", modulo: "clientes", registroId: id,
+      descripcion: `Regeneró el código QR de ${data.nombre || `#${id}`}` });
+    res.json({ token, url: urlQrCliente(token), generado_en: ahora });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // Historial completo de un cliente
