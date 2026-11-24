@@ -11,6 +11,7 @@
  *   1. Últimos 4 dígitos del teléfono   → instantáneo, sin correo
  *   2. Código de 6 dígitos al correo     → si no hay teléfono en ficha
  *   3. Código dictado en el mostrador    → si no hay ninguno de los dos
+ *   4. Código QR personal del cliente     → enlace ?qr=… o escáner de la app
  *
  * El paso 1 (consultar placa) le pregunta al backend qué métodos aplican, así
  * el cliente nunca ve una opción que no puede usar.
@@ -19,17 +20,31 @@
  *   <PortalAcceso onEntrar={(sesion) => setSesion(sesion)} />
  */
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   consultarPlaca, entrarConTelefono, solicitarCodigo, entrarConCodigo,
-  entrarConCodigoMostrador, ErrorPortal,
+  entrarConCodigoMostrador, entrarConQR, extraerTokenQR, ErrorPortal,
   type MetodosAcceso, type Sesion,
 } from "@/lib/portalCliente";
+import EscanerQR from "@/components/EscanerQR";
 
-type Paso = "placa" | "metodo" | "telefono" | "codigo" | "mostrador";
+type Paso = "placa" | "metodo" | "telefono" | "codigo" | "mostrador"
+          | "escanear" | "qr-cargando" | "qr-vehiculo";
 
-export default function PortalAcceso({ onEntrar }: { onEntrar: (s: Sesion) => void }) {
-  const [paso, setPaso]         = useState<Paso>("placa");
+type VehiculoQR = { placa: string; marca?: string; modelo?: string; ano?: number; color?: string };
+
+export default function PortalAcceso({
+  onEntrar,
+  qrInicial,
+}: {
+  onEntrar: (s: Sesion) => void;
+  /** Token que llegó en el enlace del QR (?qr=…). Entra automáticamente. */
+  qrInicial?: string | null;
+}) {
+  const [paso, setPaso]         = useState<Paso>(qrInicial ? "qr-cargando" : "placa");
+  const [qrToken, setQrToken]   = useState<string | null>(null);
+  const [vehiculosQR, setVehiculosQR] = useState<VehiculoQR[]>([]);
+  const [nombreQR, setNombreQR] = useState("");
   const [placa, setPlaca]       = useState("");
   const [ultimos4, setUltimos4] = useState("");
   const [codigo, setCodigo]     = useState("");
@@ -65,6 +80,47 @@ export default function PortalAcceso({ onEntrar }: { onEntrar: (s: Sesion) => vo
       setPaso("mostrador");
     }
   };
+
+  // ── Código QR ─────────────────────────────────────────────────────────────
+  const entrarQR = async (token: string, placaElegida?: string) => {
+    setCargando(true); setError(""); setAviso("");
+    try {
+      const s = await entrarConQR(token, placaElegida);
+      onEntrar(s);
+    } catch (e) {
+      if (e instanceof ErrorPortal && e.status === 300) {
+        // Varios vehículos: que el cliente elija cuál ver.
+        setQrToken(token);
+        setVehiculosQR(e.datos?.vehiculos || []);
+        setNombreQR(e.datos?.cliente?.nombre || "");
+        setPaso("qr-vehiculo");
+      } else {
+        setPaso("placa");
+        manejar(e);
+      }
+    } finally {
+      setCargando(false);
+    }
+  };
+
+  useEffect(() => {
+    if (qrInicial) entrarQR(qrInicial);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [qrInicial]);
+
+  const alLeerQR = useCallback((texto: string) => {
+    const token = extraerTokenQR(texto);
+    if (!token) {
+      setPaso("placa");
+      setError("Ese código QR no es de Sólido Auto Servicio. Usa el QR que te dio el taller.");
+      return;
+    }
+    setPaso("qr-cargando");
+    entrarQR(token);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const cerrarEscaner = useCallback(() => setPaso("placa"), []);
 
   // ── Paso 1: placa ─────────────────────────────────────────────────────────
   const buscarPlaca = async () => {
@@ -139,7 +195,41 @@ export default function PortalAcceso({ onEntrar }: { onEntrar: (s: Sesion) => vo
       <style>{ESTILOS}</style>
 
       <div className="pa-card">
-        <div className="pa-icono">🔐</div>
+        <div className="pa-icono">{paso === "escanear" || paso.startsWith("qr") ? "📱" : "🔐"}</div>
+
+        {/* ── QR: escáner con la cámara ─────────────────────────────────── */}
+        {paso === "escanear" && (
+          <>
+            <h2 className="pa-titulo">Escanea tu código QR</h2>
+            <EscanerQR onLeido={alLeerQR} onCerrar={cerrarEscaner} />
+          </>
+        )}
+
+        {/* ── QR: entrando ──────────────────────────────────────────────── */}
+        {paso === "qr-cargando" && (
+          <>
+            <h2 className="pa-titulo">Entrando con tu QR…</h2>
+            <p className="pa-sub">Un momento, estamos buscando tu vehículo.</p>
+          </>
+        )}
+
+        {/* ── QR: elegir vehículo ───────────────────────────────────────── */}
+        {paso === "qr-vehiculo" && qrToken && (
+          <>
+            <h2 className="pa-titulo">Hola{nombreQR ? `, ${nombreQR.split(" ")[0]}` : ""} 👋</h2>
+            <p className="pa-sub">Tienes varios vehículos. ¿Cuál quieres ver?</p>
+            {vehiculosQR.map((v) => (
+              <button key={v.placa} className="pa-opcion" disabled={cargando}
+                onClick={() => entrarQR(qrToken, v.placa)}>
+                <span className="pa-opcion-emoji">🚗</span>
+                <span>
+                  <strong>{[v.marca, v.modelo, v.ano].filter(Boolean).join(" ")}</strong>
+                  <small>Placa {v.placa}{v.color ? ` · ${v.color}` : ""}</small>
+                </span>
+              </button>
+            ))}
+          </>
+        )}
 
         {/* ── PLACA ─────────────────────────────────────────────────────── */}
         {paso === "placa" && (
@@ -161,6 +251,10 @@ export default function PortalAcceso({ onEntrar }: { onEntrar: (s: Sesion) => vo
             />
             <button className="pa-btn" disabled={cargando || placa.trim().length < 4} onClick={buscarPlaca}>
               {cargando ? "Buscando…" : "Continuar"}
+            </button>
+            <div className="pa-separador"><span>o</span></div>
+            <button className="pa-btn pa-btn-qr" onClick={() => { setError(""); setAviso(""); setPaso("escanear"); }}>
+              📷 Escanear mi código QR
             </button>
             <button className="pa-link" onClick={() => { setError(""); setPaso("mostrador"); }}>
               Tengo un código del taller
@@ -347,6 +441,15 @@ const ESTILOS = `
   }
   .pa-btn:hover:not(:disabled) { transform:translateY(-1px); }
   .pa-btn:disabled { opacity:.4; cursor:not-allowed; }
+  .pa-btn-qr {
+    background:rgba(124,58,237,.16); border:1px solid rgba(167,139,250,.45); color:#ddd6fe;
+  }
+  .pa-separador {
+    display:flex; align-items:center; gap:10px; margin:14px 0; color:#475569; font-size:12px;
+  }
+  .pa-separador::before, .pa-separador::after {
+    content:""; flex:1; height:1px; background:rgba(255,255,255,.08);
+  }
 
   .pa-opcion {
     display:flex; align-items:center; gap:14px; width:100%; text-align:left;

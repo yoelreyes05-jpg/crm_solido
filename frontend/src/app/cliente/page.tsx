@@ -7,8 +7,70 @@ import MisCitas from "@/components/MisCitas";
 import {
   cargarEstado, cargarHistorial, cargarDetalleHistorial,
   responderCotizacion, revalidarSesion, salir,
+  extraerTokenQR, borrarSesion,
   type Sesion,
 } from "@/lib/portalCliente";
+
+// ── Planes de mantenimiento (los crea el taller en /mantenimiento) ──
+const TIPO_MANT: Record<string, { label: string; emoji: string }> = {
+  CAMBIO_ACEITE: { label: "Cambio de aceite", emoji: "🛢️" },
+  FILTROS:       { label: "Filtros",          emoji: "🔩" },
+  FRENOS:        { label: "Frenos",           emoji: "🛑" },
+  CORREAS:       { label: "Correas",          emoji: "⚙️" },
+  BUJIAS:        { label: "Bujías",           emoji: "⚡" },
+  ALINEACION:    { label: "Alineación y balanceo", emoji: "🔄" },
+  TRANSMISION:   { label: "Transmisión",      emoji: "⚙️" },
+  AC:            { label: "Aire acondicionado", emoji: "❄️" },
+  SUSPENSION:    { label: "Suspensión",       emoji: "🔧" },
+  GOMAS:         { label: "Gomas",            emoji: "🛞" },
+  BATERIA:       { label: "Batería",          emoji: "🔋" },
+  REFRIGERANTE:  { label: "Refrigerante",     emoji: "💧" },
+  DIAGNOSTICO:   { label: "Diagnóstico",      emoji: "🔬" },
+  OTRO:          { label: "Mantenimiento",    emoji: "🔧" },
+};
+
+const esAceite = (t: string) => /ACEITE/i.test(String(t || ""));
+/** Para comparar textos sin emojis, mayúsculas ni acentos ("🛑 Frenos" = "Frenos"). */
+const soloLetras = (t: string) =>
+  String(t || "").normalize("NFD").replace(/[^a-zA-Z]/g, "").toLowerCase();
+
+function infoTipoMant(t: string) {
+  const k = String(t || "").toUpperCase().trim().replace(/\s+/g, "_");
+  if (TIPO_MANT[k]) return TIPO_MANT[k];
+  if (esAceite(t)) return TIPO_MANT.CAMBIO_ACEITE;
+  return { label: t ? t.charAt(0).toUpperCase() + t.slice(1).toLowerCase().replace(/_/g, " ") : "Mantenimiento", emoji: "🔧" };
+}
+
+/** 'YYYY-MM-DD' a Date a mediodía local, para que no se corra un día por zona horaria. */
+function fechaLocal(f?: string | null): Date | null {
+  if (!f) return null;
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(f) ? `${f}T12:00:00` : f);
+  return isNaN(d.getTime()) ? null : d;
+}
+
+const fechaCorta = (d: Date | null) =>
+  d ? d.toLocaleDateString("es-DO", { day: "numeric", month: "short", year: "numeric" }) : "—";
+const kmBonito = (n: any) => `${Number(n).toLocaleString("es-DO")} km`;
+
+/** Estado de un plan: días que faltan, % del intervalo consumido y color. */
+function estadoPlan(m: any) {
+  const proximo = fechaLocal(m.proximo_fecha);
+  const ultimo  = fechaLocal(m.ultimo_servicio_fecha) || fechaLocal(m.created_at);
+  const hoy = new Date();
+  const dias = proximo ? Math.ceil((proximo.getTime() - hoy.getTime()) / 86400000) : null;
+  let pct = 0;
+  if (proximo && ultimo && proximo > ultimo) {
+    pct = ((hoy.getTime() - ultimo.getTime()) / (proximo.getTime() - ultimo.getTime())) * 100;
+  }
+  pct = Math.max(3, Math.min(100, pct));
+  const nivel = dias === null ? "sin" : dias < 0 ? "vencido" : dias <= 15 ? "pronto" : "aldia";
+  const texto =
+    dias === null ? "Sin fecha programada"
+    : dias < 0   ? `Vencido hace ${Math.abs(dias)} día${Math.abs(dias) === 1 ? "" : "s"}`
+    : dias === 0 ? "Toca hoy"
+    : `Faltan ${dias} día${dias === 1 ? "" : "s"}`;
+  return { proximo, ultimo, dias, pct: dias !== null && dias < 0 ? 100 : pct, nivel, texto };
+}
 
 const ESTADO_INFO = {
   RECIBIDO:        { color: "#60a5fa", grad: "linear-gradient(135deg,#1e3a5f,#2563eb)", emoji: "📋", paso: 1, msg: "Tu vehículo fue recibido. Pronto será evaluado." },
@@ -811,9 +873,29 @@ export default function ClienteApp() {
 
   // Sesión guardada: si el token sigue vivo, el cliente entra directo. Dura 30
   // días, así que en la práctica se identifica una vez y luego solo abre la app.
+  // Token del código QR (?qr=…). Si el cliente llega escaneando su QR, entra
+  // con ese QR aunque hubiera otra sesión guardada en el teléfono.
+  const [qrInicial, setQrInicial] = useState<string | null>(null);
+
   useEffect(() => {
     let vigente = true;
     (async () => {
+      const params = new URLSearchParams(window.location.search);
+      const tokenQR = extraerTokenQR(params.get("qr"));
+      if (params.has("qr")) {
+        // Se quita de la barra de direcciones: no debe quedar en el historial
+        // ni compartirse por accidente al copiar el enlace de la app.
+        params.delete("qr");
+        const resto = params.toString();
+        window.history.replaceState(null, "", window.location.pathname + (resto ? `?${resto}` : ""));
+      }
+      if (tokenQR) {
+        borrarSesion();
+        setQrInicial(tokenQR);
+        setVerificando(false);
+        return;
+      }
+
       const s = await revalidarSesion();
       if (!vigente) return;
       if (s) {
@@ -1248,6 +1330,34 @@ export default function ClienteApp() {
         .mant-fila small  { display:block; font-size:11.5px; color:#64748b; margin-top:2px; }
         .mant-fila > span { font-size:12px; color:#94a3b8; white-space:nowrap; }
         .mant-vencido > span { color:#fca5a5; font-weight:700; }
+        .mant-plan {
+          padding:14px; margin-bottom:10px; border-radius:14px;
+          background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.06);
+        }
+        .mant-aceite { background:rgba(59,130,246,.07); border-color:rgba(96,165,250,.22); }
+        .mant-plan-top { display:flex; align-items:center; gap:10px; }
+        .mant-plan-emoji { font-size:22px; }
+        .mant-plan-txt { flex:1; min-width:0; }
+        .mant-plan-txt strong { display:block; font-size:14.5px; color:#e2e8f0; font-weight:700; }
+        .mant-plan-txt small  { display:block; font-size:11.5px; color:#64748b; margin-top:2px; }
+        .mant-chip {
+          font-size:11.5px; font-weight:700; padding:4px 10px; border-radius:999px; white-space:nowrap;
+          background:rgba(34,197,94,.14); color:#86efac;
+        }
+        .mant-pronto  .mant-chip { background:rgba(245,158,11,.16); color:#fcd34d; }
+        .mant-vencido .mant-chip { background:rgba(239,68,68,.16);  color:#fca5a5; }
+        .mant-sin     .mant-chip { background:rgba(148,163,184,.14); color:#cbd5e1; }
+        .mant-barra {
+          height:7px; border-radius:99px; background:rgba(255,255,255,.07); overflow:hidden; margin:12px 0 10px;
+        }
+        .mant-barra > div { height:100%; border-radius:99px; background:linear-gradient(90deg,#22c55e,#4ade80); }
+        .mant-pronto  .mant-barra > div { background:linear-gradient(90deg,#f59e0b,#fbbf24); }
+        .mant-vencido .mant-barra > div { background:linear-gradient(90deg,#dc2626,#f87171); }
+        .mant-datos { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+        .mant-datos small { display:block; font-size:10.5px; color:#64748b; text-transform:uppercase; letter-spacing:.6px; }
+        .mant-datos b     { display:block; font-size:13.5px; color:#e2e8f0; font-weight:600; margin-top:2px; }
+        .mant-datos em    { display:block; font-size:11.5px; color:#94a3b8; font-style:normal; margin-top:1px; }
+        .mant-intervalo { margin-top:10px; font-size:11.5px; color:#93c5fd; line-height:1.45; }
         .mant-cita {
           display:block; margin-top:14px; padding:12px; text-align:center;
           background:rgba(34,197,94,.12); border:1px solid rgba(74,222,128,.28);
@@ -1601,7 +1711,7 @@ export default function ClienteApp() {
                 placa mostraba el vehículo de cualquier persona. Ahora el
                 cliente verifica identidad y solo ve lo suyo. */}
             {!sesion && !verificandoSesion && (
-              <PortalAcceso onEntrar={alEntrar} />
+              <PortalAcceso onEntrar={alEntrar} qrInicial={qrInicial} />
             )}
 
             {verificandoSesion && (
@@ -1697,38 +1807,72 @@ export default function ClienteApp() {
                   </div>
                 ))}
 
-                {/* ── RECORDATORIOS DE MANTENIMIENTO ── */}
-                {(resultado.recordatorios || []).length > 0 && (
-                  <div className="mant-card fade-up">
-                    <div className="mant-titulo">🔔 Mantenimiento próximo</div>
-                    {resultado.recordatorios.map((m: any) => {
-                      const vencido = m.proximo_fecha && new Date(m.proximo_fecha) < new Date();
-                      return (
-                        <div key={m.id} className={`mant-fila ${vencido ? "mant-vencido" : ""}`}>
-                          <div>
-                            <strong>{m.tipo_servicio}</strong>
-                            {m.descripcion && <small>{m.descripcion}</small>}
+                {/* ── PLAN DE MANTENIMIENTO ──
+                    Antes solo aparecía lo que vencía en 30 días, así que un
+                    plan de cambio de aceite recién creado (que toca en ~3
+                    meses) no se veía. Ahora se muestran todos los planes
+                    activos, con el cambio de aceite primero. */}
+                {(resultado.mantenimiento || []).length > 0 && (() => {
+                  const planes = [...resultado.mantenimiento].sort((a: any, b: any) => {
+                    const pa = esAceite(a.tipo_servicio) ? 0 : 1, pb = esAceite(b.tipo_servicio) ? 0 : 1;
+                    if (pa !== pb) return pa - pb;
+                    return String(a.proximo_fecha || "9999").localeCompare(String(b.proximo_fecha || "9999"));
+                  });
+                  const hayUrgente = planes.some((m: any) => ["vencido", "pronto"].includes(estadoPlan(m).nivel));
+                  return (
+                    <div className="mant-card fade-up">
+                      <div className="mant-titulo">🗓️ Mi plan de mantenimiento</div>
+                      {planes.map((m: any) => {
+                        const t = infoTipoMant(m.tipo_servicio);
+                        const e = estadoPlan(m);
+                        const aceite = esAceite(m.tipo_servicio);
+                        return (
+                          <div key={m.id} className={`mant-plan mant-${e.nivel} ${aceite ? "mant-aceite" : ""}`}>
+                            <div className="mant-plan-top">
+                              <span className="mant-plan-emoji">{t.emoji}</span>
+                              <div className="mant-plan-txt">
+                                <strong>{t.label}</strong>
+                                {m.descripcion && soloLetras(m.descripcion) !== soloLetras(t.label) && (
+                                  <small>{m.descripcion}</small>
+                                )}
+                              </div>
+                              <span className="mant-chip">{e.texto}</span>
+                            </div>
+                            <div className="mant-barra"><div style={{ width: `${e.pct}%` }} /></div>
+                            <div className="mant-datos">
+                              <div>
+                                <small>Próximo</small>
+                                <b>{fechaCorta(e.proximo)}</b>
+                                {m.proximo_km ? <em>o a los {kmBonito(m.proximo_km)}</em> : null}
+                              </div>
+                              <div>
+                                <small>Último</small>
+                                <b>{e.ultimo && m.ultimo_servicio_fecha ? fechaCorta(e.ultimo) : "—"}</b>
+                                {m.ultimo_servicio_km ? <em>{kmBonito(m.ultimo_servicio_km)}</em> : null}
+                              </div>
+                            </div>
+                            {aceite && (m.intervalo_dias || m.intervalo_km) && (
+                              <div className="mant-intervalo">
+                                Se cambia cada {m.intervalo_dias ? `${Math.round(m.intervalo_dias / 30)} meses` : ""}
+                                {m.intervalo_dias && m.intervalo_km ? " o " : ""}
+                                {m.intervalo_km ? kmBonito(m.intervalo_km) : ""}, lo que llegue primero.
+                              </div>
+                            )}
                           </div>
-                          <span>
-                            {vencido ? "Vencido" : "Toca"}{" "}
-                            {m.proximo_fecha
-                              ? new Date(m.proximo_fecha).toLocaleDateString("es-DO", { day: "numeric", month: "short" })
-                              : `a los ${Number(m.proximo_km || 0).toLocaleString("es-DO")} km`}
-                          </span>
-                        </div>
-                      );
-                    })}
-                    <a
-                      className="mant-cita"
-                      href={`https://wa.me/18495692027?text=${encodeURIComponent(
-                        `Hola, quiero agendar el mantenimiento de mi vehículo placa ${resultado.vehiculo?.placa || ""}.`
-                      )}`}
-                      target="_blank" rel="noreferrer"
-                    >
-                      📅 Agendar por WhatsApp
-                    </a>
-                  </div>
-                )}
+                        );
+                      })}
+                      <a
+                        className="mant-cita"
+                        href={`https://wa.me/18495692027?text=${encodeURIComponent(
+                          `Hola, quiero agendar el mantenimiento de mi vehículo placa ${resultado.vehiculo?.placa || ""}.`
+                        )}`}
+                        target="_blank" rel="noreferrer"
+                      >
+                        📅 {hayUrgente ? "Agendar ahora por WhatsApp" : "Agendar por WhatsApp"}
+                      </a>
+                    </div>
+                  );
+                })()}
 
                 {/* VEHÍCULO */}
                 <div className="car-card fade-up">

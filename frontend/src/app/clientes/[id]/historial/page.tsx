@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { auditHeaders } from "@/lib/audit";
 import GenerarCodigoPortal from "@/components/GenerarCodigoPortal";
+import BotonQRCliente from "@/components/ClienteQR";
 
 const API = process.env.NEXT_PUBLIC_API_URL!;
 
@@ -139,6 +140,11 @@ export default function FichaCliente() {
                 en ficha: es su única vía de acceso.
                 Se usa el id de la URL y no `cliente.id` para que el botón esté
                 disponible aunque la ficha todavía esté cargando. */}
+            <BotonQRCliente
+              clienteId={Number(id)}
+              etiqueta="Código QR"
+              estiloBoton={{ background: "#7c3aed", color: "#fff", border: "none", padding: "7px 16px", borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+            />
             <GenerarCodigoPortal
               clienteId={Number(id)}
               clienteNombre={cliente?.nombre}
