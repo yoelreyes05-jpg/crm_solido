@@ -4623,7 +4623,8 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       // las usa primero: no dependen del formato de cada tabla.
       expediente: construirExpediente({
         orden, historial: hist, diagnostico: diag, avances: avancesFinal,
-        cotizacion, cotizacion_items, factura_items, inspeccion,
+        cotizacion, cotizacion_items, factura, factura_items, inspeccion,
+        estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
       }),
     });
   } catch (err) {
@@ -4722,7 +4723,8 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
       fotos:           normalizarFotosInspeccion(inspeccion),
       expediente:      construirExpediente({
         orden, historial: null, diagnostico: diag, avances,
-        cotizacion, cotizacion_items, factura_items, inspeccion,
+        cotizacion, cotizacion_items, factura: facturaFinal, factura_items, inspeccion,
+        estado_historial: Array.isArray(estado_historial) ? estado_historial : [],
       }),
     });
   } catch (err) {

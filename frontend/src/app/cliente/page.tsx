@@ -716,7 +716,7 @@ ${cotItems.length > 0 || cot.total > 0 ? `
 
 <!-- ══ Reparación realizada (expediente normalizado) ══ -->
 ${rep && (rep.trabajos.length > 0 || rep.avances_tecnico.length > 0 || rep.repuestos.length > 0) ? `
-<h3>🛠️ Reparación Realizada</h3>
+<h3>🛠️ ${rep.solo_diagnostico ? "Servicio Realizado (solo diagnóstico)" : "Reparación Realizada"}</h3>
 <div class="card" style="background:#f0fdf4;border-color:#bbf7d0">
   ${rep.trabajos.length > 0 ? `
     <div class="mini" style="color:#166534">Trabajos</div>
@@ -728,6 +728,17 @@ ${rep && (rep.trabajos.length > 0 || rep.avances_tecnico.length > 0 || rep.repue
     <div class="mini" style="color:#166534;margin-top:6px">Notas del técnico</div>
     ${rep.avances_tecnico.map((a: any) => `<div style="font-size:12px;margin-bottom:4px;white-space:pre-wrap">${a.descripcion}<div style="font-size:10px;color:#64748b">${a.tecnico || ""}${a.tecnico && a.fecha ? " · " : ""}${a.fecha ? fmtDT(a.fecha) : ""}</div></div>`).join("")}` : ""}
   ${rep.cierre ? `<div style="font-size:10.5px;color:#64748b;margin-top:6px">Reparación completada${rep.cierre.tecnico ? ` por <strong>${rep.cierre.tecnico}</strong>` : ""}${rep.cierre.fecha ? ` · ${fmtDT(rep.cierre.fecha)}` : ""}</div>` : ""}
+</div>` : ""}
+
+<!-- ══ Trabajos recomendados (cotizados y no aprobados) ══ -->
+${rep?.recomendados && rep.cotizacion_estado !== "APROBADA" ? `
+<h3>💡 Trabajos Recomendados${rep.solo_diagnostico ? " — el cliente decidió no reparar" : ""}</h3>
+<div class="card" style="background:#fff7ed;border-color:#fed7aa">
+  ${rep.recomendados.trabajos.map((t: any) => `<div style="font-size:12px;margin-bottom:2px">• ${t.descripcion}</div>`).join("")}
+  ${rep.recomendados.repuestos.length > 0 ? `
+    <div class="mini" style="color:#9a3412;margin-top:6px">Repuestos necesarios</div>
+    ${rep.recomendados.repuestos.map((r: any) => `<div style="font-size:12px;margin-bottom:2px">🔩 ${r.descripcion}${r.cantidad > 1 ? ` × ${r.cantidad}` : ""}</div>`).join("")}` : ""}
+  ${rep.recomendados.total ? `<div style="font-size:12px;font-weight:700;margin-top:6px;color:#9a3412">Total cotizado: RD$ ${fmtMoney(rep.recomendados.total)}</div>` : ""}
 </div>` : ""}
 
 <!-- ══ Avances de reparación ══ -->
@@ -795,8 +806,33 @@ ${(fechaEntrega || firmaEntrega || h.estado === "ENTREGADO") ? `
     </div>` : ""}
 </div>` : ""}
 
-<!-- ══ Línea de tiempo ══ (una fila por etapa) -->
-${timeline.length > 0 ? `
+<!-- ══ Recorrido completo (expediente normalizado) ══ -->
+${Array.isArray(ex?.recorrido) && ex.recorrido.length > 0 ? `
+<h3>📅 Recorrido de su vehículo</h3>
+<div class="card" style="padding:4px 6px">
+  <table>
+    <thead><tr><th style="width:18px">#</th><th>Qué pasó</th><th>Fecha y hora</th><th>Por</th><th style="text-align:right">Tiempo</th></tr></thead>
+    <tbody>
+    ${ex.recorrido.map((e: any, i: number) => {
+      const ic = ({ recibido:"🚗", inspeccion:"🔍", diagnostico:"🔬", cotizacion:"📄", aprobacion:"👍", avance:"🔧", estado:"📍", factura:"🧾" } as any)[e.tipo] || "•";
+      const dur = duracion(e.fecha, ex.recorrido[i+1]?.fecha);
+      return `<tr>
+        <td style="color:#94a3b8">${i+1}</td>
+        <td><strong>${ic} ${e.titulo}</strong>${e.detalle ? `<div style="font-size:9.5px;color:#92400e;white-space:pre-wrap">${e.detalle}</div>` : ""}</td>
+        <td style="white-space:nowrap">${fmtDT(e.fecha)}</td>
+        <td>${e.por || "—"}</td>
+        <td style="text-align:right;color:#1e40af;white-space:nowrap">${dur || ""}</td>
+      </tr>`; }).join("")}
+    </tbody>
+  </table>
+  ${(() => {
+    const total = duracion(ex.recorrido[0]?.fecha, ex.recorrido[ex.recorrido.length-1]?.fecha);
+    return total ? `<div style="font-size:10.5px;text-align:right;color:#1e40af;margin-top:3px"><strong>Tiempo total en el taller: ${total}</strong></div>` : "";
+  })()}
+</div>` : ""}
+
+<!-- ══ Línea de tiempo ══ (una fila por etapa; respaldo si no hay recorrido) -->
+${!(Array.isArray(ex?.recorrido) && ex.recorrido.length > 0) && timeline.length > 0 ? `
 <h3>📅 Por dónde pasó su vehículo</h3>
 <div class="card" style="padding:4px 6px">
   <table>
@@ -2560,7 +2596,14 @@ export default function ClienteApp() {
                           })();
                           // mano_de_obra_detalle del diagnóstico
                           const manoObraDet: string = diag?.mano_de_obra_detalle || (h.cotizacion_data as any)?.mano_de_obra_detalle || "";
-                          const fmtF  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
+                          // Fechas sin zona (columnas timestamp) están en UTC: sin la Z el
+                          // diagnóstico de las 9:08 p. m. salía a la 1:08 a. m. del día siguiente.
+                          const fmtF  = (v: any) => {
+                            if (!v) return null;
+                            const t = String(v);
+                            const d = new Date(/^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2}(\.\d+)?)?$/.test(t) ? `${t.replace(" ", "T")}Z` : t);
+                            return isNaN(d.getTime()) ? null : d.toLocaleDateString("es-DO",{ timeZone:"America/Santo_Domingo", year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"});
+                          };
                           // Expediente normalizado por el backend (con pruebas automáticas).
                           const exPant: any = d?.expediente || null;
                           const repEx: any = exPant?.reparacion || null;
@@ -2581,7 +2624,7 @@ export default function ClienteApp() {
                           const codigos = diag?.codigos_falla        || h.codigos_falla;
                           const hallazgos = diag?.descripcion        || diag?.hallazgos;
                           const moDetalle = manoObraDet; // usa fallbacks: diag → cotizacion_data snapshot
-                          const trabajosCheck = moDetalle.split("\n").map((l: string) => l.trim()).filter(Boolean);
+                          const trabajosCheck = moDetalle.split("\n").map((l: string) => l.replace(/^[\s•\-✓*]+/, "").trim()).filter(Boolean);
 
                           return (
                             <>
@@ -2663,7 +2706,7 @@ export default function ClienteApp() {
                               {/* ── REPARACIÓN REALIZADA (expediente normalizado) ── */}
                               {repEx && (repEx.trabajos.length > 0 || repEx.avances_tecnico.length > 0 || repEx.repuestos.length > 0) && (
                                 <div className="card" style={{ marginBottom:10, border:"1px solid rgba(52,211,153,0.25)" }}>
-                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ Reparación Realizada</div>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ {repEx.solo_diagnostico ? "Servicio realizado (solo diagnóstico)" : "Reparación Realizada"}</div>
                                   {repEx.trabajos.map((t: any, i: number) => (
                                     <div key={`t${i}`} style={{ display:"flex", gap:8, fontSize:13, color:"#cbd5e1", marginBottom:6 }}>
                                       <span style={{ color:"#34d399" }}>✓</span><span>{t.descripcion}</span>
@@ -2695,6 +2738,40 @@ export default function ClienteApp() {
                                       Reparación completada{repEx.cierre.tecnico ? <> por <b style={{ color:"#94a3b8" }}>{repEx.cierre.tecnico}</b></> : null}{repEx.cierre.fecha ? ` · ${fmtF(repEx.cierre.fecha)}` : ""}
                                     </div>
                                   )}
+                                </div>
+                              )}
+
+                              {/* ── TRABAJOS RECOMENDADOS (cotizados y no aprobados) ── */}
+                              {repEx?.recomendados && repEx.cotizacion_estado !== "APROBADA" && (
+                                <div className="card" style={{ marginBottom:10, border:"1px solid rgba(251,146,60,0.3)" }}>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:4 }}>💡 Trabajos recomendados</div>
+                                  <div style={{ fontSize:11.5, color:"#fdba74", marginBottom:10 }}>
+                                    {repEx.solo_diagnostico ? "Lo que el técnico encontró que necesita el vehículo. Decidiste no repararlo por ahora."
+                                      : "Cotización pendiente de tu aprobación."}
+                                  </div>
+                                  {repEx.recomendados.trabajos.map((t: any, i: number) => (
+                                    <div key={`rt${i}`} style={{ display:"flex", gap:8, fontSize:13, color:"#cbd5e1", marginBottom:6 }}>
+                                      <span style={{ color:"#fb923c" }}>•</span><span>{t.descripcion}</span>
+                                    </div>
+                                  ))}
+                                  {repEx.recomendados.repuestos.length > 0 && (
+                                    <div style={{ marginTop:8 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>🔩 Repuestos necesarios</div>
+                                      {repEx.recomendados.repuestos.map((r: any, i: number) => (
+                                        <div key={`rr${i}`} style={{ fontSize:12.5, color:"#94a3b8", marginBottom:4 }}>{r.descripcion}{r.cantidad > 1 ? ` × ${r.cantidad}` : ""}</div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {repEx.recomendados.total ? (
+                                    <div style={{ display:"flex", justifyContent:"space-between", marginTop:10, paddingTop:8, borderTop:"1px solid rgba(255,255,255,0.06)", fontWeight:800, color:"#fdba74", fontSize:14 }}>
+                                      <span>Total cotizado</span><span>{moneda(repEx.recomendados.total)}</span>
+                                    </div>
+                                  ) : null}
+                                  <a href={`https://wa.me/18495692027?text=${encodeURIComponent(`Hola, quiero retomar la reparación recomendada de mi vehículo (orden ${h.numero_orden || ""}).`)}`}
+                                    target="_blank" rel="noreferrer"
+                                    style={{ display:"block", textAlign:"center", marginTop:12, padding:"10px", borderRadius:10, background:"rgba(22,163,74,0.15)", border:"1px solid rgba(74,222,128,0.3)", color:"#86efac", fontWeight:700, fontSize:13, textDecoration:"none" }}>
+                                    💬 Quiero hacer la reparación
+                                  </a>
                                 </div>
                               )}
 
@@ -2792,8 +2869,34 @@ export default function ClienteApp() {
                                 </div>
                               )}
 
-                              {/* ── HISTORIAL DEL PROCESO (timeline) ── */}
-                              {timelineVivo.length > 0 && (
+                              {/* ── RECORRIDO COMPLETO (expediente normalizado) ── */}
+                              {Array.isArray(exPant?.recorrido) && exPant.recorrido.length > 0 && (
+                                <div className="card" style={{ marginBottom:10 }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>📜 Recorrido de tu vehículo</div>
+                                  {exPant.recorrido.map((e: any, i: number) => {
+                                    const ic = ({ recibido:"🚗", inspeccion:"🔍", diagnostico:"🔬", cotizacion:"📄", aprobacion:"👍", avance:"🔧", estado:"📍", factura:"🧾" } as any)[e.tipo] || "•";
+                                    const ultimo = i === exPant.recorrido.length - 1;
+                                    return (
+                                      <div key={i} style={{ display:"flex", gap:10 }}>
+                                        <div style={{ display:"flex", flexDirection:"column", alignItems:"center" }}>
+                                          <div style={{ width:28, height:28, borderRadius:"50%", background:"rgba(59,130,246,0.12)", border:"1px solid rgba(96,165,250,0.3)", display:"flex", alignItems:"center", justifyContent:"center", fontSize:13 }}>{ic}</div>
+                                          {!ultimo && <div style={{ flex:1, width:2, background:"rgba(148,163,184,0.15)", minHeight:14 }} />}
+                                        </div>
+                                        <div style={{ flex:1, paddingBottom: ultimo ? 0 : 12 }}>
+                                          <div style={{ fontSize:13, fontWeight:700, color:"#e2e8f0" }}>{e.titulo}</div>
+                                          {e.detalle && <div style={{ fontSize:12, color:"#94a3b8", marginTop:2, whiteSpace:"pre-wrap" }}>{e.detalle}</div>}
+                                          <div style={{ fontSize:11, color:"#64748b", marginTop:3 }}>
+                                            {fmtF(e.fecha)}{e.por && <> · <b style={{ color:"#94a3b8" }}>{e.por}</b></>}
+                                          </div>
+                                        </div>
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+
+                              {/* ── HISTORIAL DEL PROCESO (respaldo si no hay recorrido) ── */}
+                              {!(Array.isArray(exPant?.recorrido) && exPant.recorrido.length > 0) && timelineVivo.length > 0 && (
                                 <div className="card" style={{ marginBottom:10 }}>
                                   <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:12 }}>📜 Historial del Proceso</div>
                                   <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:4, fontSize:11, color:"#475569", fontWeight:700, textTransform:"uppercase", letterSpacing:.7, marginBottom:8, paddingBottom:6, borderBottom:"1px solid rgba(255,255,255,0.06)" }}>
