@@ -102,6 +102,9 @@ export default function ReparacionPage() {
   const [msg,     setMsg]     = useState<Msg | null>(null);
   const [descAvance, setDescAvance] = useState("");
   const [confirmCompleta, setConfirmCompleta] = useState(false);
+  // Qué se le hizo al vehículo. Es lo que el cliente ve como "Reparación
+  // realizada" en su app; antes solo quedaba "Reparación completada por técnico".
+  const [resumenRep, setResumenRep] = useState("");
   const [mejorandoIA,     setMejorandoIA]     = useState(false);
   const [iaModal,         setIaModal]         = useState<string | null>(null);
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -316,8 +319,18 @@ export default function ReparacionPage() {
     }
   }
 
+  // ¿El técnico ya escribió algún avance real (no el automático de cierre)?
+  const MIN_RESUMEN = 15;
+  const tieneAvancesDescritos = avances.some(a =>
+    !/^\s*reparaci[oó]n completada( por (el )?t[eé]cnico)?\.?\s*$/i.test(String((a as any).descripcion || "")));
+
   // ── Marcar reparación completa → Control de Calidad ──────────────────────
   async function marcarCompleta() {
+    const resumen = resumenRep.trim();
+    if (!tieneAvancesDescritos && resumen.length < MIN_RESUMEN) {
+      setMsg({ tipo: "error", texto: `Describe qué se le hizo al vehículo (mínimo ${MIN_RESUMEN} letras). El cliente lo verá en su expediente.` });
+      return;
+    }
     setSaving(true);
     setMsg(null);
     setConfirmCompleta(false);
@@ -329,7 +342,7 @@ export default function ReparacionPage() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           orden_id:       Number(id),
-          descripcion:    "Reparación completada por técnico",
+          descripcion:    resumen ? `✅ Reparación completada: ${resumen}` : "Reparación completada por técnico",
           tecnico_nombre: nombreTecnico,
           usuario_id:     usuario.id,
         }),
@@ -339,6 +352,11 @@ export default function ReparacionPage() {
         const data = await resAvance.json();
         const nuevo: Avance = data.avance || data;
         setAvances(prev => [...prev, nuevo]);
+        setResumenRep("");
+      } else if (resumen) {
+        // Sin este avance el cliente no ve qué se reparó: no se sigue.
+        const err = await resAvance.json().catch(() => ({}));
+        throw new Error(`No se guardó la descripción de la reparación: ${err.error || resAvance.status}`);
       }
 
       // 2. Transición de estado: REPARACION → CONTROL_CALIDAD
@@ -353,8 +371,14 @@ export default function ReparacionPage() {
         }),
       });
 
+      if (!resCalidad.ok && resCalidad.status !== 404) {
+        // El backend rechazó el cierre (p. ej. falta describir la reparación):
+        // NO se salta la validación con el PATCH directo.
+        const err = await resCalidad.json().catch(() => ({}));
+        throw new Error(err.error || "No se pudo completar la reparación");
+      }
       if (!resCalidad.ok) {
-        // Fallback: usar PATCH directo (funciona con backend antiguo y nuevo)
+        // Fallback solo si el endpoint no existe (backend antiguo)
         const resPatch = await fetch(`${API}/ordenes/${id}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -1251,13 +1275,27 @@ export default function ReparacionPage() {
                   <p style={{ margin: "0 0 8px", fontWeight: 700, color: C.orange, fontSize: 13 }}>
                     ⚠️ ¿Confirmas que la reparación está completa?
                   </p>
-                  <p style={{ margin: "0 0 14px", color: C.muted, fontSize: 12 }}>
+                  <p style={{ margin: "0 0 10px", color: C.muted, fontSize: 12 }}>
                     Se registrará un avance de cierre y la orden pasará a <strong>Control de Calidad</strong>.
+                  </p>
+                  <label style={{ display: "block", fontSize: 12, fontWeight: 700, color: C.text, marginBottom: 6 }}>
+                    {tieneAvancesDescritos ? "Resumen final de la reparación (opcional)" : "¿Qué se le hizo al vehículo? *"}
+                  </label>
+                  <textarea
+                    value={resumenRep}
+                    onChange={e => setResumenRep(e.target.value)}
+                    rows={3}
+                    placeholder="Ej: Se cambiaron las bandas delanteras y se rectificaron los discos. Se purgó el sistema de frenos."
+                    style={{ width: "100%", boxSizing: "border-box", border: `1px solid ${C.border}`, borderRadius: 8, padding: "8px 10px", fontSize: 13, fontFamily: "inherit", resize: "vertical", marginBottom: 6 }}
+                  />
+                  <p style={{ margin: "0 0 12px", color: C.muted, fontSize: 11 }}>
+                    El cliente ve este texto en su app como “Reparación realizada”.
+                    {!tieneAvancesDescritos && resumenRep.trim().length < MIN_RESUMEN && ` Faltan ${MIN_RESUMEN - resumenRep.trim().length} letras.`}
                   </p>
                   <div style={{ display: "flex", gap: 8 }}>
                     <button
                       onClick={marcarCompleta}
-                      disabled={saving}
+                      disabled={saving || (!tieneAvancesDescritos && resumenRep.trim().length < MIN_RESUMEN)}
                       style={{ flex: 1, background: C.orange, color: "#fff", border: "none", borderRadius: 7, padding: "9px 12px", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
                     >
                       {saving ? "⏳..." : "✅ Confirmar"}

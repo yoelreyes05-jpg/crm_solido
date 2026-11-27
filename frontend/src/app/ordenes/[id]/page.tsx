@@ -670,6 +670,11 @@ export default function OrdenDetallePage() {
   // Avances cargados de forma independiente (siempre actualizados)
   const [avancesReparacion, setAvancesReparacion] = useState<any[]>([]);
 
+  // Lo que le falta al expediente que verá el cliente (fotos, inspección,
+  // descripción de la reparación, checklist de QC). Se calcula en el backend
+  // con services/expediente.mjs, el mismo código que arma la app del cliente.
+  const [faltantesExp, setFaltantesExp] = useState<{ codigo: string; mensaje: string }[]>([]);
+
   // Nuevos estados
   const [trabajosItems,    setTrabajosItems]    = useState<TrabajoItem[]>([]);
   const [guardandoTrabajos,setGuardandoTrabajos]= useState(false);
@@ -900,6 +905,15 @@ export default function OrdenDetallePage() {
     cargar();
   }, [cargar]);
 
+  useEffect(() => {
+    const estado = data?.orden?.estado;
+    if (!estado) return;
+    fetch(`${API}/vehiculo-historial/orden/${id}/detalle`, { cache: "no-store" })
+      .then(r => r.ok ? r.json() : null)
+      .then(d => setFaltantesExp(Array.isArray(d?.expediente?.faltantes) ? d.expediente.faltantes : []))
+      .catch(() => setFaltantesExp([]));
+  }, [id, data?.orden?.estado, avancesReparacion.length]);
+
   // ── Guardar trabajos realizados ─────────────────────────────────────────────
   const guardarTrabajos = async () => {
     const diagnostico = data?.diagnostico;
@@ -1121,6 +1135,18 @@ export default function OrdenDetallePage() {
         </div>
       )}
 
+      {/* ── Aviso: expediente del cliente incompleto ── */}
+      {faltantesExp.length > 0 && (
+        <div style={{ marginBottom:16, background:"#fffbeb", border:"1.5px solid #fcd34d", borderRadius:12, padding:"12px 16px" }}>
+          <div style={{ fontWeight:800, fontSize:13.5, color:"#92400e", marginBottom:6 }}>
+            ⚠️ Al expediente que ve el cliente en su app le falta:
+          </div>
+          <ul style={{ margin:0, paddingLeft:20, color:"#78350f", fontSize:13, lineHeight:1.6 }}>
+            {faltantesExp.map(f => <li key={f.codigo}>{f.mensaje}</li>)}
+          </ul>
+        </div>
+      )}
+
       {/* ── Botón taller ── */}
       {botonTaller && (
         <div style={{ marginBottom:16, display:"flex", gap:10, flexWrap:"wrap" }}>
@@ -1136,13 +1162,16 @@ export default function OrdenDetallePage() {
           {puedeCompletarReparacion && (
             <button
               onClick={async () => {
+                // El cliente ve este texto como "Reparación realizada" en su app.
+                const resumen = window.prompt("¿Qué se le hizo al vehículo? (lo verá el cliente en su expediente)\nDéjalo vacío solo si el técnico ya lo escribió en los avances.") ;
+                if (resumen === null) return;
                 setProcesando(true);
                 setMsg(null);
                 try {
                   const res = await fetch(`${API}/ordenes/${id}/completar-reparacion`, {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ usuario_id: usuario?.id, usuario_nombre: usuario?.nombre, motivo: "Reparación completada" }),
+                    body: JSON.stringify({ usuario_id: usuario?.id, usuario_nombre: usuario?.nombre, motivo: "Reparación completada", resumen: resumen.trim() }),
                   });
                   const json = await res.json();
                   if (json.error) throw new Error(json.error);

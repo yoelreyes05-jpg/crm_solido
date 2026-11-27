@@ -310,8 +310,21 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   };
 
   // ── Fuentes de datos: live > snapshot ──
-  const cot        = h.cotizacion_data && typeof h.cotizacion_data === "object" ? h.cotizacion_data : {};
-  const fac        = h.factura_data    && typeof h.factura_data    === "object" ? h.factura_data    : {};
+  // `ex` es el expediente normalizado por el backend (services/expediente.mjs,
+  // con pruebas). Cuando viene, manda sobre la lectura campo por campo.
+  const ex: any = detalleCompleto?.expediente || null;
+  const conDatos = (o: any) => o && typeof o === "object" && Object.keys(o).length > 0;
+  // La cotización y la factura se leían SOLO del snapshot de vehiculo_historial.
+  // Las órdenes que no se han archivado no lo tienen y la hoja salía sin
+  // cotización, sin factura y sin costos. Ahora el detalle es respaldo.
+  const cot: any   = conDatos(h.cotizacion_data) && (h.cotizacion_data.id || h.cotizacion_data.total)
+    ? h.cotizacion_data
+    : (detalleCompleto?.cotizacion || (conDatos(h.cotizacion_data) ? h.cotizacion_data : {}));
+  const fac: any   = conDatos(h.factura_data) && h.factura_data.id
+    ? h.factura_data
+    : (detalleCompleto?.factura
+        ? { ...detalleCompleto.factura, items: detalleCompleto.factura_items || [] }
+        : {});
   const fechas     = h.fechas_proceso  && typeof h.fechas_proceso  === "object" ? h.fechas_proceso  : {};
   const checklist  = h.checklist_qc   && typeof h.checklist_qc    === "object" ? h.checklist_qc    : {};
   const inspecSnap = h.inspeccion_data && typeof h.inspeccion_data === "object" ? h.inspeccion_data : null;
@@ -329,7 +342,9 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
     || (Array.isArray(detalleCompleto?.orden_trabajo_log) && detalleCompleto.orden_trabajo_log)
     || [];
 
-  const cotItems  = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle : (Array.isArray(cot.items) ? cot.items : []);
+  const cotItems  = Array.isArray(cot.items_detalle) && cot.items_detalle.length > 0 ? cot.items_detalle
+    : (Array.isArray(cot.items) && cot.items.length > 0 ? cot.items
+    : (Array.isArray(detalleCompleto?.cotizacion_items) ? detalleCompleto.cotizacion_items : []));
   const facItems: any[] = Array.isArray(fac.items) ? fac.items : [];
 
   // ── Ficha técnica del vehículo ──
@@ -360,6 +375,7 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   // leer `fotos_slots` / `fotos` en crudo por si el expediente viene de un
   // snapshot guardado antes de que existiera esa normalización.
   const fotosExp: any[] = (() => {
+    if (Array.isArray(ex?.fotos) && ex.fotos.length > 0) return ex.fotos;
     const norm = detalleCompleto?.fotos || h.fotos;
     if (Array.isArray(norm) && norm.length > 0) return norm;
 
@@ -439,10 +455,35 @@ function imprimirExpediente(h: any, detalleCompleto: any) {
   ];
 
   const QC_LBL: Record<string,string> = {
-    motor:"Motor",transmision:"Transmisión",frenos:"Frenos",suspension:"Suspensión",
-    direccion:"Dirección",electrico:"Eléctrico",ac:"A/C",escape:"Escape",
-    neumaticos:"Neumáticos",limpieza:"Limpieza",documentos:"Documentos",fluidos:"Fluidos",
+    motor:"Motor funcionando correctamente", frenos:"Sistema de frenos operativo",
+    fluidos:"Sin fugas de fluidos", luces:"Sistema de luces completo",
+    electrico:"Sistema eléctrico sin fallas", transmision:"Transmisión / caja de cambios",
+    suspension:"Suspensión y dirección", ac:"A/C y climatización",
+    limpieza:"Limpieza y presentación", prueba_ruta:"Prueba de ruta realizada",
+    trabajo_ok:"Trabajo solicitado completado al 100%",
+    direccion:"Dirección", escape:"Escape", neumaticos:"Neumáticos", documentos:"Documentos",
   };
+
+  // Control de calidad: el CRM guarda "APROBADO" en MAYÚSCULAS y la hoja
+  // comparaba con "aprobado": todo vehículo salía "Rechazado". Se usa el
+  // expediente normalizado y, si no vino, la orden viva antes que el snapshot.
+  const qc: { resultado: string | null; aprobado: boolean; checklist: { label: string; ok: boolean }[];
+              puntos_ok: number; puntos_total: number; observaciones: string | null; tecnico: string | null } =
+    ex?.control_calidad || (() => {
+      const o = detalleCompleto?.orden || {};
+      const crudo = String(o.resultado_qc || h.resultado_qc || "").toUpperCase();
+      const ck = conDatos(o.checklist_qc) ? o.checklist_qc : checklist;
+      const lista = Object.entries(ck || {}).map(([k, v]) => ({ label: QC_LBL[k] || k.replace(/_/g, " "), ok: !!v }));
+      return {
+        resultado: crudo || null, aprobado: crudo.startsWith("APROB"), checklist: lista,
+        puntos_ok: lista.filter(c => c.ok).length, puntos_total: lista.length,
+        observaciones: o.observaciones_qc || h.observaciones_qc || null, tecnico: o.tecnico_qc || null,
+      };
+    })();
+
+  // Reparación realizada, juntando avances del técnico, trabajos, cotización
+  // y factura (lo arma el backend en ex.reparacion).
+  const rep: any = ex?.reparacion || null;
 
   const html = `<!DOCTYPE html>
 <html lang="es">
@@ -619,7 +660,7 @@ ${(hallazgos || codigosFalla || observacionesDiag) ? `
 </div>` : ""}
 
 <!-- ══ Mano de obra (trabajos a realizar) ══ -->
-${manoDeObraDetalle ? `
+${!rep && manoDeObraDetalle ? `
 <h3>🔧 Trabajos a Realizar (Mano de Obra)</h3>
 <div class="card" style="background:#f0fdf4;border-color:#bbf7d0">
   ${manoDeObraDetalle.split("\n").filter((l: string) => l.trim())
@@ -628,7 +669,7 @@ ${manoDeObraDetalle ? `
 </div>` : ""}
 
 <!-- ══ Trabajos realizados estructurados ══ -->
-${trabajosItems.length > 0 ? `
+${!rep && trabajosItems.length > 0 ? `
 <h3>🛠️ Trabajos Realizados</h3>
 <div class="card">
   <table>
@@ -673,8 +714,24 @@ ${cotItems.length > 0 || cot.total > 0 ? `
   </div>
 </div>` : ""}
 
+<!-- ══ Reparación realizada (expediente normalizado) ══ -->
+${rep && (rep.trabajos.length > 0 || rep.avances_tecnico.length > 0 || rep.repuestos.length > 0) ? `
+<h3>🛠️ Reparación Realizada</h3>
+<div class="card" style="background:#f0fdf4;border-color:#bbf7d0">
+  ${rep.trabajos.length > 0 ? `
+    <div class="mini" style="color:#166534">Trabajos</div>
+    ${rep.trabajos.map((t: any) => `<div style="font-size:12px;margin-bottom:2px">✓ ${t.descripcion}${t.estado ? ` <span style="font-size:10px;color:#64748b">(${String(t.estado).replace(/_/g, " ").toLowerCase()})</span>` : ""}</div>`).join("")}` : ""}
+  ${rep.repuestos.length > 0 ? `
+    <div class="mini" style="color:#166534;margin-top:6px">Repuestos instalados</div>
+    ${rep.repuestos.map((r: any) => `<div style="font-size:12px;margin-bottom:2px">🔩 ${r.descripcion}${r.cantidad > 1 ? ` × ${r.cantidad}` : ""}</div>`).join("")}` : ""}
+  ${rep.avances_tecnico.length > 0 ? `
+    <div class="mini" style="color:#166534;margin-top:6px">Notas del técnico</div>
+    ${rep.avances_tecnico.map((a: any) => `<div style="font-size:12px;margin-bottom:4px;white-space:pre-wrap">${a.descripcion}<div style="font-size:10px;color:#64748b">${a.tecnico || ""}${a.tecnico && a.fecha ? " · " : ""}${a.fecha ? fmtDT(a.fecha) : ""}</div></div>`).join("")}` : ""}
+  ${rep.cierre ? `<div style="font-size:10.5px;color:#64748b;margin-top:6px">Reparación completada${rep.cierre.tecnico ? ` por <strong>${rep.cierre.tecnico}</strong>` : ""}${rep.cierre.fecha ? ` · ${fmtDT(rep.cierre.fecha)}` : ""}</div>` : ""}
+</div>` : ""}
+
 <!-- ══ Avances de reparación ══ -->
-${avances.length > 0 ? `
+${!rep && avances.length > 0 ? `
 <h3>📋 Avances de Reparación</h3>
 <div class="card">
   ${avances.map((a: any, i: number) => `
@@ -682,22 +739,23 @@ ${avances.length > 0 ? `
       <div style="font-size:11px;color:#64748b;margin-bottom:3px">${fmtDT(a.created_at)}${a.tecnico_nombre ? ` · ${a.tecnico_nombre}` : ""}</div>
       <div style="font-size:13px;white-space:pre-wrap">${a.descripcion || "—"}</div>
     </div>`).join("")}
-</div>` : (h.trabajos_realizados ? `
+</div>` : (!rep && h.trabajos_realizados ? `
 <h3>📋 Avances de Reparación</h3>
 <div class="card"><div style="font-size:13px;white-space:pre-wrap">${h.trabajos_realizados}</div></div>` : "")}
 
 <!-- ══ Control de Calidad ══ -->
-${h.resultado_qc ? `
+${qc.resultado ? `
 <h3>✅ Control de Calidad</h3>
-<div class="card" style="border-color:${h.resultado_qc === "aprobado" ? "#6ee7b7" : "#fca5a5"}">
-  <div style="font-size:14px;font-weight:700;color:${h.resultado_qc === "aprobado" ? "#059669" : "#dc2626"};margin-bottom:8px">
-    ${h.resultado_qc === "aprobado" ? "✅ Aprobado" : "❌ Rechazado"}
+<div class="card" style="border-color:${qc.aprobado ? "#6ee7b7" : "#fca5a5"}">
+  <div style="font-size:14px;font-weight:700;color:${qc.aprobado ? "#059669" : "#dc2626"};margin-bottom:6px">
+    ${qc.aprobado ? "✅ Aprobado" : "❌ Rechazado"}${qc.puntos_total ? ` <span style="font-size:11px;color:#64748b;font-weight:600">· ${qc.puntos_ok}/${qc.puntos_total} puntos verificados</span>` : ""}
   </div>
-  ${h.observaciones_qc ? `<div style="font-size:12px;color:#374151;margin-bottom:10px">${h.observaciones_qc}</div>` : ""}
-  ${Object.keys(checklist).length > 0 ? `
-  <div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">
-    ${Object.entries(checklist).map(([k,v]) => `
-      <div style="font-size:12px;padding:3px 0">${v ? "✅" : "❌"} ${QC_LBL[k] || k.replace(/_/g," ")}</div>`).join("")}
+  ${qc.tecnico ? `<div style="font-size:11px;color:#64748b;margin-bottom:4px">Revisado por: <strong>${qc.tecnico}</strong></div>` : ""}
+  ${qc.observaciones ? `<div style="font-size:12px;color:#374151;margin-bottom:8px">${qc.observaciones}</div>` : ""}
+  ${qc.checklist.length > 0 ? `
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 12px">
+    ${qc.checklist.map((c: any) => `
+      <div style="font-size:11.5px;padding:2px 0">${c.ok ? "✅" : "❌"} ${c.label}</div>`).join("")}
   </div>` : ""}
 </div>` : ""}
 
@@ -2237,11 +2295,15 @@ export default function ClienteApp() {
                           <button onClick={cerrarDetalleHist} className="btn-volver" style={{ flex:1 }}>
                             ← Volver
                           </button>
+                          {/* No se imprime hasta tener el expediente completo: antes se
+                              podía imprimir mientras cargaba y salía sin fotos,
+                              sin inspección y sin cotización. */}
                           <button
                             onClick={() => imprimirExpediente(histDetalle, histDetalleCompleto)}
-                            style={{ flex:1, background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"10px 0", fontWeight:700, fontSize:13, cursor:"pointer" }}
+                            disabled={loadingDetalle}
+                            style={{ flex:1, background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"10px 0", fontWeight:700, fontSize:13, cursor: loadingDetalle ? "wait" : "pointer", opacity: loadingDetalle ? .55 : 1 }}
                           >
-                            🖨️ Imprimir
+                            {loadingDetalle ? "⏳ Cargando…" : "🖨️ Imprimir"}
                           </button>
                         </div>
                         {loadingDetalle && (
@@ -2315,8 +2377,14 @@ export default function ClienteApp() {
                           const fotosSlotArr = Object.entries(fotoSlots)
                             .filter(([,v]) => v)
                             .map(([k,v]) => ({ data: v, label: SLOT_LBL[k] || k.replace(/_/g," ") }));
-                          const fotosExtra: any[] = Array.isArray(insp.fotos) ? insp.fotos : [];
-                          const todasFotos = [...fotosSlotArr, ...fotosExtra].slice(0, 12);
+                          const fotosExtra: any[] = (Array.isArray(insp.fotos) ? insp.fotos : [])
+                            .filter((f: any) => f?.data)
+                            .map((f: any) => ({ data: f.data, label: f.label || SLOT_LBL[f.tipo] || "Foto" }));
+                          // Las fotos normalizadas del backend mandan (mismo formato siempre).
+                          const exFotos: any[] = Array.isArray(histDetalleCompleto?.expediente?.fotos)
+                            ? histDetalleCompleto.expediente.fotos.map((f: any) => ({ data: f.src, label: f.label }))
+                            : [];
+                          const todasFotos = (exFotos.length > 0 ? exFotos : [...fotosSlotArr, ...fotosExtra]).slice(0, 12);
                           const combPct = Number(insp.nivel_combustible || 0);
                           const combColor = combPct >= 60 ? "#22c55e" : combPct >= 30 ? "#f59e0b" : "#ef4444";
                           const checkItems = [
@@ -2493,6 +2561,16 @@ export default function ClienteApp() {
                           // mano_de_obra_detalle del diagnóstico
                           const manoObraDet: string = diag?.mano_de_obra_detalle || (h.cotizacion_data as any)?.mano_de_obra_detalle || "";
                           const fmtF  = (v: any) => v ? new Date(v).toLocaleDateString("es-DO",{year:"numeric",month:"long",day:"numeric",hour:"2-digit",minute:"2-digit"}) : null;
+                          // Expediente normalizado por el backend (con pruebas automáticas).
+                          const exPant: any = d?.expediente || null;
+                          const repEx: any = exPant?.reparacion || null;
+                          const qcEx: any = exPant?.control_calidad || (() => {
+                            const crudo = String(orden?.resultado_qc || h.resultado_qc || "").toUpperCase();
+                            const ck = (orden?.checklist_qc && Object.keys(orden.checklist_qc).length > 0) ? orden.checklist_qc : (h.checklist_qc || {});
+                            const lista = Object.entries(ck).map(([k, v]: [string, any]) => ({ label: k.replace(/_/g, " "), ok: !!v }));
+                            return { resultado: crudo || null, aprobado: crudo.startsWith("APROB"), checklist: lista,
+                                     observaciones: orden?.observaciones_qc || h.observaciones_qc || null, tecnico: orden?.tecnico_qc || null };
+                          })();
                           const moneda = (v: any) => `RD$ ${Number(v||0).toLocaleString("es-DO",{minimumFractionDigits:2})}`;
 
                           // Inspecciones técnicas del diagnóstico
@@ -2568,7 +2646,7 @@ export default function ClienteApp() {
                                   {/* Costos del diagnóstico */}
                                   <div style={{ marginTop:12, paddingTop:10, borderTop:"1px solid rgba(255,255,255,0.06)" }}>
                                     <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#64748b", marginBottom:4 }}>
-                                      <span>Mano de obra</span><span>{moneda(h.costo_mano_obra)}</span>
+                                      <span>Mano de obra</span><span>{moneda(Number(h.costo_mano_obra) || Number(d?.cotizacion?.mano_obra) || 0)}</span>
                                     </div>
                                     {h.costo_repuestos > 0 && (
                                       <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, color:"#64748b", marginBottom:4 }}>
@@ -2576,14 +2654,52 @@ export default function ClienteApp() {
                                       </div>
                                     )}
                                     <div style={{ display:"flex", justifyContent:"space-between", fontWeight:800, fontSize:16, color:"#34d399", paddingTop:6, borderTop:"1px solid rgba(255,255,255,0.06)", marginTop:4 }}>
-                                      <span>TOTAL</span><span>{moneda(h.costo_total)}</span>
+                                      <span>TOTAL</span><span>{moneda(Number(h.costo_total) || Number(d?.factura?.total) || Number(d?.cotizacion?.total) || 0)}</span>
                                     </div>
                                   </div>
                                 </div>
                               )}
 
+                              {/* ── REPARACIÓN REALIZADA (expediente normalizado) ── */}
+                              {repEx && (repEx.trabajos.length > 0 || repEx.avances_tecnico.length > 0 || repEx.repuestos.length > 0) && (
+                                <div className="card" style={{ marginBottom:10, border:"1px solid rgba(52,211,153,0.25)" }}>
+                                  <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ Reparación Realizada</div>
+                                  {repEx.trabajos.map((t: any, i: number) => (
+                                    <div key={`t${i}`} style={{ display:"flex", gap:8, fontSize:13, color:"#cbd5e1", marginBottom:6 }}>
+                                      <span style={{ color:"#34d399" }}>✓</span><span>{t.descripcion}</span>
+                                    </div>
+                                  ))}
+                                  {repEx.repuestos.length > 0 && (
+                                    <div style={{ marginTop:8 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>🔩 Repuestos instalados</div>
+                                      {repEx.repuestos.map((r: any, i: number) => (
+                                        <div key={`r${i}`} style={{ fontSize:12.5, color:"#94a3b8", marginBottom:4 }}>{r.descripcion}{r.cantidad > 1 ? ` × ${r.cantidad}` : ""}</div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {repEx.avances_tecnico.length > 0 && (
+                                    <div style={{ marginTop:8 }}>
+                                      <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:.8, marginBottom:6 }}>📝 Notas del técnico</div>
+                                      {repEx.avances_tecnico.map((a: any, i: number) => (
+                                        <div key={`a${i}`} style={{ paddingBottom:8, marginBottom:8, borderBottom: i < repEx.avances_tecnico.length-1 ? "1px solid rgba(255,255,255,0.05)" : "none" }}>
+                                          <div style={{ fontSize:13, color:"#cbd5e1", whiteSpace:"pre-wrap" }}>{a.descripcion}</div>
+                                          <div style={{ fontSize:11, color:"#64748b", marginTop:2 }}>
+                                            {a.tecnico && <b style={{ color:"#94a3b8" }}>{a.tecnico}</b>}{a.tecnico && a.fecha ? " · " : ""}{a.fecha ? fmtF(a.fecha) : ""}
+                                          </div>
+                                        </div>
+                                      ))}
+                                    </div>
+                                  )}
+                                  {repEx.cierre && (
+                                    <div style={{ fontSize:11, color:"#64748b", marginTop:6 }}>
+                                      Reparación completada{repEx.cierre.tecnico ? <> por <b style={{ color:"#94a3b8" }}>{repEx.cierre.tecnico}</b></> : null}{repEx.cierre.fecha ? ` · ${fmtF(repEx.cierre.fecha)}` : ""}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
                               {/* ── TRABAJOS REALIZADOS (items estructurados con tipo/estado) ── */}
-                              {trabajosItemsPWA.length > 0 && (
+                              {!repEx && trabajosItemsPWA.length > 0 && (
                                 <div className="card" style={{ marginBottom:10 }}>
                                   <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>🛠️ Trabajos Realizados</div>
                                   <div style={{ display:"flex", flexDirection:"column", gap:6 }}>
@@ -2606,7 +2722,7 @@ export default function ClienteApp() {
                               )}
 
                               {/* ── AVANCES DE REPARACIÓN (cronología) ── */}
-                              {avancesVivos.length > 0 && (
+                              {!repEx && avancesVivos.length > 0 && (
                                 <div className="card" style={{ marginBottom:10 }}>
                                   <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>📋 Avances de Reparación</div>
                                   {avancesVivos.map((a: any, i: number) => (
@@ -2622,7 +2738,7 @@ export default function ClienteApp() {
                               )}
 
                               {/* Fallback: si no hay ninguno de los anteriores */}
-                              {trabajosItemsPWA.length === 0 && avancesVivos.length === 0 && !manoObraDet && h.trabajos_realizados && (
+                              {!repEx && trabajosItemsPWA.length === 0 && avancesVivos.length === 0 && !manoObraDet && h.trabajos_realizados && (
                                 <div className="card" style={{ marginBottom:10 }}>
                                   <div style={{ fontSize:10, color:"#64748b", fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:8 }}>🛠️ Trabajos Realizados</div>
                                   <div style={{ fontSize:13, color:"#94a3b8", whiteSpace:"pre-wrap" }}>{h.trabajos_realizados}</div>
@@ -2630,26 +2746,21 @@ export default function ClienteApp() {
                               )}
 
                               {/* ── CONTROL DE CALIDAD ── */}
-                              {h.resultado_qc && (
-                                <div className="card" style={{ marginBottom:10, border:`1px solid ${h.resultado_qc?.toUpperCase().includes("APROBADO") ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.3)"}` }}>
-                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>✅ Control de Calidad — Resultado: {h.resultado_qc}</div>
-                                  {orden?.tecnico_qc && <div style={{ fontSize:13, color:"#94a3b8", marginBottom:8 }}>Técnico QC: <b style={{ color:"#e2e8f0" }}>{orden.tecnico_qc}</b></div>}
-                                  {h.observaciones_qc && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>{h.observaciones_qc}</div>}
-                                  {h.checklist_qc && Object.keys(h.checklist_qc).length > 0 && (
+                              {qcEx.resultado && (
+                                <div className="card" style={{ marginBottom:10, border:`1px solid ${qcEx.aprobado ? "rgba(52,211,153,0.3)" : "rgba(239,68,68,0.3)"}` }}>
+                                  <div className="hist-section-title" style={{ color:"#64748b", fontSize:11, fontWeight:700, textTransform:"uppercase", letterSpacing:1, marginBottom:10 }}>
+                                    ✅ Control de Calidad — {qcEx.aprobado ? "Aprobado" : "Rechazado"}
+                                    {qcEx.checklist.length > 0 && ` · ${qcEx.checklist.filter((c: any) => c.ok).length}/${qcEx.checklist.length}`}
+                                  </div>
+                                  {qcEx.tecnico && <div style={{ fontSize:13, color:"#94a3b8", marginBottom:8 }}>Revisado por: <b style={{ color:"#e2e8f0" }}>{qcEx.tecnico}</b></div>}
+                                  {qcEx.observaciones && <div style={{ fontSize:12, color:"#94a3b8", marginBottom:8 }}>{qcEx.observaciones}</div>}
+                                  {qcEx.checklist.length > 0 && (
                                     <div style={{ display:"flex", flexWrap:"wrap", gap:6 }}>
-                                      {(() => {
-                                          const QC_LBL: Record<string,string> = {
-                                            motor:"Motor OK",frenos:"Frenos OK",fluidos:"Sin fugas",
-                                            luces:"Luces OK",electrico:"Eléctrico OK",transmision:"Transmisión",
-                                            suspension:"Suspensión",ac:"A/C",limpieza:"Limpieza",
-                                            prueba_ruta:"Prueba de ruta",trabajo_ok:"Trabajo al 100%",
-                                          };
-                                          return Object.entries(h.checklist_qc).map(([k, v]: [string, any]) => (
-                                            <span key={k} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background: v ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)", color: v ? "#6ee7b7" : "#fca5a5", border:`1px solid ${v ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.15)"}` }}>
-                                              {v ? "✅" : "❌"} {QC_LBL[k] || k.replace(/_/g," ")}
-                                            </span>
-                                          ));
-                                        })()}
+                                      {qcEx.checklist.map((c: any, i: number) => (
+                                        <span key={i} style={{ fontSize:11, padding:"3px 10px", borderRadius:20, fontWeight:600, background: c.ok ? "rgba(52,211,153,0.1)" : "rgba(239,68,68,0.08)", color: c.ok ? "#6ee7b7" : "#fca5a5", border:`1px solid ${c.ok ? "rgba(52,211,153,0.2)" : "rgba(239,68,68,0.15)"}` }}>
+                                          {c.ok ? "✅" : "❌"} {c.label}
+                                        </span>
+                                      ))}
                                     </div>
                                   )}
                                 </div>
@@ -2713,9 +2824,10 @@ export default function ClienteApp() {
                         {/* ── BOTÓN IMPRIMIR ── */}
                         <button
                           onClick={() => imprimirExpediente(histDetalle, histDetalleCompleto)}
-                          style={{ width:"100%", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"12px 0", fontWeight:700, fontSize:14, cursor:"pointer", marginBottom:14 }}
+                          disabled={loadingDetalle}
+                          style={{ width:"100%", background:"#1e40af", color:"#fff", border:"none", borderRadius:8, padding:"12px 0", fontWeight:700, fontSize:14, cursor: loadingDetalle ? "wait" : "pointer", marginBottom:14, opacity: loadingDetalle ? .55 : 1 }}
                         >
-                          🖨️ Imprimir Expediente
+                          {loadingDetalle ? "⏳ Cargando expediente…" : "🖨️ Imprimir Expediente"}
                         </button>
                       </div>
                     ) : (
