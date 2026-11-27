@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import {
   construirExpediente, normalizarFotos, controlCalidad, reparacion,
   checklistInspeccion, esAvanceGenerico, EXPEDIENTE_VERSION,
+  recorrido, esSoloDiagnostico, aISO,
 } from "../services/expediente.mjs";
 
 const FOTO = "data:image/jpeg;base64,AAAA";
@@ -183,9 +184,103 @@ test("expediente: orden aún en reparación no exige descripción todavía", () 
 test("expediente: la forma de salida no cambia sin querer", () => {
   const e = construirExpediente({});
   assert.deepEqual(Object.keys(e).sort(),
-    ["control_calidad", "estado", "faltantes", "fotos", "inspeccion", "reparacion", "version"]);
+    ["control_calidad", "estado", "faltantes", "fotos", "inspeccion", "recorrido", "reparacion", "version"]);
   assert.deepEqual(Object.keys(e.reparacion).sort(),
-    ["avances_tecnico", "cierre", "documentada", "notas_entrega", "repuestos", "trabajos"]);
+    ["avances_tecnico", "cierre", "cotizacion_estado", "documentada", "notas_entrega", "recomendados",
+     "repuestos", "solo_diagnostico", "trabajos"]);
   assert.deepEqual(Object.keys(e.control_calidad).sort(),
     ["aprobado", "checklist", "fecha", "observaciones", "puntos_ok", "puntos_total", "resultado", "tecnico"]);
+});
+
+// ── Solo diagnóstico y recorrido (caso OT-0055) ────────────────────────────
+
+const OT55 = {
+  orden: { id: 55, estado: "ENTREGADO", aprobado_por_cliente: false, created_at: "2026-10-05T00:52:00Z",
+    motivo_entrada: "El vehiculo esta mezclando el coolant con el aceite", fecha_entrega: "2026-11-16T15:04:00Z" },
+  diagnostico: { id: 70, estado: "RECHAZADO", tecnico_nombre: "Gerente", created_at: "2026-10-05T05:08:00Z",
+    fallas_identificadas: "1. Enfriador de aceite dañado. 2. Mezcla de agua con aceite.",
+    mano_de_obra_detalle: "• Cambio de enfriador de aceite\n• Lavado del sistema de enfriamiento\n• Cambio de aceite y filtro" },
+  cotizacion: { id: 40, total: 18500, created_at: "2026-10-05T01:08:00Z",
+    mano_de_obra_detalle: "• Cambio de enfriador de aceite\n• Lavado del sistema de enfriamiento\n• Cambio de aceite y filtro",
+    items_detalle: [{ descripcion: "Enfriador de aceite", cantidad: 1, subtotal: 9500 }, { descripcion: "Coolant 1 gal", cantidad: 2 }] },
+  factura: { id: 88, total: 1200, ncf: "B0200000100", metodo_pago: "Efectivo", created_at: "2026-11-16T14:50:00Z" },
+  factura_items: [{ descripcion: "Diagnostico con escaner (lectura y borrado de codigos)", tipo: "servicio", cantidad: 1, subtotal: 1200 }],
+  inspeccion: { km_entrada: 246597, nivel_combustible: 50, zonas_danio: [{ zona: "lat_izq" }, { zona: "lat_der" }],
+    luces_ok: true, creado_por_nombre: "Gerente", created_at: "2026-10-05T00:52:30Z" },
+  estado_historial: [
+    { estado_anterior: null, estado_nuevo: "RECIBIDO", motivo: "Orden creada", usuario_nombre: "Gerente", created_at: "2026-10-05T00:52:00Z" },
+    { estado_anterior: "RECIBIDO", estado_nuevo: "DIAGNOSTICO", motivo: "Cambio de estado", usuario_nombre: "Gerente", created_at: "2026-10-05T00:52:10Z" },
+    { estado_anterior: "DIAGNOSTICO", estado_nuevo: "ESPERANDO_APROBACION", motivo: "Técnico cerró el diagnóstico", usuario_nombre: "Gerente", created_at: "2026-10-05T01:08:00Z" },
+    { estado_anterior: "ESPERANDO_APROBACION", estado_nuevo: "LISTO", motivo: "Solo diagnóstico: el cliente no desea reparar", usuario_nombre: "Gerente", created_at: "2026-10-11T01:21:00Z" },
+    { estado_anterior: "LISTO", estado_nuevo: "ENTREGADO", motivo: "Vehículo entregado al cliente", usuario_nombre: "Gerente", created_at: "2026-11-16T15:04:00Z" },
+  ],
+};
+
+test("solo diagnóstico: se detecta por la orden, el diagnóstico o el log", () => {
+  assert.equal(esSoloDiagnostico({ orden: { aprobado_por_cliente: false } }), true);
+  assert.equal(esSoloDiagnostico({ diagnostico: { estado: "RECHAZADO" } }), true);
+  assert.equal(esSoloDiagnostico({ estado_historial: [{ motivo: "Solo diagnóstico: x" }] }), true);
+  assert.equal(esSoloDiagnostico({ orden: { aprobado_por_cliente: true }, diagnostico: { estado: "EN_REPARACION" } }), false);
+});
+
+test("OT-0055: lo realizado es el diagnóstico y lo cotizado queda como recomendado", () => {
+  const e = construirExpediente(OT55);
+  const r = e.reparacion;
+  assert.equal(r.solo_diagnostico, true);
+  assert.equal(r.cotizacion_estado, "RECHAZADA");
+  assert.deepEqual(r.trabajos.map((t) => t.descripcion), ["Diagnostico con escaner (lectura y borrado de codigos)"]);
+  assert.deepEqual(r.repuestos, []);
+  assert.deepEqual(r.recomendados.trabajos.map((t) => t.descripcion),
+    ["Cambio de enfriador de aceite", "Lavado del sistema de enfriamiento", "Cambio de aceite y filtro"]);
+  assert.deepEqual(r.recomendados.repuestos.map((x) => x.descripcion), ["Enfriador de aceite", "Coolant 1 gal"]);
+  assert.equal(r.recomendados.total, 18500);
+  assert.ok(!e.faltantes.some((f) => f.codigo === "sin_detalle_reparacion"), "solo diagnóstico no exige descripción de reparación");
+});
+
+test("OT-0055: el recorrido trae inspección, diagnóstico, cotización, decisión, factura y entrega en orden", () => {
+  const e = construirExpediente(OT55);
+  const tipos = e.recorrido.map((x) => x.tipo);
+  assert.deepEqual(tipos, ["recibido", "estado", "inspeccion", "cotizacion", "estado", "diagnostico", "estado", "factura", "estado"]);
+  const titulos = e.recorrido.map((x) => x.titulo);
+  assert.ok(titulos.includes("El cliente decidió no reparar (solo diagnóstico)"));
+  assert.ok(titulos.includes("Factura emitida"));
+  const insp = e.recorrido.find((x) => x.tipo === "inspeccion");
+  assert.match(insp.detalle, /246,597 km/);
+  assert.match(insp.detalle, /2 zonas con daño/);
+  const fac = e.recorrido.find((x) => x.tipo === "factura");
+  assert.match(fac.detalle, /RD\$ 1,200\.00/);
+});
+
+test("recorrido: avances del técnico y resultado del QC aparecen en su momento", () => {
+  const pasos = recorrido({
+    orden: { created_at: "2026-11-26T18:47:00Z" },
+    avances: [
+      { descripcion: "Cambio de bandas delanteras", tecnico_nombre: "Luis", created_at: "2026-11-26T19:22:00Z" },
+      { descripcion: "Reparación completada por técnico", created_at: "2026-11-26T19:23:00Z" },
+    ],
+    estado_historial: [
+      { estado_anterior: "CONTROL_CALIDAD", estado_nuevo: "LISTO", usuario_nombre: "Gerente", created_at: "2026-11-26T19:23:30Z" },
+    ],
+    control_calidad: { resultado: "APROBADO", aprobado: true, puntos_ok: 7, puntos_total: 8 },
+  });
+  assert.deepEqual(pasos.map((p) => p.tipo), ["recibido", "avance", "estado"]);
+  assert.equal(pasos[1].por, "Luis");
+  assert.equal(pasos[2].detalle, "Control de calidad aprobado · 7/8 puntos");
+});
+
+test("recorrido: un servicio archivado usa los snapshots (timeline_data, avances_data, factura_data)", () => {
+  const pasos = recorrido({ historial: {
+    fechas_proceso: { recibido: "2026-09-01T12:00:00Z" },
+    timeline_data: [{ estado_nuevo: "ENTREGADO", created_at: "2026-09-02T12:00:00Z" }],
+    avances_data: [{ descripcion: "Cambio de aceite", created_at: "2026-09-01T15:00:00Z" }],
+    factura_data: { id: 1, total: 2500, created_at: "2026-09-02T11:00:00Z" },
+  } });
+  assert.deepEqual(pasos.map((p) => p.tipo), ["recibido", "avance", "factura", "estado"]);
+});
+
+test("fechas sin zona se leen como UTC (no corre el diagnóstico al día siguiente)", () => {
+  assert.equal(aISO("2026-10-05T01:08:00"), "2026-10-05T01:08:00.000Z");
+  assert.equal(aISO("2026-10-05 01:08:00.123"), "2026-10-05T01:08:00.123Z");
+  assert.equal(aISO("2026-10-05T01:08:00-04:00"), "2026-10-05T05:08:00.000Z");
+  assert.equal(aISO(null), null);
 });
