@@ -1,0 +1,52 @@
+# Verificación automática en cada push y pull request.
+#
+# Si una modificación rompe el expediente que ve el cliente (reparación,
+# fotos, lista de verificación, control de calidad) o deja el frontend sin
+# compilar, este flujo sale en ROJO en GitHub antes de hacer merge a main.
+#
+# Pruebas del expediente: crm-backend/test/expediente.test.mjs
+
+name: Verificación
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+jobs:
+  backend:
+    name: Backend — sintaxis y pruebas del expediente
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: crm-backend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Sintaxis del servidor
+        run: npm run check
+      - name: Pruebas del expediente del cliente
+        run: npm test
+
+  frontend:
+    name: Frontend — tipos y compilación
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - run: npm ci
+      - name: Revisión de tipos
+        run: npx tsc --noEmit -p .
+      - name: Compilación de producción
+        run: npx next build
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"

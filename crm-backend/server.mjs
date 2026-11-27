@@ -20,6 +20,7 @@ import {
 // cliente que pedía cita por Telegram recibía un enlace roto.
 import { URL_WEB, URL_APP, URL_CITA, TEL_TALLER } from "./services/enlaces.mjs";
 import { randomUUID } from "node:crypto";
+import { construirExpediente, normalizarFotos, esAvanceGenerico } from "./services/expediente.mjs";
 
 const app = express();
 
@@ -4494,12 +4495,24 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       ? await safe(() => supabase.from("diagnosticos").select("*").eq("id", hist.diagnostico_id).maybeSingle())
       : null;
 
-    const ordenId = diag?.orden_id || null;
+    let ordenId = diag?.orden_id || null;
 
     // 3. Orden de trabajo completa
-    const orden = ordenId
+    let orden = ordenId
       ? await safe(() => supabase.from("ordenes_trabajo").select("*").eq("id", ordenId).maybeSingle())
       : null;
+
+    // Registros sin diagnóstico enlazado: se busca la orden por su número.
+    // Sin esto la inspección, las fotos, la factura y el QC quedaban fuera del
+    // expediente aunque existieran.
+    if (!orden && hist.numero_orden) {
+      orden = await safe(() => {
+        let q = supabase.from("ordenes_trabajo").select("*").eq("numero_orden", hist.numero_orden);
+        if (hist.vehiculo_id) q = q.eq("vehiculo_id", hist.vehiculo_id);
+        return q.order("id", { ascending: false }).limit(1).maybeSingle();
+      });
+      ordenId = orden?.id || null;
+    }
 
     // 4. Avances de reparación
     const avances = hist.diagnostico_id
@@ -4606,6 +4619,12 @@ app.get("/vehiculo-historial/:id/detalle", async (req, res) => {
       tecnico_nombre,
       fechas_proceso,
       fotos: normalizarFotosInspeccion(inspeccion || hist.inspeccion_data),
+      // Secciones normalizadas (services/expediente.mjs). La app del cliente
+      // las usa primero: no dependen del formato de cada tabla.
+      expediente: construirExpediente({
+        orden, historial: hist, diagnostico: diag, avances: avancesFinal,
+        cotizacion, cotizacion_items, factura_items, inspeccion,
+      }),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4701,6 +4720,10 @@ app.get("/vehiculo-historial/orden/:ordenId/detalle", async (req, res) => {
       tecnico_nombre,
       fechas_proceso,
       fotos:           normalizarFotosInspeccion(inspeccion),
+      expediente:      construirExpediente({
+        orden, historial: null, diagnostico: diag, avances,
+        cotizacion, cotizacion_items, factura_items, inspeccion,
+      }),
     });
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -4795,30 +4818,10 @@ app.patch("/vehiculo-historial/:id", async (req, res) => {
 // Esta función normaliza ambos a una sola lista, en el mismo orden que usa la
 // hoja impresa de /ordenes/[id], para que la PWA no tenga que conocer los dos.
 // =====================================================
-const FOTO_SLOT_LABELS = {
-  frente:         "Frente",
-  trasero:        "Trasero",
-  lateral_izq:    "Lateral izquierdo",
-  lateral_der:    "Lateral derecho",
-  interior:       "Interior",
-  tablero:        "Tablero",
-  danos_visibles: "Daños visibles",
-};
-
+// Delegado al servicio con pruebas (services/expediente.mjs): acepta fotos_slots
+// y la lista [{ tipo, data }] que manda recepción, con su etiqueta legible.
 function normalizarFotosInspeccion(inspeccion) {
-  if (!inspeccion) return [];
-
-  const slots = inspeccion.fotos_slots || {};
-  const desdeSlots = Object.keys(FOTO_SLOT_LABELS)
-    .filter(k => slots[k])
-    .map(k => ({ slot: k, label: FOTO_SLOT_LABELS[k], src: slots[k] }));
-
-  const legacy = Array.isArray(inspeccion.fotos) ? inspeccion.fotos : [];
-  const desdeLegacy = legacy
-    .filter(f => f && f.data)
-    .map((f, i) => ({ slot: `extra_${i}`, label: f.label || f.tipo || "Foto", src: f.data }));
-
-  return [...desdeSlots, ...desdeLegacy];
+  return normalizarFotos(inspeccion);
 }
 
 // =====================================================
@@ -8576,6 +8579,42 @@ app.post("/ordenes/:id/completar-reparacion", async (req, res) => {
   try {
     const { id } = req.params;
     const { usuario_id, usuario_nombre, motivo } = req.body;
+    const resumen = String(req.body?.resumen || "").trim();
+
+    // ── La reparación tiene que quedar descrita ──
+    // Es lo que el cliente ve como "Reparación realizada" en su app. Antes se
+    // podía cerrar sin escribir nada y el expediente solo decía "Reparación
+    // completada por técnico". Se valida aquí (no solo en pantalla) para que
+    // ningún botón nuevo del CRM pueda saltárselo.
+    const { data: diagRep } = await supabase.from("diagnosticos")
+      .select("id, trabajos_realizados_items")
+      .eq("orden_id", id).order("id", { ascending: false }).limit(1).maybeSingle();
+
+    if (resumen && diagRep?.id) {
+      const { error: eAv } = await supabase.from("avances_reparacion").insert([{
+        diagnostico_id: diagRep.id,
+        descripcion: `✅ Reparación completada: ${resumen}`,
+        tecnico_nombre: usuario_nombre || "Técnico",
+        created_at: new Date(),
+      }]);
+      if (eAv) return res.status(500).json({ error: `No se guardó la descripción de la reparación: ${eAv.message}` });
+    }
+
+    if (diagRep?.id) {
+      const { data: avs } = await supabase.from("avances_reparacion")
+        .select("descripcion").eq("diagnostico_id", diagRep.id);
+      let items = diagRep.trabajos_realizados_items;
+      if (typeof items === "string") { try { items = JSON.parse(items); } catch { items = []; } }
+      const documentada = (avs || []).some(a => !esAvanceGenerico(a.descripcion))
+        || (Array.isArray(items) && items.length > 0);
+      if (!documentada) {
+        return res.status(422).json({
+          error: "Describe qué se le hizo al vehículo antes de pasar a Control de Calidad. El cliente lo verá en su expediente.",
+          codigo: "falta_descripcion_reparacion",
+        });
+      }
+    }
+
     const result = await transicionarEstado(Number(id), "CONTROL_CALIDAD", {
       usuarioId:     usuario_id,
       usuarioNombre: usuario_nombre || "Técnico",

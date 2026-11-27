@@ -125,6 +125,51 @@ function mezclarAuto(actual: string, previo: string, nuevo: string): string {
   return resto ? `${nuevo}. ${resto}` : nuevo;
 }
 
+// ── Fotos: se comprimen antes de guardarlas ──────────────────────────────────
+// Una foto de celular pesa 3–6 MB y en base64 un tercio más. Con 2 o 3 fotos
+// la inspección pasaba el límite de 10 MB del servidor, la petición fallaba y,
+// como el error solo se escribía en la consola, la orden quedaba SIN
+// inspección: sin fotos y sin lista de verificación en el expediente del
+// cliente. A 1280 px y calidad 0.72 cada foto queda en ~150–300 KB.
+const FOTO_MAX_LADO = 1280;
+const FOTO_CALIDAD  = 0.72;
+
+function leerComoDataURL(file: Blob): Promise<string> {
+  return new Promise((ok, mal) => {
+    const r = new FileReader();
+    r.onload = () => ok(String(r.result));
+    r.onerror = () => mal(r.error);
+    r.readAsDataURL(file);
+  });
+}
+
+async function comprimirImagen(file: File): Promise<string> {
+  const original = await leerComoDataURL(file);
+  try {
+    const img = await new Promise<HTMLImageElement>((ok, mal) => {
+      const i = new Image();
+      i.onload = () => ok(i);
+      i.onerror = mal;
+      i.src = original;
+    });
+    const escala = Math.min(1, FOTO_MAX_LADO / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.max(1, Math.round(img.naturalWidth * escala));
+    const h = Math.max(1, Math.round(img.naturalHeight * escala));
+    const canvas = document.createElement("canvas");
+    canvas.width = w; canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return original;
+    ctx.drawImage(img, 0, 0, w, h);
+    const comprimida = canvas.toDataURL("image/jpeg", FOTO_CALIDAD);
+    return comprimida.length < original.length ? comprimida : original;
+  } catch {
+    return original; // formato que el navegador no puede dibujar: se manda tal cual
+  }
+}
+
+/** Tamaño máximo seguro del cuerpo (el servidor acepta 10 MB). */
+const LIMITE_INSPECCION_BYTES = 9 * 1024 * 1024;
+
 // ── Colores tema (claro) ──────────────────────────────────────────────────────
 const BG       = "#f1f5f9";
 const CARD     = "#ffffff";
@@ -296,6 +341,11 @@ export default function RecepcionPage() {
   const [error, setError] = useState("");
   const [finalizado, setFinalizado] = useState(false);
   const [numeroOrden, setNumeroOrden] = useState<number | null>(null);
+  // Resultado de guardar la inspección (checklist, daños, fotos, firma).
+  // Antes un fallo aquí se escribía solo en la consola y nadie se enteraba.
+  const [inspGuardada, setInspGuardada] = useState<boolean | null>(null);
+  const [inspError, setInspError]       = useState("");
+  const [reintentandoInsp, setReintentandoInsp] = useState(false);
 
   // Paso 1 — Cliente
   const [clientes, setClientes] = useState<Cliente[]>([]);
@@ -532,12 +582,15 @@ export default function RecepcionPage() {
 
   const getDanioZona = (zonaId: string) => zonesDanio.find(z => z.zona_id === zonaId);
 
-  const handleFotoSlot = (key: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFotoSlot = async (key: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    const reader = new FileReader();
-    reader.onload = ev => setFotosSlots(prev => ({ ...prev, [key]: ev.target?.result as string }));
-    reader.readAsDataURL(file);
+    try {
+      const dataUrl = await comprimirImagen(file);
+      setFotosSlots(prev => ({ ...prev, [key]: dataUrl }));
+    } catch {
+      setError("No se pudo leer la foto. Intenta tomarla de nuevo.");
+    }
   };
 
   // ── Navegación ────────────────────────────────────────────────────────────
@@ -614,43 +667,9 @@ export default function RecepcionPage() {
         }
       }
 
-      // 2. Crear la inspección (no-bloqueante: si la tabla aún no existe en Supabase,
-      //    la orden ya fue creada y no se cancela)
-      try {
-        const resInsp = await fetch(`${API}/inspeccion`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            orden_id:          ordenId,
-            vehiculo_id:       vehiculoSeleccionado.id,
-            cliente_id:        clienteSeleccionado.id,
-            km_entrada:        kmEntrada ? Number(kmEntrada) : null,
-            nivel_combustible: combustible,
-            condicion_general: condicion,
-            zonas_danio:       zonesDanio,
-            fotos:             Object.entries(fotosSlots)
-                                 .filter(([, v]) => v)
-                                 .map(([k, v]) => ({ tipo: k, data: v })),
-            firma_cliente:     firma,
-            observaciones:     observaciones.trim(),
-            rayones:           rayones.trim() || null,
-            golpes:            golpes.trim() || null,
-            estado_vidrios:    estadoVidrios.trim() || null,
-            estado_llantas:    estadoLlantas.trim() || null,
-            estado_pintura:    estadoPintura.trim() || null,
-            creado_por_id:     usuario.id    || null,
-            creado_por_nombre: usuario.nombre || "Sistema",
-            ...checklist,
-          }),
-        });
-        if (!resInsp.ok) {
-          const errInsp = await resInsp.json().catch(() => ({}));
-          console.warn("⚠️ Inspección no guardada (¿tabla existe?):", errInsp.error || resInsp.status);
-        }
-      } catch (inspErr) {
-        // No bloquear creación de orden por fallo de inspección
-        console.warn("⚠️ Error al crear inspección:", inspErr);
-      }
+      // 2. Crear la inspección. La orden ya existe aunque esto falle, pero el
+      //    fallo se muestra en pantalla con opción de reintentar.
+      await guardarInspeccion(ordenId, firma);
 
       setNumeroOrden(ordenId);
       setFinalizado(true);
@@ -660,8 +679,78 @@ export default function RecepcionPage() {
     setCreandoOrden(false);
   };
 
+  // ── Guardar inspección (también para reintentar) ──────────────────────────
+  const firmaGuardada = useRef<string | null>(null);
+  const guardarInspeccion = async (ordenId: number, firma: string | null) => {
+    firmaGuardada.current = firma;
+    setInspError("");
+    try {
+      const usuario = JSON.parse(localStorage.getItem("usuario") || "{}");
+      const cuerpo = JSON.stringify({
+        orden_id:          ordenId,
+        vehiculo_id:       vehiculoSeleccionado?.id,
+        cliente_id:        clienteSeleccionado?.id,
+        km_entrada:        kmEntrada ? Number(kmEntrada) : null,
+        nivel_combustible: combustible,
+        condicion_general: condicion,
+        zonas_danio:       zonesDanio,
+        fotos:             Object.entries(fotosSlots)
+                             .filter(([, v]) => v)
+                             .map(([k, v]) => ({ tipo: k, data: v })),
+        firma_cliente:     firma,
+        observaciones:     observaciones.trim(),
+        rayones:           rayones.trim() || null,
+        golpes:            golpes.trim() || null,
+        estado_vidrios:    estadoVidrios.trim() || null,
+        estado_llantas:    estadoLlantas.trim() || null,
+        estado_pintura:    estadoPintura.trim() || null,
+        creado_por_id:     usuario.id    || null,
+        creado_por_nombre: usuario.nombre || "Sistema",
+        ...checklist,
+      });
+
+      if (cuerpo.length > LIMITE_INSPECCION_BYTES) {
+        throw new Error(`Las fotos pesan demasiado (${(cuerpo.length / 1048576).toFixed(1)} MB). Quita alguna foto o tómala de nuevo.`);
+      }
+
+      const resInsp = await fetch(`${API}/inspeccion`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: cuerpo,
+      });
+      if (!resInsp.ok) {
+        const errInsp = await resInsp.json().catch(() => ({}));
+        throw new Error(
+          resInsp.status === 413
+            ? "Las fotos pesan demasiado para el servidor."
+            : (errInsp.error || `El servidor respondió ${resInsp.status}`)
+        );
+      }
+      setInspGuardada(true);
+      return true;
+    } catch (e: unknown) {
+      console.error("❌ Inspección no guardada:", e);
+      setInspGuardada(false);
+      setInspError(e instanceof Error ? e.message : "Error desconocido");
+      return false;
+    }
+  };
+
+  const reintentarInspeccion = async () => {
+    if (!numeroOrden) return;
+    setReintentandoInsp(true);
+    await guardarInspeccion(numeroOrden, firmaGuardada.current);
+    setReintentandoInsp(false);
+  };
+
   // ── Reset completo ────────────────────────────────────────────────────────
   const resetear = () => {
+    if (inspGuardada === false &&
+        !confirm("La inspección (fotos y lista de verificación) NO se guardó. Si sigues, se pierde. ¿Continuar de todos modos?")) {
+      return;
+    }
+    setInspGuardada(null);
+    setInspError("");
     setPaso(1);
     setError("");
     setFinalizado(false);
@@ -737,6 +826,25 @@ export default function RecepcionPage() {
               Vehículo: <strong>{vehiculoSeleccionado?.marca} {vehiculoSeleccionado?.modelo} — {vehiculoSeleccionado?.placa}</strong>
             </p>
           </div>
+          {inspGuardada === false && (
+            <div style={{
+              textAlign: "left", background: "#fef2f2", border: "2px solid #fca5a5", borderRadius: 14,
+              padding: "16px 18px", marginBottom: 20, color: "#991b1b", fontSize: 14, lineHeight: 1.55,
+            }}>
+              <strong>⚠️ La inspección no se guardó.</strong> La orden sí existe, pero sin fotos, sin daños y
+              sin lista de verificación el cliente no los verá en su expediente.
+              <div style={{ fontSize: 12.5, marginTop: 6, color: "#b91c1c" }}>Motivo: {inspError}</div>
+              <button onClick={reintentarInspeccion} disabled={reintentandoInsp}
+                style={{ ...sBtnPrimary, marginTop: 12, background: "#dc2626", fontSize: 14, padding: "10px 20px" }}>
+                {reintentandoInsp ? "Guardando…" : "🔄 Reintentar guardar inspección"}
+              </button>
+            </div>
+          )}
+          {inspGuardada === true && (
+            <p style={{ color: GREEN, fontSize: 13, fontWeight: 700, marginTop: -16, marginBottom: 20 }}>
+              ✓ Inspección, fotos y firma guardadas
+            </p>
+          )}
           <button onClick={resetear} style={{ ...sBtnPrimary, fontSize: 15, padding: "14px 36px" }}>
             + Nueva Recepción
           </button>
