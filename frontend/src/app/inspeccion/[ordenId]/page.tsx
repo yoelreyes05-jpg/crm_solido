@@ -1,5 +1,6 @@
 "use client";
 import React, { useEffect, useRef, useState } from "react";
+import { comprimirImagen, LIMITE_INSPECCION_BYTES, errorDeRespuesta } from "@/lib/comprimirImagen";
 import { useParams, useRouter } from "next/navigation";
 import { API_URL as API } from "@/config";
 
@@ -264,26 +265,22 @@ export default function InspeccionPage() {
   };
 
   // ── Fotos (4 slots fijos) ─────────────────────────────────────────────────
-  const handleFotoSlot = (slotKey: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
+  // Las fotos se comprimen (~200 KB c/u). Sin comprimir, 2 o 3 fotos de
+  // celular pasaban el límite del servidor y la inspección no se guardaba.
+  const handleFotoSlot = async (slotKey: FotoSlotKey, e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    const reader = new FileReader();
-    reader.onload = (ev) => {
-      setFotosSlots(prev => ({ ...prev, [slotKey]: ev.target!.result as string }));
-    };
-    reader.readAsDataURL(file);
     e.target.value = ""; // reset para poder volver a seleccionar el mismo archivo
+    if (!file) return;
+    const dataUrl = await comprimirImagen(file);
+    setFotosSlots(prev => ({ ...prev, [slotKey]: dataUrl }));
   };
 
   const handleFotoExtra = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files || []);
-    files.forEach(file => {
-      const reader = new FileReader();
-      reader.onload = (ev) => {
-        const label = file.name.replace(/\.[^/.]+$/, "") || "Foto adicional";
-        setFotosExtra(prev => [...prev, { data: ev.target!.result as string, label }]);
-      };
-      reader.readAsDataURL(file);
+    files.forEach(async file => {
+      const label = file.name.replace(/\.[^/.]+$/, "") || "Foto adicional";
+      const data = await comprimirImagen(file);
+      setFotosExtra(prev => [...prev, { data, label }]);
     });
   };
 
@@ -336,11 +333,16 @@ export default function InspeccionPage() {
         method = "PATCH";
       }
 
+      const cuerpo = JSON.stringify(payload);
+      if (cuerpo.length > LIMITE_INSPECCION_BYTES) {
+        throw new Error(`Las fotos pesan demasiado (${(cuerpo.length / 1048576).toFixed(1)} MB). Quita alguna y vuelve a guardar.`);
+      }
       const res = await fetch(url, {
         method,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
+        body: cuerpo,
       });
+      if (!res.ok) throw new Error(await errorDeRespuesta(res));
       const data = await res.json();
       if (data?.error) throw new Error(data.error);
 
