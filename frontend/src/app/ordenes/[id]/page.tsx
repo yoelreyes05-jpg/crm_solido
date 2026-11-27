@@ -674,6 +674,10 @@ export default function OrdenDetallePage() {
   // descripción de la reparación, checklist de QC). Se calcula en el backend
   // con services/expediente.mjs, el mismo código que arma la app del cliente.
   const [faltantesExp, setFaltantesExp] = useState<{ codigo: string; mensaje: string }[]>([]);
+  // Para documentar la reparación después (órdenes cerradas sin descripción).
+  const [textoRep, setTextoRep]       = useState("");
+  const [guardandoRep, setGuardandoRep] = useState(false);
+  const [recargaExp, setRecargaExp]   = useState(0);
 
   // Nuevos estados
   const [trabajosItems,    setTrabajosItems]    = useState<TrabajoItem[]>([]);
@@ -912,7 +916,29 @@ export default function OrdenDetallePage() {
       .then(r => r.ok ? r.json() : null)
       .then(d => setFaltantesExp(Array.isArray(d?.expediente?.faltantes) ? d.expediente.faltantes : []))
       .catch(() => setFaltantesExp([]));
-  }, [id, data?.orden?.estado, avancesReparacion.length]);
+  }, [id, data?.orden?.estado, avancesReparacion.length, recargaExp]);
+
+  const guardarDescripcionRep = async () => {
+    const t = textoRep.trim();
+    if (t.length < 15) { setMsg({ tipo:"err", texto:"Describe la reparación con al menos 15 letras." }); return; }
+    setGuardandoRep(true);
+    try {
+      const r = await fetch(`${API}/avances`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orden_id: Number(id), descripcion: `✅ Reparación realizada: ${t}`,
+          tecnico_nombre: usuario?.nombre || "Taller", usuario_id: usuario?.id || null }),
+      });
+      const j = await r.json().catch(() => ({}));
+      if (!r.ok || j?.error) throw new Error(j?.error || `Error ${r.status}`);
+      setTextoRep("");
+      setMsg({ tipo:"ok", texto:"Descripción guardada. El cliente ya la ve en su expediente." });
+      setRecargaExp(n => n + 1);
+    } catch (e: any) {
+      setMsg({ tipo:"err", texto: `No se guardó: ${e.message}` });
+    }
+    setGuardandoRep(false);
+  };
 
   // ── Guardar trabajos realizados ─────────────────────────────────────────────
   const guardarTrabajos = async () => {
@@ -1144,6 +1170,17 @@ export default function OrdenDetallePage() {
           <ul style={{ margin:0, paddingLeft:20, color:"#78350f", fontSize:13, lineHeight:1.6 }}>
             {faltantesExp.map(f => <li key={f.codigo}>{f.mensaje}</li>)}
           </ul>
+          {faltantesExp.some(f => f.codigo === "sin_detalle_reparacion") && (
+            <div style={{ marginTop:10 }}>
+              <textarea value={textoRep} onChange={e => setTextoRep(e.target.value)} rows={3}
+                placeholder="¿Qué se le hizo al vehículo? Ej: Se cambiaron las bandas delanteras y se rectificaron los dos discos."
+                style={{ width:"100%", boxSizing:"border-box", border:"1px solid #fcd34d", borderRadius:9, padding:"8px 10px", fontSize:13, fontFamily:"inherit", resize:"vertical" }} />
+              <button onClick={guardarDescripcionRep} disabled={guardandoRep || textoRep.trim().length < 15}
+                style={{ marginTop:6, padding:"9px 16px", borderRadius:9, border:"none", background:"#d97706", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer", opacity: textoRep.trim().length < 15 ? .6 : 1 }}>
+                {guardandoRep ? "Guardando…" : "✍️ Guardar qué se reparó"}
+              </button>
+            </div>
+          )}
           {faltantesExp.some(f => f.codigo === "sin_inspeccion" || f.codigo === "sin_fotos") && (
             <Link href={`/inspeccion/${id}`}>
               <button style={{ marginTop:10, padding:"9px 16px", borderRadius:9, border:"none", background:"#d97706", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>

@@ -110,6 +110,18 @@ export function esAvanceGenerico(texto) {
   return /^reparacion completada( por (el )?tecnico)?\.?$/.test(t);
 }
 
+/**
+ * Renglones de factura o cotización que no dicen qué se reparó
+ * ("Mano de Obra Técnica", "Servicio", "Reparación"). Se muestran, pero no
+ * cuentan como reparación documentada.
+ */
+export function esTrabajoGenerico(texto) {
+  const t = String(texto || "").trim().toLowerCase()
+    .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[.\s]+$/, "");
+  if (!t || t === "—") return true;
+  return /^(mano de obra( tecnica| general)?|servicio( tecnico| general)?|reparacion( general)?|trabajo( realizado)?|labor)$/.test(t);
+}
+
 // ── Fotos ───────────────────────────────────────────────────────────────────
 
 /**
@@ -308,7 +320,7 @@ export function reparacion({
     repuestos,
     cierre: cierre ? { tecnico: cierre.tecnico_nombre || null, fecha: cierre.created_at || null } : null,
     notas_entrega: h.notas_entrega || null,
-    documentada: avancesTecnico.length > 0 || trabajos.length > 0,
+    documentada: avancesTecnico.length > 0 || trabajos.some((t) => !esTrabajoGenerico(t.descripcion)),
   };
 }
 
