@@ -8631,6 +8631,33 @@ app.post("/ordenes/:id/completar-reparacion", async (req, res) => {
 // 📋 INSPECCIÓN DE VEHÍCULO
 // =====================================================
 
+// Guarda una inspección sin perder fotos aunque la base no tenga la columna
+// `fotos_slots` (migración fase2 sin correr): en ese caso las fotos de cada
+// posición se pasan a la lista `fotos` como { tipo, data }, que el expediente
+// del cliente también sabe leer (services/expediente.mjs).
+async function guardarInspeccionSegura(modo, id, campos) {
+  const fila = { ...campos };
+  if (fila.fotos_slots === undefined) delete fila.fotos_slots;
+
+  const ejecutar = (f) => modo === "insert"
+    ? supabase.from("inspeccion_vehiculo").insert([f]).select().single()
+    : supabase.from("inspeccion_vehiculo").update(f).eq("id", id).select().single();
+
+  let r = await ejecutar(fila);
+  if (r.error && /fotos_slots/i.test(r.error.message || "") && fila.fotos_slots) {
+    const slots = fila.fotos_slots;
+    delete fila.fotos_slots;
+    const lista = Array.isArray(fila.fotos) ? fila.fotos : [];
+    fila.fotos = [
+      ...Object.entries(slots).filter(([, v]) => v).map(([tipo, data]) => ({ tipo, data })),
+      ...lista,
+    ];
+    console.warn("⚠️ inspeccion_vehiculo sin columna fotos_slots: fotos guardadas en `fotos`.");
+    r = await ejecutar(fila);
+  }
+  return r;
+}
+
 // POST /inspeccion — crear inspección al recibir el vehículo
 app.post("/inspeccion", async (req, res) => {
   try {
@@ -8642,15 +8669,16 @@ app.post("/inspeccion", async (req, res) => {
       radio_pantalla, tapiceria_ok, alfombras_ok, luces_ok,
       bocina_ok, espejos_ok, gato_ok, llanta_repuesto_ok,
       documentos_ok, herramientas_ok, otros_accesorios,
-      fotos, firma_cliente, observaciones,
+      fotos, fotos_slots, firma_cliente, observaciones,
       creado_por_id, creado_por_nombre,
     } = req.body;
 
     if (!orden_id) return res.status(400).json({ error: "orden_id es requerido" });
 
-    const { data, error } = await supabase
-      .from("inspeccion_vehiculo")
-      .insert([{
+    // `fotos_slots` antes se ignoraba aquí: la pantalla /inspeccion/[ordenId]
+    // manda las fotos de frente, trasero, etc. en ese campo y, al crear la
+    // inspección, se perdían todas. Ahora se guarda (ver guardarInspeccionSegura).
+    const { data, error } = await guardarInspeccionSegura("insert", null, {
         orden_id, vehiculo_id: vehiculo_id || null, cliente_id: cliente_id || null,
         km_entrada: km_entrada ? Number(km_entrada) : null,
         nivel_combustible: nivel_combustible !== undefined ? Number(nivel_combustible) : 0,
@@ -8672,15 +8700,14 @@ app.post("/inspeccion", async (req, res) => {
         herramientas_ok:   Boolean(herramientas_ok),
         otros_accesorios: otros_accesorios || null,
         fotos: fotos || [],
+        fotos_slots: fotos_slots && typeof fotos_slots === "object" ? fotos_slots : undefined,
         firma_cliente: firma_cliente || null,
         observaciones: observaciones || null,
         creado_por_id: creado_por_id || null,
         creado_por_nombre: creado_por_nombre || "Sistema",
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
-      }])
-      .select()
-      .single();
+      });
 
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
@@ -8710,12 +8737,7 @@ app.get("/inspeccion/orden/:ordenId", async (req, res) => {
 app.patch("/inspeccion/:id", async (req, res) => {
   try {
     const campos = { ...req.body, updated_at: new Date().toISOString() };
-    const { data, error } = await supabase
-      .from("inspeccion_vehiculo")
-      .update(campos)
-      .eq("id", req.params.id)
-      .select()
-      .single();
+    const { data, error } = await guardarInspeccionSegura("update", req.params.id, campos);
     if (error) return res.status(400).json({ error: error.message });
     res.json(data);
   } catch (err) {

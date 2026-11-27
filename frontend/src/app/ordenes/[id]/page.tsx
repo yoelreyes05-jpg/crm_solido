@@ -1144,6 +1144,13 @@ export default function OrdenDetallePage() {
           <ul style={{ margin:0, paddingLeft:20, color:"#78350f", fontSize:13, lineHeight:1.6 }}>
             {faltantesExp.map(f => <li key={f.codigo}>{f.mensaje}</li>)}
           </ul>
+          {faltantesExp.some(f => f.codigo === "sin_inspeccion" || f.codigo === "sin_fotos") && (
+            <Link href={`/inspeccion/${id}`}>
+              <button style={{ marginTop:10, padding:"9px 16px", borderRadius:9, border:"none", background:"#d97706", color:"#fff", fontWeight:800, fontSize:13, cursor:"pointer" }}>
+                📸 Completar inspección y fotos ahora
+              </button>
+            </Link>
+          )}
         </div>
       )}
 

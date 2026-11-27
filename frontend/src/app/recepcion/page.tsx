@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useRef, useState, useCallback } from "react";
+import { comprimirImagen, LIMITE_INSPECCION_BYTES, errorDeRespuesta } from "@/lib/comprimirImagen";
 import { API_URL as API } from "@/config";
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
@@ -125,50 +126,7 @@ function mezclarAuto(actual: string, previo: string, nuevo: string): string {
   return resto ? `${nuevo}. ${resto}` : nuevo;
 }
 
-// ── Fotos: se comprimen antes de guardarlas ──────────────────────────────────
-// Una foto de celular pesa 3–6 MB y en base64 un tercio más. Con 2 o 3 fotos
-// la inspección pasaba el límite de 10 MB del servidor, la petición fallaba y,
-// como el error solo se escribía en la consola, la orden quedaba SIN
-// inspección: sin fotos y sin lista de verificación en el expediente del
-// cliente. A 1280 px y calidad 0.72 cada foto queda en ~150–300 KB.
-const FOTO_MAX_LADO = 1280;
-const FOTO_CALIDAD  = 0.72;
-
-function leerComoDataURL(file: Blob): Promise<string> {
-  return new Promise((ok, mal) => {
-    const r = new FileReader();
-    r.onload = () => ok(String(r.result));
-    r.onerror = () => mal(r.error);
-    r.readAsDataURL(file);
-  });
-}
-
-async function comprimirImagen(file: File): Promise<string> {
-  const original = await leerComoDataURL(file);
-  try {
-    const img = await new Promise<HTMLImageElement>((ok, mal) => {
-      const i = new Image();
-      i.onload = () => ok(i);
-      i.onerror = mal;
-      i.src = original;
-    });
-    const escala = Math.min(1, FOTO_MAX_LADO / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.max(1, Math.round(img.naturalWidth * escala));
-    const h = Math.max(1, Math.round(img.naturalHeight * escala));
-    const canvas = document.createElement("canvas");
-    canvas.width = w; canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return original;
-    ctx.drawImage(img, 0, 0, w, h);
-    const comprimida = canvas.toDataURL("image/jpeg", FOTO_CALIDAD);
-    return comprimida.length < original.length ? comprimida : original;
-  } catch {
-    return original; // formato que el navegador no puede dibujar: se manda tal cual
-  }
-}
-
-/** Tamaño máximo seguro del cuerpo (el servidor acepta 10 MB). */
-const LIMITE_INSPECCION_BYTES = 9 * 1024 * 1024;
+// Fotos comprimidas antes de guardarlas: ver src/lib/comprimirImagen.ts
 
 // ── Colores tema (claro) ──────────────────────────────────────────────────────
 const BG       = "#f1f5f9";
@@ -718,14 +676,7 @@ export default function RecepcionPage() {
         headers: { "Content-Type": "application/json" },
         body: cuerpo,
       });
-      if (!resInsp.ok) {
-        const errInsp = await resInsp.json().catch(() => ({}));
-        throw new Error(
-          resInsp.status === 413
-            ? "Las fotos pesan demasiado para el servidor."
-            : (errInsp.error || `El servidor respondió ${resInsp.status}`)
-        );
-      }
+      if (!resInsp.ok) throw new Error(await errorDeRespuesta(resInsp));
       setInspGuardada(true);
       return true;
     } catch (e: unknown) {
