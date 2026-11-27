@@ -2813,8 +2813,18 @@ app.post("/avances", async (req, res) => {
     .select();
   if (error) return res.json({ error: error.message });
 
+  // Solo se marca EN_REPARACION si la orden sigue en el taller. Un avance
+  // escrito después (documentar una orden ya entregada) no debe cambiar el
+  // diagnóstico: en un "solo diagnóstico" está RECHAZADO a propósito.
   if (diagId) {
-    await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).then(r => r).catch(() => {});
+    const oidDiag = ordenIdResuelto
+      || (await supabase.from("diagnosticos").select("orden_id").eq("id", diagId).maybeSingle()).data?.orden_id;
+    const { data: ordDiag } = oidDiag
+      ? await supabase.from("ordenes_trabajo").select("estado").eq("id", oidDiag).maybeSingle()
+      : { data: null };
+    if (!ordDiag || ["DIAGNOSTICO", "ESPERANDO_APROBACION", "APROBADO", "REPARACION"].includes(ordDiag.estado)) {
+      await supabase.from("diagnosticos").update({ estado: "EN_REPARACION" }).eq("id", diagId).then(r => r).catch(() => {});
+    }
   }
 
   // Auto-transicionar la orden a REPARACION solo si está en DIAGNOSTICO

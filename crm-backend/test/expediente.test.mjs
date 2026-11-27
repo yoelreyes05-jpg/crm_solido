@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import {
   construirExpediente, normalizarFotos, controlCalidad, reparacion,
   checklistInspeccion, esAvanceGenerico, EXPEDIENTE_VERSION,
-  recorrido, esSoloDiagnostico, aISO,
+  recorrido, esSoloDiagnostico, aISO, esTrabajoGenerico,
 } from "../services/expediente.mjs";
 
 const FOTO = "data:image/jpeg;base64,AAAA";
@@ -283,4 +283,20 @@ test("fechas sin zona se leen como UTC (no corre el diagnóstico al día siguien
   assert.equal(aISO("2026-10-05 01:08:00.123"), "2026-10-05T01:08:00.123Z");
   assert.equal(aISO("2026-10-05T01:08:00-04:00"), "2026-10-05T05:08:00.000Z");
   assert.equal(aISO(null), null);
+});
+
+test("OT-0057 real: 'Mano de Obra Técnica' en factura no cuenta como reparación descrita", () => {
+  assert.equal(esTrabajoGenerico("Mano de Obra Técnica"), true);
+  assert.equal(esTrabajoGenerico("Servicio"), true);
+  assert.equal(esTrabajoGenerico("Cambio de bandas delanteras"), false);
+  const e = construirExpediente({
+    orden: { estado: "ENTREGADO", resultado_qc: "APROBADO", checklist_qc: {} },
+    avances: [{ descripcion: "Reparación completada por técnico" }],
+    factura: { id: 9, total: 0, metodo_pago: "EFECTIVO" },
+    factura_items: [{ descripcion: "Mano de Obra Técnica", tipo: "servicio", cantidad: 1, subtotal: 0 }],
+  });
+  assert.deepEqual(e.reparacion.trabajos.map((t) => t.descripcion), ["Mano de Obra Técnica"], "se sigue mostrando");
+  assert.equal(e.reparacion.documentada, false);
+  assert.ok(e.faltantes.some((f) => f.codigo === "sin_detalle_reparacion"));
+  assert.ok(e.faltantes.some((f) => f.codigo === "sin_inspeccion"));
 });
